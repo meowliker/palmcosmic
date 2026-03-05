@@ -76,6 +76,10 @@ export async function POST(request: NextRequest) {
     const feature = udf4;
     const coins = udf5;
 
+    // Debug logging
+    console.log("PayU verify - userId:", userId, "type:", type, "bundleId:", bundleId);
+    console.log("PayU verify - features to unlock:", BUNDLE_FEATURES[bundleId]);
+
     // Update payment record
     await supabase
       .from("payments")
@@ -88,11 +92,16 @@ export async function POST(request: NextRequest) {
 
     // Fulfill the purchase — unlock features for user
     if (userId) {
-      const { data: existingUser } = await supabase
+      const { data: existingUser, error: userError } = await supabase
         .from("users")
         .select("unlocked_features, coins")
         .eq("id", userId)
-        .single();
+        .maybeSingle();
+      
+      if (userError) {
+        console.error("Error fetching user:", userError);
+      }
+      console.log("PayU verify - existing user data:", existingUser);
 
       const currentFeatures = existingUser?.unlocked_features || {
         palmReading: false,
@@ -107,10 +116,14 @@ export async function POST(request: NextRequest) {
 
       if (type === "bundle" && bundleId) {
         const featuresToUnlock = BUNDLE_FEATURES[bundleId] || [];
+        console.log("PayU verify - unlocking features:", featuresToUnlock, "for bundle:", bundleId);
         for (const f of featuresToUnlock) {
           (updatedFeatures as Record<string, boolean>)[f] = true;
         }
-        updatedCoins += 15;
+        // Bundle 3 (palm-birth-compat) gives 30 coins, others give 15
+        const coinsToAdd = bundleId === "palm-birth-compat" ? 30 : 15;
+        updatedCoins += coinsToAdd;
+        console.log("PayU verify - updated features:", updatedFeatures, "coins:", updatedCoins);
       } else if (type === "upsell" && feature) {
         (updatedFeatures as Record<string, boolean>)[feature] = true;
       } else if (type === "report" && feature) {
@@ -119,7 +132,7 @@ export async function POST(request: NextRequest) {
         updatedCoins += parseInt(coins);
       }
 
-      await supabase
+      const { error: upsertError } = await supabase
         .from("users")
         .upsert(
           {
@@ -135,6 +148,12 @@ export async function POST(request: NextRequest) {
           },
           { onConflict: "id" }
         );
+      
+      if (upsertError) {
+        console.error("PayU verify - upsert error:", upsertError);
+      } else {
+        console.log("PayU verify - user upsert successful for:", userId);
+      }
     }
 
     return NextResponse.json({ success: true });

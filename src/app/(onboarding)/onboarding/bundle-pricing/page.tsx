@@ -531,8 +531,8 @@ export default function BundlePricingPage() {
                   
                   {/* Price */}
                   <div className="flex items-baseline gap-2 mb-3">
-                    <span className="text-2xl font-bold text-primary">{plan.price}</span>
-                    <span className="text-muted-foreground line-through text-sm">{plan.originalPrice}</span>
+                    <span className="text-2xl font-bold text-primary">₹{plan.price}</span>
+                    <span className="text-muted-foreground line-through text-sm">₹{plan.originalPrice}</span>
                   </div>
 
                   {/* Features */}

@@ -1,12 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
-// Divine API Configuration
-const DIVINE_API_KEY = process.env.DIVINE_API_KEY || "";
-const DIVINE_API_URL = "https://divineapi.com/api/1.0";
-
-// Fallback API
-const FALLBACK_API_BASE = "https://horoscope-app-api.vercel.app/api/v1";
+// Horoscope API - ohmanda.com (free, reliable)
+const OHMANDA_API_URL = "https://ohmanda.com/api/horoscope";
 
 const ZODIAC_SIGNS = [
   "aries", "taurus", "gemini", "cancer", "leo", "virgo",
@@ -39,121 +35,35 @@ function getMonthKey(): string {
   return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
-// Fetch horoscope from Divine API
-async function fetchFromDivineAPI(sign: string, period: string, day: string = "today") {
-  // Calculate date based on day parameter
-  const now = new Date();
-  let targetDate = now;
-  if (day.toLowerCase() === "tomorrow") {
-    targetDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-  } else if (day.toLowerCase() === "yesterday") {
-    targetDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  }
-  const dateStr = targetDate.toISOString().split("T")[0];
-
-  // Divine API uses form-urlencoded format
-  const formData = new URLSearchParams();
-  formData.append("api_key", DIVINE_API_KEY);
-  formData.append("sign", sign.toLowerCase());
-  formData.append("date", dateStr);
-
-  const response = await fetch(`${DIVINE_API_URL}/get_daily_horoscope.php`, {
-    method: "POST",
+// Fetch horoscope from ohmanda.com API (free, reliable)
+// Note: This API only provides daily horoscope, same content used for all periods
+async function fetchHoroscopeFromAPI(sign: string, period: string, day: string = "TODAY") {
+  // ohmanda.com API - simple GET request, returns { sign, date, horoscope }
+  const response = await fetch(`${OHMANDA_API_URL}/${sign.toLowerCase()}/`, {
+    method: "GET",
     headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
+      "Accept": "application/json",
     },
-    body: formData.toString(),
   });
 
   if (!response.ok) {
-    throw new Error(`Divine API request failed: ${response.status}`);
+    throw new Error(`Horoscope API request failed: ${response.status}`);
   }
 
   const data = await response.json();
   
-  // Check for API error response
-  if (data.success === 0) {
-    throw new Error(data.message || "Divine API returned error");
-  }
-  
-  // Transform Divine API response to match our expected format
-  const prediction = data.data?.prediction || {};
-  const luckInfo = prediction.luck || [];
-  
-  // Extract lucky info from luck array
-  let luckyColor = null;
-  let luckyNumber = null;
-  for (const item of luckInfo) {
-    if (typeof item === "string") {
-      if (item.includes("Colors of the day")) {
-        luckyColor = item.replace(/Colors of the day\s*[:\u2013]\s*/i, "").trim();
-      }
-      if (item.includes("Lucky Numbers of the day")) {
-        luckyNumber = item.replace(/Lucky Numbers of the day\s*[:\u2013]\s*/i, "").trim();
-      }
-    }
-  }
-  
-  // Build structured sections from Divine API response
-  const sections: { title: string; icon: string; content: string }[] = [];
-  if (prediction.personal) sections.push({ title: "Overview", icon: "overview", content: prediction.personal });
-  if (prediction.emotions) sections.push({ title: "Love & Relationships", icon: "love", content: prediction.emotions });
-  if (prediction.profession) sections.push({ title: "Career & Finance", icon: "career", content: prediction.profession });
-  if (prediction.health) sections.push({ title: "Health & Wellness", icon: "health", content: prediction.health });
-  if (prediction.travel) sections.push({ title: "Travel & Adventure", icon: "travel", content: prediction.travel });
-
-  // Also keep combined text as fallback
-  const horoscopeText = sections.map(s => s.content).join(" ");
-  
+  // ohmanda.com response format: { sign, date, horoscope }
   return {
     data: {
-      horoscope_data: horoscopeText || "",
-      horoscope_sections: sections,
-      date: dateStr,
-      lucky_number: luckyNumber,
-      lucky_color: luckyColor,
+      horoscope_data: data.horoscope || "",
+      horoscope_sections: undefined,
+      date: data.date || new Date().toISOString().split("T")[0],
+      lucky_number: null,
+      lucky_color: null,
+      mood: null,
+      compatibility: null,
     }
   };
-}
-
-// Fetch horoscope from fallback API
-async function fetchFromFallbackAPI(sign: string, period: string, day: string = "TODAY") {
-  let url = "";
-
-  switch (period) {
-    case "weekly":
-      url = `${FALLBACK_API_BASE}/get-horoscope/weekly?sign=${sign}`;
-      break;
-    case "monthly":
-      url = `${FALLBACK_API_BASE}/get-horoscope/monthly?sign=${sign}`;
-      break;
-    case "daily":
-    default:
-      url = `${FALLBACK_API_BASE}/get-horoscope/daily?sign=${sign}&day=${day}`;
-      break;
-  }
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Fallback API request failed: ${response.status}`);
-  }
-  return response.json();
-}
-
-// Fetch horoscope from external API (tries Divine first, then fallback)
-async function fetchHoroscopeFromAPI(sign: string, period: string, day: string = "TODAY") {
-  // Try Divine API first if configured
-  if (DIVINE_API_KEY) {
-    try {
-      const divineDay = day === "TOMORROW" ? "tomorrow" : "today";
-      return await fetchFromDivineAPI(sign, period, divineDay);
-    } catch (error) {
-      console.error("Divine API failed, using fallback:", error);
-    }
-  }
-
-  // Fallback to free API
-  return await fetchFromFallbackAPI(sign, period, day);
 }
 
 export async function GET(request: NextRequest) {
@@ -216,20 +126,36 @@ export async function GET(request: NextRequest) {
     // No cache found - fetch from API
     const apiResponse = await fetchHoroscopeFromAPI(sign, period, apiDay);
     const horoscopeData = apiResponse.data;
+    
+    // Ensure horoscope_data exists
+    const normalizedData = {
+      horoscope_data: horoscopeData?.horoscope_data || "",
+      horoscope_sections: horoscopeData?.horoscope_sections || undefined,
+      lucky_number: horoscopeData?.lucky_number || null,
+      lucky_color: horoscopeData?.lucky_color || null,
+      mood: horoscopeData?.mood || null,
+      compatibility: horoscopeData?.compatibility || null,
+    };
 
-    // Save to Supabase cache
-    await supabase.from("horoscope_cache").upsert({
-      id: cacheDocId,
-      horoscope: horoscopeData,
-      sign,
-      period,
-      cache_key: cacheKey,
-      fetched_at: new Date().toISOString(),
-    }, { onConflict: "id" });
+    // Save to Supabase cache (non-blocking to speed up response)
+    (async () => {
+      try {
+        await supabase.from("horoscope_cache").upsert({
+          id: cacheDocId,
+          horoscope: normalizedData,
+          sign,
+          period,
+          cache_key: cacheKey,
+          fetched_at: new Date().toISOString(),
+        }, { onConflict: "id" });
+      } catch (e) {
+        // Ignore cache errors
+      }
+    })();
 
     return NextResponse.json({
       success: true,
-      data: horoscopeData,
+      data: normalizedData,
       period,
       sign,
       cached: false,

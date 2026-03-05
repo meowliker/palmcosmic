@@ -24,18 +24,16 @@ const getBundleBenefits = (bundleId: string | null, unlockedFeatures?: { birthCh
   benefits.push({ icon: "🖐️", text: "Palm Reading Report" });
   
   // Show based on what was purchased (check both bundleId and unlockedFeatures)
-  if (bundleId === "bundle-palm-birth" || bundleId === "bundle-full" || unlockedFeatures?.birthChart) {
-    benefits.push({ icon: "🌙", text: "Birth Chart Analysis" });
-  }
-  if (bundleId === "bundle-full" || unlockedFeatures?.compatibilityTest) {
-    benefits.push({ icon: "💕", text: "Compatibility Report" });
-  }
-  if (unlockedFeatures?.prediction2026) {
-    benefits.push({ icon: "💫", text: "2026 Predictions" });
-  }
-  
-  // All bundles include coins
-  benefits.push({ icon: "💬", text: "15 AI Chat Coins" });
+  if (bundleId === "palm-birth" || bundleId === "palm-birth-compat" || unlockedFeatures?.birthChart) {
+  benefits.push({ icon: "🌙", text: "Birth Chart Analysis" });
+}
+if (bundleId === "palm-birth-compat" || unlockedFeatures?.compatibilityTest) {
+  benefits.push({ icon: "💕", text: "Compatibility Report" });
+}
+
+// Bundle 3 (palm-birth-compat) gives 30 coins, others give 15
+const coinCount = bundleId === "palm-birth-compat" ? 30 : 15;
+  benefits.push({ icon: "💬", text: `${coinCount} AI Chat Coins` });
   
   return benefits;
 };

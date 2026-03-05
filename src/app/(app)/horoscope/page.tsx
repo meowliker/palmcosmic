@@ -24,10 +24,8 @@ const ZODIAC_SIGNS = [
 ];
 
 const PERIODS = [
-  { id: "today", label: "Today", apiPeriod: "daily" },
-  { id: "tomorrow", label: "Tomorrow", apiPeriod: "tomorrow" },
-  { id: "week", label: "This Week", apiPeriod: "weekly" },
-  { id: "month", label: "This Month", apiPeriod: "monthly" },
+  { id: "today", label: "Today" },
+  { id: "tomorrow", label: "Tomorrow" },
 ];
 
 interface HoroscopeSection {
@@ -48,18 +46,19 @@ interface SignHoroscopeData {
 export default function HoroscopePage() {
   const router = useRouter();
   const [selectedSign, setSelectedSign] = useState("Aries");
-  const [selectedPeriod, setSelectedPeriod] = useState("today");
+    const [selectedPeriod, setSelectedPeriod] = useState("today");
   const [showSignPicker, setShowSignPicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [horoscopeData, setHoroscopeData] = useState<SignHoroscopeData | null>(null);
   const [userSign, setUserSign] = useState<string | null>(null);
+  const [signLoaded, setSignLoaded] = useState(false);
 
   const { birthMonth: storeBirthMonth, birthDay: storeBirthDay } = useOnboardingStore();
 
   const currentSignData = ZODIAC_SIGNS.find((z) => z.sign === selectedSign) || ZODIAC_SIGNS[0];
 
   useEffect(() => {
-    loadUserSign();
+    loadUserSign().finally(() => setSignLoaded(true));
   }, []);
 
   const loadUserSign = async () => {
@@ -122,38 +121,27 @@ export default function HoroscopePage() {
   };
 
   useEffect(() => {
-    fetchHoroscope();
-  }, [selectedSign, selectedPeriod]);
+    if (signLoaded) {
+      fetchHoroscope();
+    }
+  }, [selectedSign, selectedPeriod, signLoaded]);
 
   const fetchHoroscope = async () => {
     setLoading(true);
     setHoroscopeData(null);
+    
     try {
-      const periodConfig = PERIODS.find((p) => p.id === selectedPeriod);
-      const apiPeriod = periodConfig?.apiPeriod || "daily";
-
-      // Try pre-generated sign-based horoscope first
-      const signRes = await fetch(`/api/horoscope/sign?sign=${selectedSign}&period=${apiPeriod}`);
-      if (signRes.ok) {
-        const signResult = await signRes.json();
-        if (signResult.success && signResult.data) {
-          setHoroscopeData(signResult.data);
-          setLoading(false);
-          return;
-        }
-      }
-
-      // Fallback to cached/Divine API
-      const period = apiPeriod === "tomorrow" ? "daily" : apiPeriod;
-      const day = apiPeriod === "tomorrow" ? "TOMORROW" : "TODAY";
-      const fallbackRes = await fetch(`/api/horoscope/cached?sign=${selectedSign}&period=${period}&day=${day}`);
-      if (fallbackRes.ok) {
-        const fallbackResult = await fallbackRes.json();
-        if (fallbackResult.success && fallbackResult.data) {
+      // Fetch horoscope (cached by sign+date, different API for today vs tomorrow)
+      const day = selectedPeriod === "tomorrow" ? "tomorrow" : "today";
+      const res = await fetch(`/api/horoscope/user-daily?sign=${selectedSign}&day=${day}`);
+      
+      if (res.ok) {
+        const result = await res.json();
+        if (result.success && result.horoscope) {
           setHoroscopeData({
-            horoscope: fallbackResult.data.horoscope_data || "",
-            horoscope_sections: fallbackResult.data.horoscope_sections || undefined,
+            horoscope: result.horoscope,
           });
+          return;
         }
       }
     } catch (error) {
@@ -170,7 +158,7 @@ export default function HoroscopePage() {
     year: "numeric",
   });
 
-  const periodTitle = selectedPeriod === "week" ? "Weekly" : selectedPeriod === "month" ? "Monthly" : selectedPeriod === "tomorrow" ? "Tomorrow\u2019s" : "Daily";
+  const periodTitle = selectedPeriod === "tomorrow" ? "Tomorrow's" : "Daily";
 
   return (
     <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
@@ -218,7 +206,7 @@ export default function HoroscopePage() {
         </div>
 
         {/* Period Tabs */}
-        <div className="flex gap-1 px-4 py-3 bg-[#0A0E1A] border-b border-white/5">
+        <div className="flex gap-2 px-4 py-3 bg-[#0A0E1A] border-b border-white/5">
           {PERIODS.map((period) => (
             <button
               key={period.id}

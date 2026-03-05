@@ -160,26 +160,26 @@ export default function EditProfilePage() {
           ? getZodiacSign(Number(newBirthMonth), Number(newBirthDay))
           : null;
         
-        // Base update data
+        // Base update data (snake_case for Supabase)
         const updateData: any = {
           name: field === "name" ? value : localName,
           gender: field === "gender" ? value : gender,
-          relationshipStatus: field === "relationship" ? value : relationshipStatus,
-          birthMonth: newBirthMonth,
-          birthDay: newBirthDay,
-          birthYear: newBirthYear,
-          birthPlace: newBirthPlace,
-          birthHour: newBirthHour,
-          birthMinute: newBirthMinute,
-          birthPeriod: newBirthPeriod,
-          updatedAt: new Date().toISOString(),
+          relationship_status: field === "relationship" ? value : relationshipStatus,
+          birth_month: newBirthMonth,
+          birth_day: newBirthDay,
+          birth_year: newBirthYear,
+          birth_place: newBirthPlace,
+          birth_hour: newBirthHour,
+          birth_minute: newBirthMinute,
+          birth_period: newBirthPeriod,
+          updated_at: new Date().toISOString(),
         };
         
         // If birth details changed, recalculate signs
         if (field === "birthDate" || field === "birthTime" || field === "birthPlace") {
           // Update sun sign immediately (calculated locally)
           if (sunSign) {
-            updateData.sunSign = sunSign;
+            updateData.sun_sign = sunSign;
           }
           
           // Recalculate moon and ascendant signs via API
@@ -202,9 +202,9 @@ export default function EditProfilePage() {
             });
             const signsData = await response.json();
             if (signsData.success) {
-              updateData.sunSign = signsData.sunSign;
-              updateData.moonSign = signsData.moonSign;
-              updateData.ascendantSign = signsData.ascendant;
+              updateData.sun_sign = signsData.sunSign;
+              updateData.moon_sign = signsData.moonSign;
+              updateData.ascendant_sign = signsData.ascendant;
             }
           } catch (signsError) {
             console.error("Error recalculating signs:", signsError);

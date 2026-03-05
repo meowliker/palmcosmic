@@ -46,13 +46,23 @@ export async function POST(request: NextRequest) {
     let migratedData: Record<string, any> = {};
 
     if (anonId) {
-      const { data: anonUser } = await supabase
+      console.log("Register - looking for anonymous user:", anonId);
+      
+      const { data: anonUser, error: anonError } = await supabase
         .from("users")
         .select("*")
         .eq("id", anonId)
-        .single();
+        .maybeSingle();
 
+      console.log("Register - anonymous user found:", anonUser ? "YES" : "NO", anonError ? `Error: ${anonError.message}` : "");
+      
       if (anonUser) {
+        console.log("Register - migrating data:", {
+          coins: anonUser.coins,
+          bundle_purchased: anonUser.bundle_purchased,
+          payment_status: anonUser.payment_status,
+          unlocked_features: anonUser.unlocked_features,
+        });
         migratedData = {
           coins: anonUser.coins || 0,
           unlocked_features: anonUser.unlocked_features || {},
@@ -62,6 +72,8 @@ export async function POST(request: NextRequest) {
           payment_status: anonUser.payment_status,
           razorpay_payment_id: anonUser.razorpay_payment_id,
           razorpay_order_id: anonUser.razorpay_order_id,
+          payu_payment_id: anonUser.payu_payment_id,
+          payu_txn_id: anonUser.payu_txn_id,
           scans_used: anonUser.scans_used,
           scans_allowed: anonUser.scans_allowed,
           birth_chart_timer_active: anonUser.birth_chart_timer_active,

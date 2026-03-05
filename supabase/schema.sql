@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS public.users (
   payment_status TEXT,               -- 'paid', 'pending', 'failed'
   razorpay_payment_id TEXT,
   razorpay_order_id TEXT,
+  payu_payment_id TEXT,
+  payu_txn_id TEXT,
   password_hash TEXT,
   
   -- Coins & Features
@@ -110,6 +112,8 @@ CREATE TABLE IF NOT EXISTS public.payments (
   razorpay_order_id TEXT,
   razorpay_payment_id TEXT,
   razorpay_signature TEXT,
+  payu_txn_id TEXT,
+  payu_payment_id TEXT,
   user_id TEXT REFERENCES public.users(id),
   type TEXT NOT NULL,                     -- 'bundle_payment', 'upsell', 'coins', 'report'
   bundle_id TEXT,                         -- 'palm-reading', 'palm-birth', 'palm-birth-compat'

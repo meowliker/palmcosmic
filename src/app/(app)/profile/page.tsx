@@ -116,9 +116,9 @@ export default function ProfilePage() {
                 
                 if (sunSignValue || moonSignValue || ascendantValue) {
                   await supabase.from("users").update({
-                    ...(sunSignValue ? { sun_sign: profileData.sun_sign } : {}),
-                    ...(moonSignValue ? { moon_sign: profileData.moon_sign } : {}),
-                    ...(ascendantValue ? { ascendant_sign: profileData.ascendant_sign } : {}),
+                    ...(sunSignValue ? { sun_sign: sunSignValue } : {}),
+                    ...(moonSignValue ? { moon_sign: moonSignValue } : {}),
+                    ...(ascendantValue ? { ascendant_sign: ascendantValue } : {}),
                   }).eq("id", userId);
                 }
               }
@@ -149,9 +149,9 @@ export default function ProfilePage() {
                 if (!ascendantValue) ascendantValue = extractSignName(signsData.ascendant);
                 
                 await supabase.from("users").update({
-                  sun_sign: signsData.sunSign,
-                  moon_sign: signsData.moonSign,
-                  ascendant_sign: signsData.ascendant,
+                  sun_sign: signsData.sunSign?.name || signsData.sunSign,
+                  moon_sign: signsData.moonSign?.name || signsData.moonSign,
+                  ascendant_sign: signsData.ascendant?.name || signsData.ascendant,
                 }).eq("id", userId);
               }
             } catch (signsError) {

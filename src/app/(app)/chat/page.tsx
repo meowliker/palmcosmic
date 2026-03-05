@@ -38,28 +38,28 @@ const coinPackages = [
   {
     id: 1,
     coins: 50,
-    price: 4.99,
+    price: 199,
     discount: null,
     popular: false,
   },
   {
     id: 2,
     coins: 150,
-    price: 12.99,
+    price: 509,
     discount: 15,
     popular: true,
   },
   {
     id: 3,
     coins: 300,
-    price: 19.99,
+    price: 839,
     discount: 30,
     popular: false,
   },
   {
     id: 4,
     coins: 500,
-    price: 29.99,
+    price: 1199,
     discount: 40,
     popular: false,
   },
@@ -810,7 +810,7 @@ export default function ChatPage() {
 
                     {/* Price */}
                     <div className="text-center mb-2 sm:mb-4">
-                      <p className="text-white text-lg sm:text-2xl font-bold">${pkg.price}</p>
+                      <p className="text-white text-lg sm:text-2xl font-bold">₹{pkg.price}</p>
                     </div>
 
                     {/* Buy Button */}
