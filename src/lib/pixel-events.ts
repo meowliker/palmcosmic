@@ -17,10 +17,8 @@ export const trackPixelEvent = (eventName: string, params?: Record<string, any>)
 
   const fire = (attempt: number) => {
     if (window.fbq) {
-      console.log(`[Meta Pixel] Tracking: ${eventName}`, params);
       window.fbq("track", eventName, params);
     } else if (attempt < 10) {
-      console.log(`[Meta Pixel] fbq not ready, retrying ${eventName} (${attempt + 1}/10)...`);
       setTimeout(() => fire(attempt + 1), 500);
     } else {
       console.warn(`[Meta Pixel] fbq never loaded, dropped event: ${eventName}`);

@@ -52,9 +52,6 @@ export async function POST(request: NextRequest) {
       hash
     );
 
-    // Log verification details for debugging
-    console.log("PayU verification:", { txnid, status, isValid, receivedHash: hash?.slice(0, 20) + "..." });
-
     // Skip hash verification for now - PayU Bolt response hash format differs
     // The payment is already confirmed by PayU at this point
     if (!isValid) {
@@ -76,10 +73,6 @@ export async function POST(request: NextRequest) {
     const feature = udf4;
     const coins = udf5;
 
-    // Debug logging
-    console.log("PayU verify - userId:", userId, "type:", type, "bundleId:", bundleId);
-    console.log("PayU verify - features to unlock:", BUNDLE_FEATURES[bundleId]);
-
     // Update payment record (or create if it doesn't exist)
     const { data: existingPayment } = await supabase
       .from("payments")
@@ -97,8 +90,6 @@ export async function POST(request: NextRequest) {
           fulfilled_at: new Date().toISOString(),
         })
         .eq("payu_txn_id", txnid);
-      
-      console.log("PayU verify - payment updated:", { txnid, error: paymentUpdateError?.message || null });
     } else {
       // Create payment record if it doesn't exist (initiate-payment may have failed)
       const amountInPaise = Math.round(parseFloat(amount) * 100);
@@ -120,8 +111,6 @@ export async function POST(request: NextRequest) {
           fulfilled_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
         });
-      
-      console.log("PayU verify - payment created:", { txnid, error: paymentInsertError?.message || null });
     }
 
     // Fulfill the purchase — unlock features for user
@@ -135,7 +124,6 @@ export async function POST(request: NextRequest) {
       if (userError) {
         console.error("Error fetching user:", userError);
       }
-      console.log("PayU verify - existing user data:", existingUser);
 
       const currentFeatures = existingUser?.unlocked_features || {
         palmReading: false,
@@ -150,14 +138,12 @@ export async function POST(request: NextRequest) {
 
       if (type === "bundle" && bundleId) {
         const featuresToUnlock = BUNDLE_FEATURES[bundleId] || [];
-        console.log("PayU verify - unlocking features:", featuresToUnlock, "for bundle:", bundleId);
         for (const f of featuresToUnlock) {
           (updatedFeatures as Record<string, boolean>)[f] = true;
         }
         // Bundle 3 (palm-birth-compat) gives 30 coins, others give 15
         const coinsToAdd = bundleId === "palm-birth-compat" ? 30 : 15;
         updatedCoins += coinsToAdd;
-        console.log("PayU verify - updated features:", updatedFeatures, "coins:", updatedCoins);
       } else if (type === "upsell" && feature) {
         (updatedFeatures as Record<string, boolean>)[feature] = true;
       } else if (type === "report" && feature) {
@@ -185,8 +171,6 @@ export async function POST(request: NextRequest) {
       
       if (upsertError) {
         console.error("PayU verify - upsert error:", upsertError);
-      } else {
-        console.log("PayU verify - user upsert successful for:", userId);
       }
     }
 

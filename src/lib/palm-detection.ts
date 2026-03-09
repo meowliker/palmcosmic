@@ -5,16 +5,13 @@ let handLandmarker: HandLandmarker | null = null;
 // Initialize MediaPipe Hand Landmarker
 export async function initializeHandDetection() {
   if (handLandmarker) {
-    console.log("[palm-detection] HandLandmarker already initialized");
     return handLandmarker;
   }
 
   try {
-    console.log("[palm-detection] Initializing MediaPipe...");
     const vision = await FilesetResolver.forVisionTasks(
       "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
     );
-    console.log("[palm-detection] FilesetResolver loaded");
 
     handLandmarker = await HandLandmarker.createFromOptions(vision, {
       baseOptions: {
@@ -27,7 +24,6 @@ export async function initializeHandDetection() {
       minHandPresenceConfidence: 0.3,
       minTrackingConfidence: 0.3,
     });
-    console.log("[palm-detection] HandLandmarker created successfully");
 
     return handLandmarker;
   } catch (error) {
@@ -241,14 +237,10 @@ function calculateLineLength(points: { x: number; y: number }[]) {
 
 // Main function to detect palm features from an image
 export async function detectPalmFeatures(imageElement: HTMLImageElement | HTMLVideoElement | HTMLCanvasElement) {
-  console.log("[palm-detection] detectPalmFeatures called");
-  
   try {
     const results = await detectHandLandmarks(imageElement);
-    console.log("[palm-detection] Detection results:", results);
     
     if (!results || !results.landmarks || results.landmarks.length === 0) {
-      console.log("[palm-detection] No landmarks detected");
       return {
         palmLines: [],
         fingertips: [],
@@ -256,7 +248,6 @@ export async function detectPalmFeatures(imageElement: HTMLImageElement | HTMLVi
     }
 
     const landmarks = results.landmarks[0];
-    console.log("[palm-detection] Found", landmarks.length, "landmarks");
 
     // Extract fingertips
     const fingertipIndices = [4, 8, 12, 16, 20];
@@ -264,7 +255,6 @@ export async function detectPalmFeatures(imageElement: HTMLImageElement | HTMLVi
       x: landmarks[index].x,
       y: landmarks[index].y,
     }));
-    console.log("[palm-detection] Extracted fingertips:", fingertips);
 
     return {
       palmLines: [],

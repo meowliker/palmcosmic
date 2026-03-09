@@ -47,8 +47,6 @@ function BundleUpsellContent() {
       await supabase.from("users").update({
         bundle_purchased: bundleId,
       }).eq("id", userId);
-      
-      console.log("Bundle checkout fulfilled for:", bundleId);
     } catch (err) {
       console.error("Failed to fulfill bundle checkout:", err);
     }

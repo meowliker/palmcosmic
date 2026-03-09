@@ -201,7 +201,6 @@ export default function ChatPage() {
     const loadData = async () => {
       const userId = generateUserId();
       setCurrentUserId(userId);
-      console.log("[Chat] Loading data for userId:", userId);
 
       // Load palm reading from Supabase
       try {
@@ -219,10 +218,8 @@ export default function ChatPage() {
         const { data: chartData } = await supabase.from("natal_charts").select("*").eq("id", userId).single();
         if (chartData) {
           setNatalChart(chartData);
-          console.log("[Chat] Loaded natal chart from Supabase");
         } else {
           // No chart saved yet — calculate it now via astro-engine
-          console.log("[Chat] No natal chart found, calculating...");
           try {
             const signsResponse = await fetch("/api/astrology/signs", {
               method: "POST",
@@ -245,7 +242,6 @@ export default function ChatPage() {
               const { data: newChart } = await supabase.from("natal_charts").select("*").eq("id", userId).single();
               if (newChart) {
                 setNatalChart(newChart);
-                console.log("[Chat] Natal chart calculated and loaded");
               }
             }
           } catch (calcErr) {
@@ -258,11 +254,8 @@ export default function ChatPage() {
 
       // Load chat history from Supabase
       try {
-        console.log("[Chat] Attempting to load chat for userId:", userId);
         const { data: chatDoc } = await supabase.from("chat_messages").select("*").eq("id", userId).single();
-        console.log("[Chat] Chat doc exists:", !!chatDoc);
         if (chatDoc) {
-          console.log("[Chat] Loaded chat data");
           if (chatDoc.messages && chatDoc.messages.length > 0) {
             const loadedMessages: Message[] = chatDoc.messages.map((m: StoredMessage) => ({
               ...m,
@@ -307,13 +300,11 @@ export default function ChatPage() {
     // Only save if we have loaded chat, have a userId, and user has sent at least one message
     const hasUserMessage = messages.some(m => m.role === "user");
     if (!chatLoaded || messages.length === 0 || !currentUserId || !hasUserMessage) {
-      console.log("[Chat] Skip save - chatLoaded:", chatLoaded, "messages:", messages.length, "userId:", currentUserId, "hasUserMessage:", hasUserMessage);
       return;
     }
 
     const saveChat = async () => {
       try {
-        console.log("[Chat] Saving chat for userId:", currentUserId, "messages count:", messages.length);
         // Filter out undefined fields
         const storedMessages: StoredMessage[] = messages.map((m) => {
           const msg: StoredMessage = {
@@ -333,7 +324,6 @@ export default function ChatPage() {
           updated_at: new Date().toISOString(),
           user_id: currentUserId,
         }, { onConflict: "id" });
-        console.log("[Chat] Chat saved successfully for userId:", currentUserId);
       } catch (err: any) {
         console.error("[Chat] Failed to save chat:", err);
         console.error("[Chat] Error code:", err?.code);

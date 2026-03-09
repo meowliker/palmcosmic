@@ -139,7 +139,6 @@ function Step19Content() {
       // Show success immediately - do background tasks after
       setShowSuccess(true);
       pixelEvents.completeRegistration(email);
-      console.log("User registered:", uid);
 
       // Background tasks (non-blocking)
       const palmImage = localStorage.getItem("astrorekha_palm_image");
@@ -198,7 +197,6 @@ function Step19Content() {
                 },
                 { onConflict: "id" }
               );
-              console.log("Palm reading pre-generated successfully");
             }
           })
           .catch((err) => console.error("Background palm analysis error:", err));
@@ -247,7 +245,6 @@ function Step19Content() {
                 { id: cacheKey, data: { ...chartResult.data, cachedAt: new Date().toISOString() }, cached_at: new Date().toISOString() },
                 { onConflict: "id" }
               );
-              console.log("Birth chart pre-generated successfully");
             }
           } catch (err) {
             console.error("Background birth chart generation error:", err);

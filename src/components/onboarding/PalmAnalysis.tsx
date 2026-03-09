@@ -52,21 +52,17 @@ export function PalmAnalysis({ imageData, onComplete }: PalmAnalysisProps) {
     // Start detection immediately
     (async () => {
       try {
-        console.log("[PalmAnalysis] Starting detection...");
         const img = new window.Image();
         img.crossOrigin = "anonymous";
         img.src = imageData;
         await new Promise<void>((resolve, reject) => {
           img.onload = () => {
-            console.log("[PalmAnalysis] Image loaded:", img.width, "x", img.height);
             resolve();
           };
           img.onerror = () => reject(new Error("Failed to load palm image"));
         });
 
-        console.log("[PalmAnalysis] Calling detectPalmFeatures...");
         const detected = await detectPalmFeaturesFromImage(img);
-        console.log("[PalmAnalysis] Detection result:", detected);
 
         const container = containerRef.current;
         const containerSize = container
@@ -81,8 +77,6 @@ export function PalmAnalysis({ imageData, onComplete }: PalmAnalysisProps) {
               containerSize
             )
           );
-
-          console.log("[PalmAnalysis] Mapped fingertips:", mappedTips);
 
           const showFingertips = () => {
             if (!fingertipsSetRef.current) {

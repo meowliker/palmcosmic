@@ -46,23 +46,13 @@ export async function POST(request: NextRequest) {
     let migratedData: Record<string, any> = {};
 
     if (anonId) {
-      console.log("Register - looking for anonymous user:", anonId);
-      
-      const { data: anonUser, error: anonError } = await supabase
+      const { data: anonUser } = await supabase
         .from("users")
         .select("*")
         .eq("id", anonId)
         .maybeSingle();
 
-      console.log("Register - anonymous user found:", anonUser ? "YES" : "NO", anonError ? `Error: ${anonError.message}` : "");
-      
       if (anonUser) {
-        console.log("Register - migrating data:", {
-          coins: anonUser.coins,
-          bundle_purchased: anonUser.bundle_purchased,
-          payment_status: anonUser.payment_status,
-          unlocked_features: anonUser.unlocked_features,
-        });
         migratedData = {
           coins: anonUser.coins || 0,
           unlocked_features: anonUser.unlocked_features || {},

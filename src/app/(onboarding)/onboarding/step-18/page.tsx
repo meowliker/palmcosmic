@@ -119,7 +119,6 @@ function Step18Content() {
         const planName = `${selectedPlan} Trial`;
         
         // Track PURCHASE event - Critical for Meta ROAS tracking
-        console.log("[Meta Pixel] Firing Purchase event:", { value: purchaseValue, plan: planName });
         pixelEvents.purchase(purchaseValue, `subscription-${selectedPlan}`, planName);
         
         // Also track Subscribe event for additional tracking

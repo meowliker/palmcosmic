@@ -214,9 +214,6 @@ export default function AdminRevenuePage() {
       }
 
       const result = await response.json();
-      console.log("Admin revenue API response:", JSON.stringify(result, null, 2));
-      console.log("Total Revenue from API:", result.totalRevenue);
-      console.log("Unique Paying Users from API:", result.uniquePayingUsers);
       setData(result);
       setError(null);
     } catch (err: any) {
@@ -411,12 +408,6 @@ export default function AdminRevenuePage() {
                 className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 text-sm"
               >
                 ← Admin
-              </button>
-              <button
-                onClick={() => router.push("/admin/pricing")}
-                className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 transition-colors text-primary text-sm font-medium"
-              >
-                Pricing
               </button>
               <button
                 onClick={fetchData}
