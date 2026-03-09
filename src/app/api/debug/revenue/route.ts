@@ -39,6 +39,7 @@ export async function GET() {
     const nonAnonUsers = (users || []).filter((u: any) => !u.id.startsWith("anon_"));
 
     const response = NextResponse.json({
+      _version: "v3-fresh-client",
       timestamp: new Date().toISOString(),
       supabaseUrl: url,
       
