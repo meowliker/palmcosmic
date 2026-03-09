@@ -37,10 +37,16 @@ export async function GET(request: NextRequest) {
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
     // Fetch all paid payments (Razorpay)
-    const { data: allPaymentsRaw } = await supabase
+    const { data: allPaymentsRaw, error: paymentsError } = await supabase
       .from("payments")
       .select("*")
       .order("created_at", { ascending: false });
+
+    console.log("Admin revenue - payments query:", {
+      count: allPaymentsRaw?.length || 0,
+      error: paymentsError?.message || null,
+      statuses: allPaymentsRaw?.map((p: any) => p.payment_status) || [],
+    });
 
     const payments: any[] = (allPaymentsRaw || []).map((p: any) => ({
       id: p.id,
@@ -56,6 +62,12 @@ export async function GET(request: NextRequest) {
 
     // Only count paid payments for revenue
     const paidPayments = payments.filter(p => p.payment_status === "paid");
+    
+    console.log("Admin revenue - paid payments:", {
+      total: payments.length,
+      paid: paidPayments.length,
+      amounts: paidPayments.map(p => ({ amount: p.amount, inr: getAmountINR(p) })),
+    });
 
     // Revenue metrics
     const totalRevenue = paidPayments.reduce((sum, p) => sum + getAmountINR(p), 0);

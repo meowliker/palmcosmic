@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Star, Heart, Briefcase, Activity, Sparkles } from "lucide-react";
 import { useOnboardingStore } from "@/lib/onboarding-store";
+import { supabase } from "@/lib/supabase";
 import predictions2026Data from "../../../../data/predictions-2026.json";
 
 const MONTHS = [
@@ -33,10 +34,39 @@ export default function Prediction2026Page() {
   const [prediction, setPrediction] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  const [zodiacSign, setZodiacSign] = useState<string>("Aries");
 
-  // Use ascendant sign for 2026 predictions (as per working.md requirements)
-  const { ascendantSign } = useOnboardingStore();
-  const zodiacSign = ascendantSign?.name || "Aries"; // Default to Aries if not set
+  // Get sun sign from onboarding store as fallback
+  const { sunSign: storeSunSign } = useOnboardingStore();
+
+  useEffect(() => {
+    loadUserSunSign();
+  }, []);
+
+  const loadUserSunSign = async () => {
+    try {
+      const userId = localStorage.getItem("astrorekha_user_id");
+      if (userId) {
+        const { data: dbUser } = await supabase.from("users").select("sun_sign").eq("id", userId).single();
+        if (dbUser?.sun_sign) {
+          const signName = typeof dbUser.sun_sign === "string" ? dbUser.sun_sign : dbUser.sun_sign?.name;
+          if (signName) {
+            setZodiacSign(signName);
+            return;
+          }
+        }
+      }
+      // Fallback to onboarding store
+      if (storeSunSign?.name) {
+        setZodiacSign(storeSunSign.name);
+      }
+    } catch (err) {
+      console.error("Failed to load sun sign:", err);
+      if (storeSunSign?.name) {
+        setZodiacSign(storeSunSign.name);
+      }
+    }
+  };
 
   useEffect(() => {
     loadPrediction();

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   TrendingUp,
-  DollarSign,
+  IndianRupee,
   Users,
   CreditCard,
   RefreshCw,
@@ -410,6 +410,12 @@ export default function AdminRevenuePage() {
                 ← Admin
               </button>
               <button
+                onClick={() => router.push("/admin/pricing")}
+                className="px-3 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 transition-colors text-primary text-sm font-medium"
+              >
+                Pricing
+              </button>
+              <button
                 onClick={fetchData}
                 disabled={refreshing}
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
@@ -548,14 +554,14 @@ export default function AdminRevenuePage() {
         {/* Primary KPIs */}
         <section>
           <h2 className="text-white/70 text-sm font-medium mb-3 flex items-center gap-2">
-            <DollarSign className="w-4 h-4" /> Primary KPIs
+            <IndianRupee className="w-4 h-4" /> Primary KPIs
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KPICard
               title="Total Revenue"
               value={formatCurrency(data.totalRevenue)}
               subtitle="All time"
-              icon={<DollarSign className="w-4 h-4" />}
+              icon={<IndianRupee className="w-4 h-4" />}
               color="text-green-400"
               tooltip="Total revenue from all paid Razorpay payments."
             />
@@ -623,7 +629,7 @@ export default function AdminRevenuePage() {
                   </span>
                   <Tooltip content="Revenue for the selected date." />
                 </div>
-                <span className="text-green-400"><DollarSign className="w-4 h-4" /></span>
+                <span className="text-green-400"><IndianRupee className="w-4 h-4" /></span>
               </div>
               <p className="text-xl font-bold text-green-400">{formatCurrency(selectedDateRevenue)}</p>
               <p className="text-white/40 text-xs mt-1">{selectedDatePaymentCount} payments</p>
@@ -1140,7 +1146,7 @@ function MetaAdsSection({
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-white/50 text-xs">Ad Spend</span>
-                <DollarSign className="w-4 h-4 text-blue-400" />
+                <IndianRupee className="w-4 h-4 text-blue-400" />
               </div>
               <p className="text-xl font-bold text-blue-400">{formatCurrency(metaAds.account.spend)}</p>
               <p className="text-white/40 text-xs mt-1">{datePresetLabels[metaDatePreset]}</p>

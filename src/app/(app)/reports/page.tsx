@@ -14,12 +14,7 @@ import { supabase } from "@/lib/supabase";
 import { UserAvatar, cacheUserInfo } from "@/components/UserAvatar";
 import { BirthChartTimer } from "@/components/BirthChartTimer";
 
-interface DailyData {
-  sunRiseSet?: { sunrise: string; sunset: string };
-  rahuKalam?: { start: string; end: string };
-  abhijitMuhurat?: { start: string; end: string };
-  nakshatra?: any;
-}
+// Removed unused DailyData interface - these API calls were failing and not displayed in UI
 
 interface DailyInsights {
   daily_tip: string;
@@ -37,8 +32,6 @@ interface DailyInsights {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [dailyData, setDailyData] = useState<DailyData | null>(null);
-  const [loading, setLoading] = useState(true);
   const [userZodiac, setUserZodiac] = useState({ sign: "Aries", symbol: "♈", color: "from-red-500 to-orange-500" });
   const [upsellPopup, setUpsellPopup] = useState<{ isOpen: boolean; feature: keyof UnlockedFeatures | null }>({
     isOpen: false,
@@ -61,7 +54,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadUserZodiac();
-    fetchDailyData();
   }, []);
 
   useEffect(() => {
@@ -168,30 +160,6 @@ export default function DashboardPage() {
     }
   };
 
-  const fetchDailyData = async () => {
-    try {
-      const response = await fetch("/api/astrology/daily", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          latitude: 28.6139,
-          longitude: 77.209,
-          timezone: 5.5,
-        }),
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          setDailyData(result.data);
-        }
-      }
-    } catch (error) {
-      console.error("Failed to fetch daily data:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const fetchDailyInsightsV2 = async () => {
     try {

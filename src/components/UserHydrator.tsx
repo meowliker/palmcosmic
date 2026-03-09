@@ -3,9 +3,11 @@
 import { useCallback, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { useUserStore } from "@/lib/user-store";
+import { useRouter } from "next/navigation";
 
 export default function UserHydrator() {
   const { syncFromServer, setCoins, setUserId, unlockFeature, unlockAllFeatures } = useUserStore();
+  const router = useRouter();
 
   const hydrate = useCallback(async () => {
     const storedId = localStorage.getItem("astrorekha_user_id");
@@ -20,7 +22,22 @@ export default function UserHydrator() {
         .eq("id", userId)
         .single();
 
-      if (error || !data) return;
+      // User not found in database - clear localStorage and redirect to login
+      if (error || !data) {
+        console.warn("User not found in database, clearing session");
+        localStorage.removeItem("astrorekha_user_id");
+        localStorage.removeItem("astrorekha_email");
+        localStorage.removeItem("astrorekha_password");
+        localStorage.removeItem("astrorekha_onboarding_flow");
+        localStorage.removeItem("astrorekha_purchase_type");
+        
+        // Clear session cookie
+        await fetch("/api/session/clear", { method: "POST" });
+        
+        // Redirect to welcome
+        router.push("/welcome");
+        return;
+      }
 
       setUserId(userId);
 

@@ -80,15 +80,49 @@ export async function POST(request: NextRequest) {
     console.log("PayU verify - userId:", userId, "type:", type, "bundleId:", bundleId);
     console.log("PayU verify - features to unlock:", BUNDLE_FEATURES[bundleId]);
 
-    // Update payment record
-    await supabase
+    // Update payment record (or create if it doesn't exist)
+    const { data: existingPayment } = await supabase
       .from("payments")
-      .update({
-        payu_payment_id: mihpayid,
-        payment_status: "paid",
-        fulfilled_at: new Date().toISOString(),
-      })
-      .eq("payu_txn_id", txnid);
+      .select("id")
+      .eq("payu_txn_id", txnid)
+      .maybeSingle();
+    
+    if (existingPayment) {
+      // Update existing payment record
+      const { error: paymentUpdateError } = await supabase
+        .from("payments")
+        .update({
+          payu_payment_id: mihpayid,
+          payment_status: "paid",
+          fulfilled_at: new Date().toISOString(),
+        })
+        .eq("payu_txn_id", txnid);
+      
+      console.log("PayU verify - payment updated:", { txnid, error: paymentUpdateError?.message || null });
+    } else {
+      // Create payment record if it doesn't exist (initiate-payment may have failed)
+      const amountInPaise = Math.round(parseFloat(amount) * 100);
+      const { error: paymentInsertError } = await supabase
+        .from("payments")
+        .insert({
+          id: `pay_${txnid}`,
+          payu_txn_id: txnid,
+          payu_payment_id: mihpayid,
+          user_id: userId || null,
+          type: type || "bundle",
+          bundle_id: bundleId || null,
+          feature: feature || null,
+          coins: coins ? parseInt(coins) : null,
+          customer_email: email || null,
+          amount: amountInPaise,
+          currency: "INR",
+          payment_status: "paid",
+          fulfilled_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        });
+      
+      console.log("PayU verify - payment created:", { txnid, error: paymentInsertError?.message || null });
+    }
 
     // Fulfill the purchase — unlock features for user
     if (userId) {

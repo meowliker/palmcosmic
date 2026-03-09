@@ -17,12 +17,25 @@ export default function BirthChartPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [chartData, setChartData] = useState<any>(null);
-  const [chartType, setChartType] = useState<"vedic" | "western">("vedic");
+  const chartType = "vedic"; // Only Vedic charts supported
   const [error, setError] = useState<string | null>(null);
   const [showMissingDataForm, setShowMissingDataForm] = useState(false);
+  const [userDataLoaded, setUserDataLoaded] = useState(false);
+  
+  // Local state for birth data (loaded from Supabase or onboarding store)
+  const [birthMonth, setBirthMonthState] = useState<string>("");
+  const [birthDay, setBirthDayState] = useState<string>("");
+  const [birthYear, setBirthYearState] = useState<string>("");
+  const [birthHour, setBirthHourState] = useState<string>("12");
+  const [birthMinute, setBirthMinuteState] = useState<string>("00");
+  const [birthPeriod, setBirthPeriodState] = useState<string>("PM");
+  const [birthPlace, setBirthPlaceState] = useState<string>("");
+  const [knowsBirthTime, setKnowsBirthTimeState] = useState<boolean>(true);
   
   const { 
-    birthMonth, birthDay, birthYear, birthHour, birthMinute, birthPeriod, birthPlace, knowsBirthTime,
+    birthMonth: storeBirthMonth, birthDay: storeBirthDay, birthYear: storeBirthYear, 
+    birthHour: storeBirthHour, birthMinute: storeBirthMinute, birthPeriod: storeBirthPeriod, 
+    birthPlace: storeBirthPlace, knowsBirthTime: storeKnowsBirthTime,
     setBirthDate, setBirthTime, setBirthPlace
   } = useOnboardingStore();
   
@@ -50,14 +63,57 @@ export default function BirthChartPage() {
     return `chart_${birthDate}_${birthTime}_${birthPlace || 'unknown'}`.replace(/[^a-zA-Z0-9_]/g, '_');
   };
 
+  // Load user data from Supabase first, then fallback to onboarding store
   useEffect(() => {
+    loadUserBirthData();
+  }, []);
+
+  const loadUserBirthData = async () => {
+    try {
+      const userId = localStorage.getItem("astrorekha_user_id");
+      if (userId) {
+        const { data: dbUser } = await supabase.from("users").select("birth_month, birth_day, birth_year, birth_hour, birth_minute, birth_period, birth_place").eq("id", userId).single();
+        if (dbUser && dbUser.birth_month && dbUser.birth_day && dbUser.birth_year) {
+          setBirthMonthState(String(dbUser.birth_month));
+          setBirthDayState(String(dbUser.birth_day));
+          setBirthYearState(String(dbUser.birth_year));
+          setBirthHourState(dbUser.birth_hour || "12");
+          setBirthMinuteState(dbUser.birth_minute || "00");
+          setBirthPeriodState(dbUser.birth_period || "PM");
+          setBirthPlaceState(dbUser.birth_place || "");
+          setUserDataLoaded(true);
+          return;
+        }
+      }
+      // Fallback to onboarding store
+      setBirthMonthState(storeBirthMonth);
+      setBirthDayState(storeBirthDay);
+      setBirthYearState(storeBirthYear);
+      setBirthHourState(storeBirthHour || "12");
+      setBirthMinuteState(storeBirthMinute || "00");
+      setBirthPeriodState(storeBirthPeriod || "PM");
+      setBirthPlaceState(storeBirthPlace || "");
+      setKnowsBirthTimeState(storeKnowsBirthTime);
+      setUserDataLoaded(true);
+    } catch (err) {
+      console.error("Failed to load birth data:", err);
+      // Fallback to onboarding store
+      setBirthMonthState(storeBirthMonth);
+      setBirthDayState(storeBirthDay);
+      setBirthYearState(storeBirthYear);
+      setUserDataLoaded(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!userDataLoaded) return;
     if (isMissingRequiredData) {
       setShowMissingDataForm(true);
       setLoading(false);
       return;
     }
     loadOrGenerateChart();
-  }, [chartType, isMissingRequiredData]);
+  }, [userDataLoaded, isMissingRequiredData]);
 
   const loadOrGenerateChart = async () => {
     setLoading(true);
@@ -179,10 +235,10 @@ export default function BirthChartPage() {
                   <div>
                     <label className="text-white/60 text-sm block mb-2">Birth Time</label>
                     <div className="grid grid-cols-3 gap-2">
-                      <select value={birthHour} onChange={(e) => setBirthTime(e.target.value, birthMinute, birthPeriod)} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
+                      <select value={birthHour} onChange={(e) => setBirthTime(e.target.value, birthMinute, birthPeriod as "AM" | "PM")} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
                         {Array.from({length: 12}, (_, i) => i + 1).map(h => <option key={h} value={String(h)}>{h}</option>)}
                       </select>
-                      <select value={birthMinute} onChange={(e) => setBirthTime(birthHour, e.target.value, birthPeriod)} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
+                      <select value={birthMinute} onChange={(e) => setBirthTime(birthHour, e.target.value, birthPeriod as "AM" | "PM")} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
                         {["00", "15", "30", "45"].map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                       <select value={birthPeriod} onChange={(e) => setBirthTime(birthHour, birthMinute, e.target.value as "AM" | "PM")} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
@@ -226,16 +282,6 @@ export default function BirthChartPage() {
             {/* Chart Display - Only API-derived content */}
             {!loading && !error && !showMissingDataForm && chartData && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                {/* Chart Type Toggle */}
-                <div className="flex gap-2 p-1 bg-white/5 rounded-xl">
-                  <button onClick={() => setChartType("vedic")} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${chartType === "vedic" ? "bg-gradient-to-r from-primary to-purple-600 text-white" : "text-white/60 hover:text-white"}`}>
-                    Vedic
-                  </button>
-                  <button onClick={() => setChartType("western")} className={`flex-1 py-2 px-4 rounded-lg text-sm font-medium transition-all ${chartType === "western" ? "bg-gradient-to-r from-primary to-purple-600 text-white" : "text-white/60 hover:text-white"}`}>
-                    Western
-                  </button>
-                </div>
-
                 {/* Birth Details */}
                 <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
                   <div className="flex items-center justify-between text-sm">
@@ -255,19 +301,17 @@ export default function BirthChartPage() {
                 </div>
 
                 {/* Rashi Chart (from API) */}
-                <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
-                  <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                    <Sun className="w-5 h-5 text-orange-400" />
-                    {chartData.chartType === "vedic" ? "Rashi Chart (D1)" : "Natal Chart"}
-                  </h3>
-                  {chartData.chart?.output ? (
-                    <div className="w-full aspect-square bg-white rounded-xl overflow-hidden flex items-center justify-center [&_svg]:w-full [&_svg]:h-full" dangerouslySetInnerHTML={{ __html: chartData.chart.output }} />
-                  ) : (
-                    <div className="w-full aspect-square bg-white/5 rounded-xl flex items-center justify-center">
-                      <p className="text-white/40 text-sm">Chart not available</p>
-                    </div>
-                  )}
-                </div>
+                {chartData.chart?.output && (
+                  <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+                    {chartData.chart?.output ? (
+                      <div className="w-full aspect-square bg-white rounded-xl overflow-hidden flex items-center justify-center [&_svg]:w-full [&_svg]:h-full" dangerouslySetInnerHTML={{ __html: chartData.chart.output }} />
+                    ) : (
+                      <div className="w-full aspect-square bg-white/5 rounded-xl flex items-center justify-center">
+                        <p className="text-white/40 text-sm">Chart not available</p>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Navamsa Chart (from API - Vedic only) */}
                 {chartData.chartType === "vedic" && chartData.navamsaChart?.output && (

@@ -27,9 +27,17 @@ You MUST respond with ONLY valid JSON (no markdown, no code fences):
 }
 
 Rules:
-- lucky_number: integer 1-99
-- lucky_color: single color name (e.g. "Emerald Green", "Gold", "Royal Blue")
-- lucky_time: 12-hour time range (e.g. "10:00 AM - 12:00 PM")
+- lucky_number: integer 1-99, derived from the user's ruling planet position and current transits
+- lucky_color: single color name associated with the dominant planetary energy today (e.g. "Emerald Green" for Mercury, "Gold" for Sun, "Silver" for Moon, "Royal Blue" for Jupiter, "Crimson Red" for Mars, "Rose Pink" for Venus, "Deep Purple" for Saturn)
+- lucky_time: IMPORTANT - Calculate based on planetary hours! Each day has different planetary hours based on sunrise. Use the user's ruling planet and current transits to determine the most auspicious 2-hour window. VARY this significantly - do NOT default to "10:00 AM - 12:00 PM". Consider:
+  * Sun hours: Good for leadership, vitality (typically mid-morning)
+  * Moon hours: Good for emotions, intuition (evening hours)
+  * Mars hours: Good for action, courage (early morning or afternoon)
+  * Mercury hours: Good for communication, learning (late morning)
+  * Jupiter hours: Good for expansion, luck (varies by day)
+  * Venus hours: Good for love, creativity (afternoon or evening)
+  * Saturn hours: Good for discipline, structure (early morning)
+  Examples of varied times: "6:00 AM - 8:00 AM", "8:30 AM - 10:30 AM", "11:00 AM - 1:00 PM", "2:00 PM - 4:00 PM", "4:30 PM - 6:30 PM", "7:00 PM - 9:00 PM"
 - mood: one word max (e.g. "Energized", "Reflective", "Passionate")
 - daily_tip: Write in PLAIN SIMPLE ENGLISH. NEVER mention planets, transits, houses, dashas, conjunctions, aspects, or any astrological terms. Just give practical, actionable life advice like "Trust your gut on financial decisions today" or "Take a break from screens and spend time outdoors". The tip should feel like advice from a wise friend, NOT an astrologer.
 - dos: exactly 3 items, under 8 words each. Plain English, no astrology jargon.

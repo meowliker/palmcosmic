@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Save, Plus, Trash2, Loader2, Check } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, Loader2, Check, ShieldAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { PricingConfig, BundlePlan, UpsellPlan, ReportPlan, CoinPackage } from "@/lib/pricing";
 
@@ -15,10 +15,26 @@ export default function AdminPricingPage() {
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"bundles" | "upsells" | "reports" | "coins">("bundles");
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
   useEffect(() => {
-    fetchPricing();
+    checkAuthAndFetch();
   }, []);
+
+  const checkAuthAndFetch = async () => {
+    const token = localStorage.getItem("admin_session_token");
+    const expiry = localStorage.getItem("admin_session_expiry");
+
+    if (!token || !expiry || new Date(expiry) < new Date()) {
+      localStorage.removeItem("admin_session_token");
+      localStorage.removeItem("admin_session_expiry");
+      router.push("/admin/login");
+      return;
+    }
+
+    setIsAuthorized(true);
+    fetchPricing();
+  };
 
   const fetchPricing = async () => {
     try {
@@ -90,7 +106,7 @@ export default function AdminPricingPage() {
     setPricing({ ...pricing, coinPackages: newPackages });
   };
 
-  if (isLoading) {
+  if (isLoading || !isAuthorized) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -214,15 +230,26 @@ export default function AdminPricingPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-sm text-muted-foreground">Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">PayU Price (₹)</label>
                     <input
                       type="number"
                       value={bundle.price}
                       onChange={(e) => updateBundle(index, "price", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-muted-foreground">Display Price (₹)</label>
+                    <input
+                      type="number"
+                      value={bundle.displayPrice || bundle.price}
+                      onChange={(e) => updateBundle(index, "displayPrice", parseInt(e.target.value) || 0)}
+                      className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Shown on paywall</p>
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Original Price (₹)</label>
@@ -232,6 +259,7 @@ export default function AdminPricingPage() {
                       onChange={(e) => updateBundle(index, "originalPrice", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Strikethrough price</p>
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Discount Text</label>
@@ -241,6 +269,7 @@ export default function AdminPricingPage() {
                       onChange={(e) => updateBundle(index, "discount", e.target.value)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">e.g. "50% OFF"</p>
                   </div>
                 </div>
 
@@ -324,15 +353,26 @@ export default function AdminPricingPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-sm text-muted-foreground">Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">PayU Price (₹)</label>
                     <input
                       type="number"
                       value={upsell.price}
                       onChange={(e) => updateUpsell(index, "price", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-muted-foreground">Display Price (₹)</label>
+                    <input
+                      type="number"
+                      value={upsell.displayPrice || upsell.price}
+                      onChange={(e) => updateUpsell(index, "displayPrice", parseInt(e.target.value) || 0)}
+                      className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Shown on paywall</p>
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Original Price (₹)</label>
@@ -342,6 +382,7 @@ export default function AdminPricingPage() {
                       onChange={(e) => updateUpsell(index, "originalPrice", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Strikethrough price</p>
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Discount Text</label>
@@ -351,6 +392,7 @@ export default function AdminPricingPage() {
                       onChange={(e) => updateUpsell(index, "discount", e.target.value)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">e.g. "50% OFF"</p>
                   </div>
                 </div>
 
@@ -462,7 +504,7 @@ export default function AdminPricingPage() {
                   </label>
                 </div>
 
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
                     <label className="text-sm text-muted-foreground">Coins</label>
                     <input
@@ -473,13 +515,24 @@ export default function AdminPricingPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">PayU Price (₹)</label>
                     <input
                       type="number"
                       value={pkg.price}
                       onChange={(e) => updateCoinPackage(index, "price", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged</p>
+                  </div>
+                  <div>
+                    <label className="text-sm text-muted-foreground">Display Price (₹)</label>
+                    <input
+                      type="number"
+                      value={pkg.displayPrice || pkg.price}
+                      onChange={(e) => updateCoinPackage(index, "displayPrice", parseInt(e.target.value) || 0)}
+                      className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">Shown on UI</p>
                   </div>
                   <div>
                     <label className="text-sm text-muted-foreground">Original Price (₹)</label>
@@ -489,6 +542,7 @@ export default function AdminPricingPage() {
                       onChange={(e) => updateCoinPackage(index, "originalPrice", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
+                    <p className="text-xs text-muted-foreground mt-1">Strikethrough price</p>
                   </div>
                 </div>
               </motion.div>

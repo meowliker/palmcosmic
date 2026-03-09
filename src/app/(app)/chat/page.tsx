@@ -11,6 +11,7 @@ import { useUserStore } from "@/lib/user-store";
 import { supabase } from "@/lib/supabase";
 import { generateUserId } from "@/lib/user-profile";
 import Script from "next/script";
+import { usePricing } from "@/hooks/usePricing";
 
 interface Message {
   role: "user" | "assistant";
@@ -34,35 +35,12 @@ const suggestedQuestions = [
   "How can I improve my relationships?",
 ];
 
-const coinPackages = [
-  {
-    id: 1,
-    coins: 50,
-    price: 199,
-    discount: null,
-    popular: false,
-  },
-  {
-    id: 2,
-    coins: 150,
-    price: 509,
-    discount: 15,
-    popular: true,
-  },
-  {
-    id: 3,
-    coins: 300,
-    price: 839,
-    discount: 30,
-    popular: false,
-  },
-  {
-    id: 4,
-    coins: 500,
-    price: 1199,
-    discount: 40,
-    popular: false,
-  },
+// Fallback coin packages (used while loading from API)
+const defaultCoinPackages = [
+  { id: 1, coins: 50, price: 199, discount: null, popular: false },
+  { id: 2, coins: 150, price: 509, discount: 15, popular: true },
+  { id: 3, coins: 300, price: 839, discount: 30, popular: false },
+  { id: 4, coins: 500, price: 1199, discount: 40, popular: false },
 ];
 
 function formatMessage(text: string): React.ReactNode[] {
@@ -95,27 +73,31 @@ export default function ChatPage() {
 
   // Get coins from user store
   const { coins, deductCoins } = useUserStore();
-
-  // Map coin packages to PayU package IDs
-  const coinPackageMap: Record<number, { id: string; priceINR: number }> = {
-    50: { id: "coins-50", priceINR: 416 },
-    150: { id: "coins-150", priceINR: 1082 },
-    300: { id: "coins-300", priceINR: 1666 },
-    500: { id: "coins-500", priceINR: 2499 },
-  };
+  
+  // Get dynamic pricing from API
+  const { pricing } = usePricing();
+  
+  // Build coin packages from dynamic pricing or use defaults
+  const coinPackages = pricing?.coinPackages?.filter(p => p.active).map((p, i) => ({
+    id: i + 1,
+    coins: p.coins,
+    price: p.displayPrice || p.price,
+    discount: p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : null,
+    popular: i === 1, // Second package is popular
+    packageId: p.id,
+  })) || defaultCoinPackages.map(p => ({ ...p, packageId: `coins-${p.coins}` }));
 
   const handlePurchaseCoins = async (pkg: typeof coinPackages[0]) => {
     setPurchaseError("");
     setPurchasingPackage(pkg.id);
 
     try {
-      const coinPkg = coinPackageMap[pkg.coins] || { id: "coins-50", priceINR: 416 };
       const response = await fetch("/api/payu/initiate-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userId: generateUserId(),
-          packageId: coinPkg.id,
+          packageId: pkg.packageId,
           type: "coins",
           email: localStorage.getItem("astrorekha_email") || "",
           firstName: localStorage.getItem("astrorekha_name") || "Customer",

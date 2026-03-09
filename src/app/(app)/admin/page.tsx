@@ -13,6 +13,7 @@ import {
   TrendingUp,
   FlaskConical,
   Shield,
+  Tag,
 } from "lucide-react";
 
 interface AdminOption {
@@ -34,6 +35,15 @@ const adminOptions: AdminOption[] = [
     href: "/admin/revenue",
     color: "text-green-400",
     bgColor: "bg-green-500/20",
+  },
+  {
+    id: "pricing",
+    title: "Pricing Management",
+    description: "Manage bundle prices, display prices, upsells, and coin packages",
+    icon: Tag,
+    href: "/admin/pricing",
+    color: "text-blue-400",
+    bgColor: "bg-blue-500/20",
   },
   {
     id: "ab-tests",

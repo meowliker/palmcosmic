@@ -86,6 +86,23 @@ export async function GET(request: NextRequest) {
     // Get first color and first number only
     const firstColor = luckyColor.split(",")[0]?.trim() || "Blue";
     const firstNumber = luckyNumber.split(",")[0]?.trim() || "7";
+    
+    // Generate varied lucky time based on sign and date
+    const luckyTimes = [
+      "6:00 AM - 8:00 AM",
+      "8:30 AM - 10:30 AM",
+      "10:00 AM - 12:00 PM",
+      "11:00 AM - 1:00 PM",
+      "2:00 PM - 4:00 PM",
+      "4:30 PM - 6:30 PM",
+      "7:00 PM - 9:00 PM",
+      "9:00 PM - 11:00 PM",
+    ];
+    const today = new Date();
+    const dateOffset = today.getDate() + today.getMonth() * 31;
+    const signSeed = sign.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const dailySeed = signSeed + dateOffset;
+    const luckyTimeValue = luckyTimes[dailySeed % luckyTimes.length];
 
     // Extract insights from the response
     const insights = {
@@ -96,7 +113,7 @@ export async function GET(request: NextRequest) {
         tipForSingles || tipForCouples || "Connect with loved ones",
       ],
       donts: extractDonts(data),
-      luckyTime: "10:00 AM - 12:00 PM",
+      luckyTime: luckyTimeValue,
       luckyNumber: firstNumber,
       luckyColor: firstColor,
       mood: prediction.emotions ? "Balanced" : "Optimistic",
@@ -200,19 +217,32 @@ function generateFallbackInsights(sign: string) {
   
   const colors = ["Blue", "Green", "Yellow", "Purple", "Red", "Orange"];
   const moods = ["Optimistic", "Energetic", "Calm", "Confident", "Creative"];
+  const luckyTimes = [
+    "6:00 AM - 8:00 AM",
+    "8:30 AM - 10:30 AM",
+    "10:00 AM - 12:00 PM",
+    "11:00 AM - 1:00 PM",
+    "2:00 PM - 4:00 PM",
+    "4:30 PM - 6:30 PM",
+    "7:00 PM - 9:00 PM",
+    "9:00 PM - 11:00 PM",
+  ];
   
-  // Deterministic selection based on sign
+  // Deterministic selection based on sign AND current date for daily variation
+  const today = new Date();
+  const dateOffset = today.getDate() + today.getMonth() * 31;
   const seed = sign.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const dailySeed = seed + dateOffset;
   const index = seed % tips.length;
   
   return {
     dailyTip: tips[index],
     dos: dosList[index],
     donts: dontsList[index],
-    luckyTime: "10:00 AM - 12:00 PM",
-    luckyNumber: (seed % 9) + 1,
-    luckyColor: colors[seed % colors.length],
-    mood: moods[seed % moods.length],
+    luckyTime: luckyTimes[dailySeed % luckyTimes.length],
+    luckyNumber: (dailySeed % 99) + 1,
+    luckyColor: colors[dailySeed % colors.length],
+    mood: moods[dailySeed % moods.length],
     compatibility: null,
   };
 }

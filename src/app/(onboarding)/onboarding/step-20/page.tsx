@@ -40,8 +40,9 @@ const getBundleFeatures = (bundleId: string | null) => {
     features.push({ icon: "💕", title: "Compatibility Report", description: "Find your perfect cosmic match" });
   }
   
-  // All bundles include AI chat coins
-  features.push({ icon: "💬", title: "15 AI Chat Coins", description: "Ask Elysia anything about your destiny" });
+  // Bundle 3 (palm-birth-compat) gives 30 coins, others give 15
+  const coinCount = bundleId === "palm-birth-compat" ? 30 : 15;
+  features.push({ icon: "💬", title: `${coinCount} AI Chat Coins`, description: "Ask Elysia anything about your destiny" });
   
   return features;
 };
