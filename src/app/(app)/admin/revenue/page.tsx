@@ -195,11 +195,11 @@ export default function AdminRevenuePage() {
         return;
       }
 
-      let url = `/api/admin/revenue?token=${token}`;
+      let url = `/api/admin/revenue?token=${token}&_t=${Date.now()}`;
       if (selectedDate) {
         url += `&startDate=${selectedDate}&endDate=${selectedDate}`;
       }
-      const response = await fetch(url);
+      const response = await fetch(url, { cache: "no-store" });
 
       if (response.status === 401) {
         localStorage.removeItem("admin_session_token");
