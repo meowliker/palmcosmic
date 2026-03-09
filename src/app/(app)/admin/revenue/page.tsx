@@ -214,6 +214,9 @@ export default function AdminRevenuePage() {
       }
 
       const result = await response.json();
+      console.log("Admin revenue API response:", JSON.stringify(result, null, 2));
+      console.log("Total Revenue from API:", result.totalRevenue);
+      console.log("Unique Paying Users from API:", result.uniquePayingUsers);
       setData(result);
       setError(null);
     } catch (err: any) {
