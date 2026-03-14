@@ -109,28 +109,27 @@ export async function POST(request: NextRequest) {
     // Generate hash
     const hash = generateHash(payuParams, merchantSalt);
 
-    // Save payment record in background (non-blocking for faster checkout)
+    // Save payment record (await to ensure it's created before returning)
     const supabase = getSupabaseAdmin();
-    (async () => {
-      try {
-        await supabase.from("payments").insert({
-          id: `pay_${txnId}`,
-          payu_txn_id: txnId,
-          user_id: userId || null,
-          type,
-          bundle_id: bundleId || packageId || null,
-          feature: metadata.feature || null,
-          coins: metadata.coins ? parseInt(metadata.coins) : null,
-          customer_email: email || null,
-          amount: amount * 100, // Store in paise for consistency
-          currency: "INR",
-          payment_status: "created",
-          created_at: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.error("Failed to save payment record:", err);
-      }
-    })();
+    const { error: paymentError } = await supabase.from("payments").insert({
+      id: `pay_${txnId}`,
+      payu_txn_id: txnId,
+      user_id: userId || null,
+      type,
+      bundle_id: bundleId || packageId || null,
+      feature: metadata.feature || null,
+      coins: metadata.coins ? parseInt(metadata.coins) : null,
+      customer_email: email || null,
+      amount: Math.round(amount * 100), // Store in paise for consistency
+      currency: "INR",
+      payment_status: "created",
+      created_at: new Date().toISOString(),
+    });
+    
+    if (paymentError) {
+      console.error("Failed to save payment record:", paymentError);
+      // Don't fail the request - payment can still proceed
+    }
 
     return NextResponse.json({
       txnId,

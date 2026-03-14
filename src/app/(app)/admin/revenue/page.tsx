@@ -167,6 +167,33 @@ export default function AdminRevenuePage() {
   const [metaDatePreset, setMetaDatePreset] = useState<string>("last_30d");
   const [showMetaCampaigns, setShowMetaCampaigns] = useState(false);
 
+  // Backfill
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<string | null>(null);
+
+  const runBackfill = async () => {
+    try {
+      setBackfillLoading(true);
+      setBackfillResult(null);
+      const token = localStorage.getItem("admin_session_token");
+      const response = await fetch(`/api/admin/backfill-payments?token=${token}`, {
+        method: "POST",
+      });
+      const result = await response.json();
+      if (result.success) {
+        setBackfillResult(`Created ${result.summary.created} payment records, skipped ${result.summary.skipped}`);
+        // Refresh data after backfill
+        fetchData();
+      } else {
+        setBackfillResult(`Error: ${result.error}`);
+      }
+    } catch (err: any) {
+      setBackfillResult(`Error: ${err.message}`);
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
+
   const formatDateTime = (dateString: string | null) => {
     if (!dateString) return "-";
     const date = new Date(dateString);
@@ -409,6 +436,16 @@ export default function AdminRevenuePage() {
               >
                 ← Admin
               </button>
+              {data && data.totalPayments === 0 && data.uniquePayingUsers > 0 && (
+                <button
+                  onClick={runBackfill}
+                  disabled={backfillLoading}
+                  className="px-3 py-2 rounded-lg bg-yellow-500/20 hover:bg-yellow-500/30 transition-colors text-yellow-400 text-sm flex items-center gap-2"
+                >
+                  {backfillLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
+                  Recover Payments
+                </button>
+              )}
               <button
                 onClick={fetchData}
                 disabled={refreshing}
@@ -419,6 +456,11 @@ export default function AdminRevenuePage() {
             </div>
           </div>
           <p className="text-white/50 text-sm">Razorpay one-time purchase analytics</p>
+          {backfillResult && (
+            <div className={`mt-2 px-3 py-2 rounded-lg text-sm ${backfillResult.startsWith("Error") ? "bg-red-500/20 text-red-400" : "bg-green-500/20 text-green-400"}`}>
+              {backfillResult}
+            </div>
+          )}
         </div>
       </div>
 

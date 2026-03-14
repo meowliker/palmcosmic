@@ -117,9 +117,13 @@ export async function GET(request: NextRequest) {
       },
     };
 
-    // Fetch all users
+    // Fetch all users (include anon users who made payments)
     const { data: allUsersRaw } = await supabase.from("users").select("*");
-    const users = (allUsersRaw || []).filter(u => !u.id.startsWith("anon_"));
+    const users = allUsersRaw || [];
+    // Count registered users (non-anon) separately for display
+    const registeredUsers = users.filter(u => !u.id.startsWith("anon_"));
+    // Count all users with payment_status = paid as paying users
+    const paidUsers = users.filter(u => u.payment_status === "paid");
 
     const uniquePayingUsers = new Set(paidPayments.map(p => p.userId).filter(Boolean)).size;
     const arpu = uniquePayingUsers > 0 ? (totalRevenue / uniquePayingUsers).toFixed(2) : "0";
@@ -234,7 +238,9 @@ export async function GET(request: NextRequest) {
 
       // Users
       totalUsers: users.length,
-      uniquePayingUsers,
+      registeredUsers: registeredUsers.length,
+      paidUsersFromDB: paidUsers.length,
+      uniquePayingUsers: uniquePayingUsers || paidUsers.length,
 
       // Custom date range
       ...(customDateRevenue !== null && {

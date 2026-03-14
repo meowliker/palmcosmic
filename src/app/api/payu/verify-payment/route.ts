@@ -80,6 +80,8 @@ export async function POST(request: NextRequest) {
       .eq("payu_txn_id", txnid)
       .maybeSingle();
     
+    const amountInPaise = Math.round(parseFloat(amount) * 100);
+    
     if (existingPayment) {
       // Update existing payment record
       const { error: paymentUpdateError } = await supabase
@@ -90,9 +92,12 @@ export async function POST(request: NextRequest) {
           fulfilled_at: new Date().toISOString(),
         })
         .eq("payu_txn_id", txnid);
+      
+      if (paymentUpdateError) {
+        console.error("PayU verify - payment update error:", paymentUpdateError);
+      }
     } else {
       // Create payment record if it doesn't exist (initiate-payment may have failed)
-      const amountInPaise = Math.round(parseFloat(amount) * 100);
       const { error: paymentInsertError } = await supabase
         .from("payments")
         .insert({
@@ -111,6 +116,10 @@ export async function POST(request: NextRequest) {
           fulfilled_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
         });
+      
+      if (paymentInsertError) {
+        console.error("PayU verify - payment insert error:", paymentInsertError);
+      }
     }
 
     // Fulfill the purchase — unlock features for user
