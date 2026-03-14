@@ -455,7 +455,6 @@ export default function AdminRevenuePage() {
               </button>
             </div>
           </div>
-          <p className="text-white/50 text-sm">Razorpay one-time purchase analytics</p>
           {backfillResult && (
             <div className={`mt-2 px-3 py-2 rounded-lg text-sm ${backfillResult.startsWith("Error") ? "bg-red-500/20 text-red-400" : "bg-green-500/20 text-green-400"}`}>
               {backfillResult}
