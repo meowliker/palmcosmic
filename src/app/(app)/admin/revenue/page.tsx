@@ -29,11 +29,14 @@ import {
   MousePointerClick,
   Target,
   ChevronDown,
+  ChevronRight,
   LayoutDashboard,
   FileSpreadsheet,
   Facebook,
   TrendingDown,
 } from "lucide-react";
+
+import React from "react";
 
 // Tab type
 type TabType = "dashboard" | "profit-sheet" | "meta-details";
@@ -49,6 +52,62 @@ interface ProfitSheetRow {
   netRevenue: number;     // Revenue - GST - Ads Cost (INR)
   roas: number;           // Revenue / Ads Cost INR (if ads cost > 0)
   transactionCount: number;
+}
+
+// Meta Ads Breakdown interfaces
+interface MetaAdMetrics {
+  id: string;
+  name: string;
+  status: string;
+  spend: number;
+  budget: number | null;
+  impressions: number;
+  clicks: number;
+  cpc: number;
+  cpm: number;
+  ctr: number;
+  purchases: number;
+  costPerPurchase: number;
+  reach: number;
+}
+
+interface MetaAdData extends MetaAdMetrics {}
+
+interface MetaAdSetData extends MetaAdMetrics {
+  ads: MetaAdData[];
+}
+
+interface MetaCampaignData extends MetaAdMetrics {
+  adsets: MetaAdSetData[];
+}
+
+interface MetaBreakdownData {
+  configured: boolean;
+  exchangeRate: number;
+  datePreset: string;
+  dateRange: { start: string; end: string };
+  campaigns: MetaCampaignData[];
+  revenue: {
+    totalRevenue: number;
+    totalSales: number;
+    gst: number;
+    netRevenue: number;
+    totalSpendINR: number;
+    profit: number;
+    roas: number;
+  };
+  totals: {
+    spend: number;
+    spendINR: number;
+    impressions: number;
+    clicks: number;
+    purchases: number;
+    reach: number;
+    cpc: number;
+    cpm: number;
+    ctr: number;
+    costPerPurchase: number;
+  };
 }
 
 interface RevenueData {
@@ -207,6 +266,16 @@ export default function AdminRevenuePage() {
   const [profitSheetExchangeRate, setProfitSheetExchangeRate] = useState<number>(85);
   const [profitSheetCustomExchangeRate, setProfitSheetCustomExchangeRate] = useState<string>("");
 
+  // Meta Breakdown state
+  const [metaBreakdown, setMetaBreakdown] = useState<MetaBreakdownData | null>(null);
+  const [metaBreakdownLoading, setMetaBreakdownLoading] = useState(false);
+  const [metaBreakdownDatePreset, setMetaBreakdownDatePreset] = useState<string>("last_7d");
+  const [metaBreakdownExchangeRate, setMetaBreakdownExchangeRate] = useState<string>("");
+  const [metaBreakdownStartDate, setMetaBreakdownStartDate] = useState<string>("");
+  const [metaBreakdownEndDate, setMetaBreakdownEndDate] = useState<string>("");
+  const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
+  const [expandedAdsets, setExpandedAdsets] = useState<Set<string>>(new Set());
+
   // Backfill
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<string | null>(null);
@@ -363,6 +432,71 @@ export default function AdminRevenuePage() {
     }
   };
 
+  // Fetch Meta Breakdown data
+  const fetchMetaBreakdown = async (customRate?: number, startDate?: string, endDate?: string) => {
+    try {
+      setMetaBreakdownLoading(true);
+      const token = localStorage.getItem("admin_session_token");
+      if (!token) return;
+      
+      let url = `/api/admin/meta-ads-breakdown?token=${token}`;
+      
+      // Use custom dates if provided, otherwise use preset
+      const useStartDate = startDate || metaBreakdownStartDate;
+      const useEndDate = endDate || metaBreakdownEndDate;
+      
+      if (useStartDate && useEndDate) {
+        url += `&startDate=${useStartDate}&endDate=${useEndDate}`;
+      } else {
+        url += `&datePreset=${metaBreakdownDatePreset}`;
+      }
+      
+      const rateToUse = customRate || (metaBreakdownExchangeRate ? parseFloat(metaBreakdownExchangeRate) : undefined);
+      if (rateToUse) {
+        url += `&exchangeRate=${rateToUse}`;
+      }
+      
+      const res = await fetch(url);
+      if (res.ok) {
+        const result = await res.json();
+        setMetaBreakdown(result);
+        if (result.exchangeRate && !metaBreakdownExchangeRate) {
+          setMetaBreakdownExchangeRate(result.exchangeRate.toFixed(2));
+        }
+      }
+    } catch (err) {
+      console.error("Meta breakdown fetch error:", err);
+    } finally {
+      setMetaBreakdownLoading(false);
+    }
+  };
+
+  // Toggle campaign expansion
+  const toggleCampaign = (campaignId: string) => {
+    setExpandedCampaigns(prev => {
+      const next = new Set(prev);
+      if (next.has(campaignId)) {
+        next.delete(campaignId);
+      } else {
+        next.add(campaignId);
+      }
+      return next;
+    });
+  };
+
+  // Toggle adset expansion
+  const toggleAdset = (adsetId: string) => {
+    setExpandedAdsets(prev => {
+      const next = new Set(prev);
+      if (next.has(adsetId)) {
+        next.delete(adsetId);
+      } else {
+        next.add(adsetId);
+      }
+      return next;
+    });
+  };
+
   useEffect(() => {
     fetchData();
     fetchMetaAds();
@@ -378,6 +512,13 @@ export default function AdminRevenuePage() {
       fetchProfitSheet();
     }
   }, [activeTab, profitSheetStartDate, profitSheetEndDate]);
+
+  // Fetch meta breakdown when tab changes or date preset changes
+  useEffect(() => {
+    if (activeTab === "meta-details") {
+      fetchMetaBreakdown();
+    }
+  }, [activeTab, metaBreakdownDatePreset]);
 
   if (loading) {
     return (
@@ -1300,16 +1441,24 @@ export default function AdminRevenuePage() {
 
         {/* Meta Details Tab Content */}
         {activeTab === "meta-details" && (
-          <MetaAdsSection
-            metaAds={metaAds}
-            metaLoading={metaLoading}
-            metaDatePreset={metaDatePreset}
-            setMetaDatePreset={setMetaDatePreset}
-            showMetaCampaigns={showMetaCampaigns}
-            setShowMetaCampaigns={setShowMetaCampaigns}
-            formatCurrency={formatCurrency}
-            onRefresh={() => fetchMetaAds()}
-            onCustomDateRefresh={(startDate, endDate) => fetchMetaAds(undefined, startDate, endDate)}
+          <MetaBreakdownTab
+            data={metaBreakdown}
+            loading={metaBreakdownLoading}
+            datePreset={metaBreakdownDatePreset}
+            setDatePreset={setMetaBreakdownDatePreset}
+            startDate={metaBreakdownStartDate}
+            setStartDate={setMetaBreakdownStartDate}
+            endDate={metaBreakdownEndDate}
+            setEndDate={setMetaBreakdownEndDate}
+            exchangeRate={metaBreakdownExchangeRate}
+            setExchangeRate={setMetaBreakdownExchangeRate}
+            expandedCampaigns={expandedCampaigns}
+            expandedAdsets={expandedAdsets}
+            toggleCampaign={toggleCampaign}
+            toggleAdset={toggleAdset}
+            onRefresh={() => fetchMetaBreakdown()}
+            onRefreshWithRate={(rate) => fetchMetaBreakdown(rate)}
+            onCustomDateRefresh={(start, end) => fetchMetaBreakdown(undefined, start, end)}
           />
         )}
       </div>
@@ -1593,6 +1742,370 @@ function ProfitSheetTab({
                     </tr>
                   </>
                 )}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Meta Breakdown Tab Component
+function MetaBreakdownTab({
+  data,
+  loading,
+  datePreset,
+  setDatePreset,
+  startDate,
+  setStartDate,
+  endDate,
+  setEndDate,
+  exchangeRate,
+  setExchangeRate,
+  expandedCampaigns,
+  expandedAdsets,
+  toggleCampaign,
+  toggleAdset,
+  onRefresh,
+  onRefreshWithRate,
+  onCustomDateRefresh,
+}: {
+  data: MetaBreakdownData | null;
+  loading: boolean;
+  datePreset: string;
+  setDatePreset: (v: string) => void;
+  startDate: string;
+  setStartDate: (v: string) => void;
+  endDate: string;
+  setEndDate: (v: string) => void;
+  exchangeRate: string;
+  setExchangeRate: (v: string) => void;
+  expandedCampaigns: Set<string>;
+  expandedAdsets: Set<string>;
+  toggleCampaign: (id: string) => void;
+  toggleAdset: (id: string) => void;
+  onRefresh: () => void;
+  onRefreshWithRate: (rate: number) => void;
+  onCustomDateRefresh: (start: string, end: string) => void;
+}) {
+  const formatUSD = (value: number) => `$${value.toFixed(2)}`;
+  const formatINR = (value: number) => {
+    const rate = exchangeRate ? parseFloat(exchangeRate) : 85;
+    return `₹${(value * rate).toFixed(2)}`;
+  };
+  const formatPercent = (value: number) => `${value.toFixed(2)}%`;
+
+  // For per-campaign breakdown, we estimate using avg order value since we don't have per-campaign revenue
+  const AVG_ORDER_VALUE = data?.revenue?.totalSales && data?.revenue?.totalRevenue 
+    ? data.revenue.totalRevenue / data.revenue.totalSales 
+    : 1500;
+
+  // Calculate estimated profit per campaign: (Purchases × Avg Order Value) - Spend in INR
+  const calculateEstimatedProfit = (purchases: number, spend: number) => {
+    const rate = exchangeRate ? parseFloat(exchangeRate) : 85;
+    const estimatedRevenue = purchases * AVG_ORDER_VALUE;
+    const spendINR = spend * rate;
+    return estimatedRevenue - spendINR;
+  };
+
+  // Calculate estimated ROAS per campaign
+  const calculateEstimatedROAS = (purchases: number, spend: number) => {
+    if (spend === 0 || purchases === 0) return "-";
+    const rate = exchangeRate ? parseFloat(exchangeRate) : 85;
+    const estimatedRevenue = purchases * AVG_ORDER_VALUE;
+    const spendINR = spend * rate;
+    if (spendINR === 0) return "-";
+    return (estimatedRevenue / spendINR).toFixed(2);
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">Quick Select</label>
+            <select
+              value={datePreset}
+              onChange={(e) => {
+                setDatePreset(e.target.value);
+                setStartDate("");
+                setEndDate("");
+              }}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+            >
+              <option value="today">Today</option>
+              <option value="yesterday">Yesterday</option>
+              <option value="last_3d">Last 3 Days</option>
+              <option value="last_7d">Last 7 Days</option>
+              <option value="last_14d">Last 14 Days</option>
+              <option value="last_30d">Last 30 Days</option>
+              <option value="last_60d">Last 60 Days</option>
+              <option value="last_90d">Last 90 Days</option>
+              <option value="this_week">This Week</option>
+              <option value="last_week">Last Week</option>
+              <option value="this_month">This Month</option>
+              <option value="last_month">Last Month</option>
+              <option value="this_quarter">This Quarter</option>
+              <option value="last_quarter">Last Quarter</option>
+              <option value="this_year">This Year</option>
+              <option value="last_year">Last Year</option>
+              <option value="maximum">All Time</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">Or Custom Range</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+              />
+              <span className="text-white/30">to</span>
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+              />
+              <button
+                onClick={() => {
+                  if (startDate && endDate) {
+                    onCustomDateRefresh(startDate, endDate);
+                  }
+                }}
+                disabled={loading || !startDate || !endDate}
+                className="px-3 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-sm rounded-lg transition-colors disabled:opacity-50"
+              >
+                Go
+              </button>
+            </div>
+          </div>
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">USD to INR Rate</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                step="0.01"
+                value={exchangeRate}
+                onChange={(e) => setExchangeRate(e.target.value)}
+                className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+                placeholder="85.00"
+              />
+              <button
+                onClick={() => {
+                  const rate = parseFloat(exchangeRate);
+                  if (rate > 0) onRefreshWithRate(rate);
+                }}
+                disabled={loading}
+                className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm rounded-lg transition-colors disabled:opacity-50"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="px-4 py-2 bg-primary hover:bg-primary/80 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+        <p className="text-white/30 text-xs mt-3">
+          Click on campaigns to expand and see adsets. Click on adsets to see individual ads.
+          {data?.dateRange && ` | Date Range: ${data.dateRange.start} to ${data.dateRange.end}`}
+        </p>
+      </div>
+
+      {/* Revenue & Profit Summary */}
+      {data?.revenue && (
+        <div className="bg-gradient-to-r from-[#1A2235] to-[#1E2942] rounded-xl p-5 border border-white/10">
+          <h3 className="text-white/70 text-sm font-semibold mb-4">Revenue & Profit Summary</h3>
+          <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
+            <div>
+              <p className="text-white/40 text-xs mb-1">Total Revenue</p>
+              <p className="text-green-400 text-xl font-bold">₹{data.revenue.totalRevenue.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-white/40 text-xs mb-1">Total Sales</p>
+              <p className="text-white text-xl font-bold">{data.revenue.totalSales}</p>
+            </div>
+            <div>
+              <p className="text-white/40 text-xs mb-1">GST (5%)</p>
+              <p className="text-amber-400 text-lg font-bold">₹{data.revenue.gst.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-white/40 text-xs mb-1">Net Revenue</p>
+              <p className="text-green-400/80 text-lg font-bold">₹{data.revenue.netRevenue.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-white/40 text-xs mb-1">Ad Spend (INR)</p>
+              <p className="text-red-400 text-xl font-bold">₹{data.revenue.totalSpendINR.toLocaleString()}</p>
+            </div>
+            <div>
+              <p className="text-white/40 text-xs mb-1">Profit</p>
+              <p className={`text-xl font-bold ${data.revenue.profit >= 0 ? "text-green-400" : "text-red-400"}`}>
+                {data.revenue.profit >= 0 ? "" : "-"}₹{Math.abs(data.revenue.profit).toLocaleString()}
+              </p>
+            </div>
+            <div>
+              <p className="text-white/40 text-xs mb-1">ROAS</p>
+              <p className={`text-xl font-bold ${data.revenue.roas >= 1 ? "text-green-400" : data.revenue.roas > 0 ? "text-amber-400" : "text-white/40"}`}>
+                {data.revenue.roas > 0 ? data.revenue.roas.toFixed(2) : "-"}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Campaign Metrics Summary */}
+      {data?.totals && (
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+            <p className="text-white/50 text-xs mb-1">Total Spend (USD)</p>
+            <p className="text-red-400 text-xl font-bold">{formatUSD(data.totals.spend)}</p>
+          </div>
+          <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+            <p className="text-white/50 text-xs mb-1">Meta Purchases</p>
+            <p className="text-blue-400 text-xl font-bold">{data.totals.purchases}</p>
+          </div>
+          <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+            <p className="text-white/50 text-xs mb-1">CPA (Cost/Purchase)</p>
+            <p className="text-amber-400 text-xl font-bold">
+              {data.totals.costPerPurchase > 0 ? formatINR(data.totals.costPerPurchase) : "-"}
+            </p>
+          </div>
+          <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+            <p className="text-white/50 text-xs mb-1">CPM</p>
+            <p className="text-white/70 text-xl font-bold">{formatINR(data.totals.cpm)}</p>
+          </div>
+          <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+            <p className="text-white/50 text-xs mb-1">CTR</p>
+            <p className="text-blue-400 text-xl font-bold">{formatPercent(data.totals.ctr)}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Campaigns Table */}
+      <div className="bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            <span className="ml-2 text-white/60">Loading campaigns...</span>
+          </div>
+        ) : !data?.campaigns?.length ? (
+          <div className="text-center text-white/40 py-12">
+            No campaign data available
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-white/10 bg-white/5">
+                  <th className="text-left text-white/70 text-xs font-semibold px-4 py-3 w-8"></th>
+                  <th className="text-left text-white/70 text-xs font-semibold px-4 py-3">Name</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Spend</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Budget</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">ROAS</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Profit</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Purchases</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">CPC</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">CPA</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">CPM</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">CTR</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.campaigns.map((campaign) => (
+                  <React.Fragment key={campaign.id}>
+                    {/* Campaign Row */}
+                    <tr 
+                      className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
+                      onClick={() => toggleCampaign(campaign.id)}
+                    >
+                      <td className="px-4 py-3">
+                        <ChevronRight className={`w-4 h-4 text-white/40 transition-transform ${expandedCampaigns.has(campaign.id) ? "rotate-90" : ""}`} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${campaign.status === "ACTIVE" ? "bg-green-400" : "bg-gray-400"}`} />
+                          <span className="text-white font-medium">{campaign.name}</span>
+                        </div>
+                      </td>
+                      <td className="text-red-400 px-4 py-3 text-right">{formatINR(campaign.spend)}</td>
+                      <td className="text-white/60 px-4 py-3 text-right">{campaign.budget ? formatINR(campaign.budget) : "-"}</td>
+                      <td className="text-green-400 px-4 py-3 text-right">{calculateEstimatedROAS(campaign.purchases, campaign.spend)}</td>
+                      <td className={`px-4 py-3 text-right ${calculateEstimatedProfit(campaign.purchases, campaign.spend) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {calculateEstimatedProfit(campaign.purchases, campaign.spend) >= 0 ? "" : "-"}₹{Math.abs(calculateEstimatedProfit(campaign.purchases, campaign.spend)).toFixed(2)}
+                      </td>
+                      <td className="text-white px-4 py-3 text-right">{campaign.purchases}</td>
+                      <td className="text-white/60 px-4 py-3 text-right">{formatINR(campaign.cpc)}</td>
+                      <td className="text-amber-400 px-4 py-3 text-right">{campaign.costPerPurchase > 0 ? formatINR(campaign.costPerPurchase) : "-"}</td>
+                      <td className="text-white/60 px-4 py-3 text-right">{formatINR(campaign.cpm)}</td>
+                      <td className="text-blue-400 px-4 py-3 text-right">{formatPercent(campaign.ctr)}</td>
+                    </tr>
+
+                    {/* Adsets (expanded) */}
+                    {expandedCampaigns.has(campaign.id) && campaign.adsets?.map((adset) => (
+                      <React.Fragment key={adset.id}>
+                        {/* Adset Row */}
+                        <tr 
+                          className="border-b border-white/5 bg-white/[0.02] hover:bg-white/5 cursor-pointer"
+                          onClick={(e) => { e.stopPropagation(); toggleAdset(adset.id); }}
+                        >
+                          <td className="px-4 py-3 pl-8">
+                            <ChevronRight className={`w-4 h-4 text-white/30 transition-transform ${expandedAdsets.has(adset.id) ? "rotate-90" : ""}`} />
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2 pl-4">
+                              <span className={`w-1.5 h-1.5 rounded-full ${adset.status === "ACTIVE" ? "bg-green-400" : "bg-gray-400"}`} />
+                              <span className="text-white/80">{adset.name}</span>
+                            </div>
+                          </td>
+                          <td className="text-red-400/80 px-4 py-3 text-right">{formatINR(adset.spend)}</td>
+                          <td className="text-white/50 px-4 py-3 text-right">{adset.budget ? formatINR(adset.budget) : "-"}</td>
+                          <td className="text-green-400/80 px-4 py-3 text-right">{calculateEstimatedROAS(adset.purchases, adset.spend)}</td>
+                          <td className={`px-4 py-3 text-right ${calculateEstimatedProfit(adset.purchases, adset.spend) >= 0 ? "text-green-400/80" : "text-red-400/80"}`}>
+                            {calculateEstimatedProfit(adset.purchases, adset.spend) >= 0 ? "" : "-"}₹{Math.abs(calculateEstimatedProfit(adset.purchases, adset.spend)).toFixed(2)}
+                          </td>
+                          <td className="text-white/80 px-4 py-3 text-right">{adset.purchases}</td>
+                          <td className="text-white/50 px-4 py-3 text-right">{formatINR(adset.cpc)}</td>
+                          <td className="text-amber-400/80 px-4 py-3 text-right">{adset.costPerPurchase > 0 ? formatINR(adset.costPerPurchase) : "-"}</td>
+                          <td className="text-white/50 px-4 py-3 text-right">{formatINR(adset.cpm)}</td>
+                          <td className="text-blue-400/80 px-4 py-3 text-right">{formatPercent(adset.ctr)}</td>
+                        </tr>
+
+                        {/* Ads (expanded) */}
+                        {expandedAdsets.has(adset.id) && adset.ads?.map((ad) => (
+                          <tr key={ad.id} className="border-b border-white/5 bg-white/[0.01]">
+                            <td className="px-4 py-3 pl-12"></td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2 pl-8">
+                                <span className={`w-1 h-1 rounded-full ${ad.status === "ACTIVE" ? "bg-green-400" : "bg-gray-400"}`} />
+                                <span className="text-white/60 text-xs">{ad.name}</span>
+                              </div>
+                            </td>
+                            <td className="text-red-400/60 px-4 py-3 text-right text-xs">{formatINR(ad.spend)}</td>
+                            <td className="text-white/40 px-4 py-3 text-right text-xs">-</td>
+                            <td className="text-green-400/60 px-4 py-3 text-right text-xs">{calculateEstimatedROAS(ad.purchases, ad.spend)}</td>
+                            <td className={`px-4 py-3 text-right text-xs ${calculateEstimatedProfit(ad.purchases, ad.spend) >= 0 ? "text-green-400/60" : "text-red-400/60"}`}>
+                              {calculateEstimatedProfit(ad.purchases, ad.spend) >= 0 ? "" : "-"}₹{Math.abs(calculateEstimatedProfit(ad.purchases, ad.spend)).toFixed(2)}
+                            </td>
+                            <td className="text-white/60 px-4 py-3 text-right text-xs">{ad.purchases}</td>
+                            <td className="text-white/40 px-4 py-3 text-right text-xs">{formatINR(ad.cpc)}</td>
+                            <td className="text-amber-400/60 px-4 py-3 text-right text-xs">{ad.costPerPurchase > 0 ? formatINR(ad.costPerPurchase) : "-"}</td>
+                            <td className="text-white/40 px-4 py-3 text-right text-xs">{formatINR(ad.cpm)}</td>
+                            <td className="text-blue-400/60 px-4 py-3 text-right text-xs">{formatPercent(ad.ctr)}</td>
+                          </tr>
+                        ))}
+                      </React.Fragment>
+                    ))}
+                  </React.Fragment>
+                ))}
               </tbody>
             </table>
           </div>
