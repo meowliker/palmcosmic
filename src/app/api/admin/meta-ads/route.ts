@@ -13,6 +13,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const token = searchParams.get("token");
     const datePreset = searchParams.get("datePreset") || "last_30d";
+    const customStartDate = searchParams.get("startDate"); // YYYY-MM-DD
+    const customEndDate = searchParams.get("endDate");     // YYYY-MM-DD
 
     if (!token) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -39,8 +41,16 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    // Build date range params - use custom dates if provided, otherwise use preset
+    let dateParams: string;
+    if (customStartDate && customEndDate) {
+      dateParams = `time_range={"since":"${customStartDate}","until":"${customEndDate}"}`;
+    } else {
+      dateParams = `date_preset=${datePreset}`;
+    }
+
     // Fetch account-level insights
-    const insightsUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,cost_per_action_type,conversions,cost_per_conversion&date_preset=${datePreset}&access_token=${metaAccessToken}`;
+    const insightsUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,cost_per_action_type,conversions,cost_per_conversion&${dateParams}&access_token=${metaAccessToken}`;
     
     const insightsRes = await fetch(insightsUrl);
     const insightsData = await insightsRes.json();
@@ -55,13 +65,13 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch campaign-level breakdown
-    const campaignsUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=campaign_name,campaign_id,spend,impressions,clicks,cpc,cpm,ctr,reach,actions,cost_per_action_type&level=campaign&date_preset=${datePreset}&limit=50&access_token=${metaAccessToken}`;
+    const campaignsUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=campaign_name,campaign_id,spend,impressions,clicks,cpc,cpm,ctr,reach,actions,cost_per_action_type&level=campaign&${dateParams}&limit=50&access_token=${metaAccessToken}`;
 
     const campaignsRes = await fetch(campaignsUrl);
     const campaignsData = await campaignsRes.json();
 
     // Fetch daily breakdown for chart
-    const dailyUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend,impressions,clicks,reach,actions&time_increment=1&date_preset=${datePreset}&limit=90&access_token=${metaAccessToken}`;
+    const dailyUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend,impressions,clicks,reach,actions&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
 
     const dailyRes = await fetch(dailyUrl);
     const dailyData = await dailyRes.json();
@@ -151,6 +161,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       configured: true,
       datePreset,
+      customDateRange: customStartDate && customEndDate ? { start: customStartDate, end: customEndDate } : null,
+      timezone: "Ad Account Timezone (typically IST for India accounts)",
       account: {
         spend: parseFloat(accountInsights.spend || "0"),
         impressions: parseInt(accountInsights.impressions || "0"),

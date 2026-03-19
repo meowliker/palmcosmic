@@ -17,6 +17,8 @@ export async function GET(request: NextRequest) {
     const token = searchParams.get("token");
     const startDateParam = searchParams.get("startDate");
     const endDateParam = searchParams.get("endDate");
+    const startTimeParam = searchParams.get("startTime") || "00:00";
+    const endTimeParam = searchParams.get("endTime") || "23:59";
 
     if (!token) {
       return NextResponse.json({ error: "Unauthorized - No token provided" }, { status: 401 });
@@ -42,11 +44,16 @@ export async function GET(request: NextRequest) {
     const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
 
-    // Fetch all paid payments (Razorpay)
+    // Fetch all payments (explicitly set high limit to get all records)
     const { data: allPaymentsRaw, error: paymentsError } = await supabase
       .from("payments")
       .select("*")
-      .order("created_at", { ascending: false });
+      .order("created_at", { ascending: false })
+      .limit(1000);
+
+    if (paymentsError) {
+      console.error("Payments fetch error:", paymentsError);
+    }
 
     const payments: any[] = (allPaymentsRaw || []).map((p: any) => ({
       id: p.id,
@@ -57,11 +64,35 @@ export async function GET(request: NextRequest) {
       userId: p.user_id,
     }));
 
+    // Log payment statuses for debugging
+    const statusCounts: Record<string, number> = {};
+    const typeCounts: Record<string, number> = {};
+    payments.forEach(p => {
+      const status = p.payment_status || "unknown";
+      const type = p.type || "unknown";
+      statusCounts[status] = (statusCounts[status] || 0) + 1;
+      typeCounts[type] = (typeCounts[type] || 0) + 1;
+    });
+    console.log("Payment status breakdown:", statusCounts);
+    console.log("Payment type breakdown:", typeCounts);
+    console.log("Total payments in DB:", payments.length);
+    
+    // Log first few payments for debugging
+    if (payments.length > 0) {
+      console.log("Sample payment:", JSON.stringify(payments[0]).slice(0, 500));
+    }
+
     // Helper: amount is stored in paise, convert to INR
     const getAmountINR = (p: any) => (p.amount || 0) / 100;
 
-    // Only count paid payments for revenue
-    const paidPayments = payments.filter(p => p.payment_status === "paid");
+    // Count all successful payments (paid, success, captured)
+    const paidPayments = payments.filter(p => 
+      p.payment_status === "paid" || 
+      p.payment_status === "success" || 
+      p.payment_status === "captured"
+    );
+    
+    console.log("Paid payments count:", paidPayments.length);
 
     // Revenue metrics
     const totalRevenue = paidPayments.reduce((sum, p) => sum + getAmountINR(p), 0);
@@ -93,9 +124,9 @@ export async function GET(request: NextRequest) {
       ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1)
       : "N/A";
 
-    // Revenue by type
+    // Revenue by type (handle both "bundle" and "bundle_payment" types)
     const revenueByType = {
-      bundle: paidPayments.filter(p => p.type === "bundle").reduce((sum, p) => sum + getAmountINR(p), 0),
+      bundle: paidPayments.filter(p => p.type === "bundle" || p.type === "bundle_payment").reduce((sum, p) => sum + getAmountINR(p), 0),
       upsell: paidPayments.filter(p => p.type === "upsell").reduce((sum, p) => sum + getAmountINR(p), 0),
       coins: paidPayments.filter(p => p.type === "coins").reduce((sum, p) => sum + getAmountINR(p), 0),
       report: paidPayments.filter(p => p.type === "report").reduce((sum, p) => sum + getAmountINR(p), 0),
@@ -179,10 +210,11 @@ export async function GET(request: NextRequest) {
     let customDateTransactions: any[] = [];
 
     if (startDateParam) {
-      const customStart = new Date(startDateParam + "T00:00:00");
+      // Use time parameters for precise filtering
+      const customStart = new Date(`${startDateParam}T${startTimeParam}:00`);
       const customEnd = endDateParam
-        ? new Date(endDateParam + "T23:59:59.999")
-        : new Date(startDateParam + "T23:59:59.999");
+        ? new Date(`${endDateParam}T${endTimeParam}:59.999`)
+        : new Date(`${startDateParam}T${endTimeParam}:59.999`);
 
       const customPayments = paidPayments.filter(p => {
         if (!p.createdAt) return false;

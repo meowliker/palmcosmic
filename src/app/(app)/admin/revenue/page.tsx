@@ -151,11 +151,18 @@ export default function AdminRevenuePage() {
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDateRange, setFilterDateRange] = useState<string>("all");
 
-  // Date picker
-  const [selectedDate, setSelectedDate] = useState<string>(
+  // Date picker with time and timezone
+  const [selectedStartDate, setSelectedStartDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
+  const [selectedEndDate, setSelectedEndDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+  const [selectedStartTime, setSelectedStartTime] = useState<string>("11:30");
+  const [selectedEndTime, setSelectedEndTime] = useState<string>("11:30");
+  const [selectedTimezone, setSelectedTimezone] = useState<string>("ist");
   const [dateLoading, setDateLoading] = useState(false);
+  const [usePayU, setUsePayU] = useState<boolean>(true); // Default to PayU for accurate data
 
   // Sorting
   const [sortField, setSortField] = useState<string>("date");
@@ -222,9 +229,18 @@ export default function AdminRevenuePage() {
         return;
       }
 
-      let url = `/api/admin/revenue?token=${token}&_t=${Date.now()}`;
-      if (selectedDate) {
-        url += `&startDate=${selectedDate}&endDate=${selectedDate}`;
+      let url: string;
+      if (usePayU) {
+        url = `/api/admin/revenue-payu?token=${token}&_t=${Date.now()}`;
+        url += `&startDate=${selectedStartDate}&endDate=${selectedEndDate}`;
+        url += `&startTime=${selectedStartTime}&endTime=${selectedEndTime}`;
+        url += `&timezone=${selectedTimezone}`;
+      } else {
+        url = `/api/admin/revenue?token=${token}&_t=${Date.now()}`;
+        if (selectedStartDate) {
+          url += `&startDate=${selectedStartDate}&endDate=${selectedEndDate}`;
+          url += `&startTime=${selectedStartTime}&endTime=${selectedEndTime}`;
+        }
       }
       const response = await fetch(url, { cache: "no-store" });
 
@@ -237,13 +253,14 @@ export default function AdminRevenuePage() {
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to fetch revenue data");
+        throw new Error(errorData.error || errorData.details || "Failed to fetch revenue data");
       }
 
       const result = await response.json();
       setData(result);
       setError(null);
     } catch (err: any) {
+      console.error("Revenue fetch error:", err.message);
       setError(err.message || "Failed to load data");
     } finally {
       setLoading(false);
@@ -252,13 +269,23 @@ export default function AdminRevenuePage() {
     }
   };
 
-  const fetchMetaAds = async (preset?: string) => {
+  const fetchMetaAds = async (preset?: string, customStart?: string, customEnd?: string) => {
     try {
       setMetaLoading(true);
       const token = localStorage.getItem("admin_session_token");
       if (!token) return;
-      const dp = preset || metaDatePreset;
-      const res = await fetch(`/api/admin/meta-ads?token=${token}&datePreset=${dp}`);
+      
+      let url = `/api/admin/meta-ads?token=${token}`;
+      
+      // Use custom date range if provided
+      if (customStart && customEnd) {
+        url += `&startDate=${customStart}&endDate=${customEnd}`;
+      } else {
+        const dp = preset || metaDatePreset;
+        url += `&datePreset=${dp}`;
+      }
+      
+      const res = await fetch(url);
       if (res.ok) {
         const result = await res.json();
         setMetaAds(result);
@@ -273,7 +300,7 @@ export default function AdminRevenuePage() {
   useEffect(() => {
     fetchData();
     fetchMetaAds();
-  }, [router, selectedDate]);
+  }, [router, selectedStartDate, selectedEndDate, selectedStartTime, selectedEndTime, selectedTimezone, usePayU]);
 
   useEffect(() => {
     fetchMetaAds(metaDatePreset);
@@ -627,28 +654,153 @@ export default function AdminRevenuePage() {
           </div>
         </section>
 
+        {/* Date Range Selector with Time & Timezone */}
+        <section className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
+              <Calendar className="w-4 h-4" /> Date Range & Data Source
+            </h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setUsePayU(!usePayU)}
+                className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${usePayU ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/60'}`}
+              >
+                {usePayU ? '✓ PayU (Live)' : '✓ Supabase'}
+              </button>
+            </div>
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Start Date & Time */}
+            <div>
+              <label className="text-white/50 text-xs mb-2 block">Start Date</label>
+              <input
+                type="date"
+                value={selectedStartDate}
+                min="2026-03-13"
+                onChange={(e) => setSelectedStartDate(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="text-white/50 text-xs mb-2 block">Start Time</label>
+              <input
+                type="time"
+                value={selectedStartTime}
+                onChange={(e) => setSelectedStartTime(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
+              />
+            </div>
+            
+            {/* End Date & Time */}
+            <div>
+              <label className="text-white/50 text-xs mb-2 block">End Date</label>
+              <input
+                type="date"
+                value={selectedEndDate}
+                min="2026-03-13"
+                onChange={(e) => setSelectedEndDate(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
+              />
+            </div>
+            <div>
+              <label className="text-white/50 text-xs mb-2 block">End Time</label>
+              <input
+                type="time"
+                value={selectedEndTime}
+                onChange={(e) => setSelectedEndTime(e.target.value)}
+                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
+              />
+            </div>
+          </div>
+          
+          {/* Timezone & Quick Presets */}
+          <div className="mt-4 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <label className="text-white/50 text-xs">Timezone:</label>
+              <select
+                value={selectedTimezone}
+                onChange={(e) => setSelectedTimezone(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary/50"
+              >
+                <option value="costa_rica">Costa Rica (UTC-6)</option>
+                <option value="ist">India (IST UTC+5:30)</option>
+              </select>
+            </div>
+            
+            <div className="flex items-center gap-2 ml-auto">
+              <button
+                onClick={() => {
+                  const today = new Date().toISOString().split("T")[0];
+                  setSelectedStartDate(today);
+                  setSelectedEndDate(today);
+                  setSelectedStartTime("00:00");
+                  setSelectedEndTime("23:59");
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                Today
+              </button>
+              <button
+                onClick={() => {
+                  const today = new Date();
+                  const yesterday = new Date(today);
+                  yesterday.setDate(yesterday.getDate() - 1);
+                  setSelectedStartDate(yesterday.toISOString().split("T")[0]);
+                  setSelectedEndDate(yesterday.toISOString().split("T")[0]);
+                  setSelectedStartTime("00:00");
+                  setSelectedEndTime("23:59");
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                Yesterday
+              </button>
+              <button
+                onClick={() => {
+                  const today = new Date();
+                  const weekAgo = new Date(today);
+                  weekAgo.setDate(weekAgo.getDate() - 7);
+                  setSelectedStartDate(weekAgo.toISOString().split("T")[0]);
+                  setSelectedEndDate(today.toISOString().split("T")[0]);
+                  setSelectedStartTime("00:00");
+                  setSelectedEndTime("23:59");
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                Last 7 Days
+              </button>
+              <button
+                onClick={() => {
+                  setSelectedStartDate("2026-03-13");
+                  setSelectedEndDate(new Date().toISOString().split("T")[0]);
+                  setSelectedStartTime("00:00");
+                  setSelectedEndTime("23:59");
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
+              >
+                All Time
+              </button>
+            </div>
+          </div>
+          
+          {/* Info about timezone */}
+          {selectedTimezone === "costa_rica" && (
+            <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+              <p className="text-blue-400 text-xs">
+                📍 Times are in Costa Rica timezone (UTC-6). IST is 11.5 hours ahead.
+                <br />
+                Example: 11:30 AM Costa Rica = 11:00 PM IST (same day) → 12:00 AM IST (next day)
+              </p>
+            </div>
+          )}
+        </section>
+
         {/* Revenue by Period */}
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
-              <Calendar className="w-4 h-4" /> Revenue by Period
+              <Calendar className="w-4 h-4" /> Revenue Summary
             </h2>
-            <div className="flex items-center gap-2">
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-              />
-              {selectedDate !== new Date().toISOString().split("T")[0] && (
-                <button
-                  onClick={() => setSelectedDate(new Date().toISOString().split("T")[0])}
-                  className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
-                >
-                  Today
-                </button>
-              )}
-            </div>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 relative">
@@ -659,15 +811,14 @@ export default function AdminRevenuePage() {
               )}
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-1.5">
-                  <span className="text-white/50 text-xs">
-                    {selectedDate === new Date().toISOString().split("T")[0] ? "Today" : formatSelectedDate(selectedDate)}
-                  </span>
-                  <Tooltip content="Revenue for the selected date." />
+                  <span className="text-white/50 text-xs">Selected Range</span>
+                  <Tooltip content="Revenue for the selected date range." />
                 </div>
                 <span className="text-green-400"><IndianRupee className="w-4 h-4" /></span>
               </div>
               <p className="text-xl font-bold text-green-400">{formatCurrency(selectedDateRevenue)}</p>
               <p className="text-white/40 text-xs mt-1">{selectedDatePaymentCount} payments</p>
+              <p className="text-white/30 text-xs mt-1">{selectedStartDate} to {selectedEndDate}</p>
             </div>
             <MetricCard title="This Week" value={formatCurrency(data.revenueThisWeek)} tooltip="Revenue generated this week (Sunday to today)." />
             <MetricCard title="This Month" value={formatCurrency(data.revenueThisMonth)} tooltip="Revenue generated this month (1st to today)." />
@@ -685,7 +836,7 @@ export default function AdminRevenuePage() {
             <div className="mt-4 bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
               <div className="px-4 py-3 border-b border-white/10">
                 <p className="text-white/60 text-xs">
-                  {selectedDatePaymentCount} transaction{selectedDatePaymentCount !== 1 ? "s" : ""} on {formatSelectedDate(selectedDate)}
+                  {selectedDatePaymentCount} transaction{selectedDatePaymentCount !== 1 ? "s" : ""} from {selectedStartDate} to {selectedEndDate}
                 </p>
               </div>
               <div className="overflow-x-auto max-h-64 overflow-y-auto">
@@ -717,9 +868,9 @@ export default function AdminRevenuePage() {
               </div>
             </div>
           )}
-          {!dateLoading && selectedDateTransactions.length === 0 && selectedDate && (
+          {!dateLoading && selectedDateTransactions.length === 0 && selectedStartDate && (
             <div className="mt-4 bg-[#1A2235] rounded-xl p-4 border border-white/10 text-center">
-              <p className="text-white/40 text-sm">No transactions on {formatSelectedDate(selectedDate)}</p>
+              <p className="text-white/40 text-sm">No transactions from {selectedStartDate} to {selectedEndDate}</p>
             </div>
           )}
         </section>
@@ -734,6 +885,7 @@ export default function AdminRevenuePage() {
           setShowMetaCampaigns={setShowMetaCampaigns}
           formatCurrency={formatCurrency}
           onRefresh={() => fetchMetaAds()}
+          onCustomDateRefresh={(startDate, endDate) => fetchMetaAds(undefined, startDate, endDate)}
         />
 
         {/* Bundle Breakdown */}
@@ -1090,6 +1242,7 @@ function MetaAdsSection({
   setShowMetaCampaigns,
   formatCurrency,
   onRefresh,
+  onCustomDateRefresh,
 }: {
   metaAds: MetaAdsData | null;
   metaLoading: boolean;
@@ -1099,11 +1252,72 @@ function MetaAdsSection({
   setShowMetaCampaigns: (v: boolean) => void;
   formatCurrency: (v: string | number) => string;
   onRefresh: () => void;
+  onCustomDateRefresh: (startDate: string, endDate: string) => void;
 }) {
+  const [showInINR, setShowInINR] = useState(false);
+  const [exchangeRate, setExchangeRate] = useState<number>(93.32); // Default fallback
+  const [rateLoading, setRateLoading] = useState(false);
+  const [editingRate, setEditingRate] = useState(false);
+  const [rateInput, setRateInput] = useState<string>("93.32");
+  
+  // Custom date range for Meta Ads
+  const [useCustomDateRange, setUseCustomDateRange] = useState(false);
+  const [metaStartDate, setMetaStartDate] = useState<string>(
+    new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]
+  );
+  const [metaEndDate, setMetaEndDate] = useState<string>(
+    new Date().toISOString().split("T")[0]
+  );
+
+  // Fetch real-time exchange rate
+  const fetchExchangeRate = async () => {
+    try {
+      setRateLoading(true);
+      const res = await fetch("/api/exchange-rate");
+      if (res.ok) {
+        const data = await res.json();
+        if (data.rate) {
+          setExchangeRate(data.rate);
+          setRateInput(data.rate.toFixed(2));
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch exchange rate:", err);
+    } finally {
+      setRateLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchExchangeRate();
+  }, []);
+
+  const handleRateChange = (value: string) => {
+    setRateInput(value);
+    const num = parseFloat(value);
+    if (!isNaN(num) && num > 0) {
+      setExchangeRate(num);
+    }
+  };
+
   const formatNum = (n: number) => {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
     if (n >= 1000) return (n / 1000).toFixed(1) + "K";
     return n.toLocaleString();
+  };
+
+  const formatMetaCurrency = (value: number | string) => {
+    const num = typeof value === "string" ? parseFloat(value) : value;
+    if (showInINR) {
+      return new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+      }).format(num * exchangeRate);
+    }
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+    }).format(num);
   };
 
   const datePresetLabels: Record<string, string> = {
@@ -1118,30 +1332,84 @@ function MetaAdsSection({
     last_90d: "Last 90 Days",
   };
 
+  // Handle custom date range fetch
+  const handleCustomDateFetch = () => {
+    if (metaStartDate && metaEndDate) {
+      setUseCustomDateRange(true);
+      onCustomDateRefresh(metaStartDate, metaEndDate);
+    }
+  };
+
   return (
     <section>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
-          <Megaphone className="w-4 h-4" /> Meta / Facebook Ads
-        </h2>
-        <div className="flex items-center gap-2">
-          <select
-            value={metaDatePreset}
-            onChange={(e) => setMetaDatePreset(e.target.value)}
-            className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary/50"
-          >
-            {Object.entries(datePresetLabels).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
-            ))}
-          </select>
-          <button
-            onClick={onRefresh}
-            disabled={metaLoading}
-            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-          >
-            <RefreshCw className={`w-4 h-4 text-white ${metaLoading ? "animate-spin" : ""}`} />
-          </button>
+      <div className="flex flex-col gap-3 mb-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
+            <Megaphone className="w-4 h-4" /> Meta / Facebook Ads
+            <span className="text-white/30 text-xs ml-2">(Timezone: Ad Account - IST)</span>
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setUseCustomDateRange(!useCustomDateRange)}
+              className={`px-2 py-1 rounded text-xs transition-colors ${
+                useCustomDateRange 
+                  ? "bg-blue-500/30 text-blue-300 border border-blue-500/50" 
+                  : "bg-white/5 text-white/60 border border-white/10 hover:bg-white/10"
+              }`}
+            >
+              {useCustomDateRange ? "Custom Range" : "Custom Range"}
+            </button>
+            {!useCustomDateRange && (
+              <select
+                value={metaDatePreset}
+                onChange={(e) => setMetaDatePreset(e.target.value)}
+                className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary/50"
+              >
+                {Object.entries(datePresetLabels).map(([key, label]) => (
+                  <option key={key} value={key}>{label}</option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={onRefresh}
+              disabled={metaLoading}
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+            >
+              <RefreshCw className={`w-4 h-4 text-white ${metaLoading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </div>
+        
+        {/* Custom Date Range Picker */}
+        {useCustomDateRange && (
+          <div className="flex items-center gap-3 bg-white/5 rounded-lg p-3 border border-white/10">
+            <div className="flex items-center gap-2">
+              <label className="text-white/50 text-xs">From:</label>
+              <input
+                type="date"
+                value={metaStartDate}
+                onChange={(e) => setMetaStartDate(e.target.value)}
+                className="bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-white/50 text-xs">To:</label>
+              <input
+                type="date"
+                value={metaEndDate}
+                onChange={(e) => setMetaEndDate(e.target.value)}
+                className="bg-white/10 border border-white/20 rounded px-2 py-1 text-white text-sm focus:outline-none focus:border-blue-400"
+              />
+            </div>
+            <button
+              onClick={handleCustomDateFetch}
+              disabled={metaLoading}
+              className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded transition-colors disabled:opacity-50"
+            >
+              {metaLoading ? "Loading..." : "Apply"}
+            </button>
+          </div>
+        )}
       </div>
 
       {metaLoading && !metaAds && (
@@ -1181,10 +1449,38 @@ function MetaAdsSection({
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-white/50 text-xs">Ad Spend</span>
-                <IndianRupee className="w-4 h-4 text-blue-400" />
+                <button
+                  onClick={() => setShowInINR(!showInINR)}
+                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/20 hover:bg-blue-500/30 transition-colors text-blue-400 text-xs"
+                  title={showInINR ? `Click to show USD (Rate: $1 = ₹${exchangeRate.toFixed(2)})` : `Click to show INR (Rate: $1 = ₹${exchangeRate.toFixed(2)})`}
+                >
+                  {showInINR ? "₹" : "$"}
+                  <ArrowUpDown className="w-3 h-3" />
+                </button>
               </div>
-              <p className="text-xl font-bold text-blue-400">{formatCurrency(metaAds.account.spend)}</p>
+              <p className="text-xl font-bold text-blue-400">{formatMetaCurrency(metaAds.account.spend)}</p>
               <p className="text-white/40 text-xs mt-1">{datePresetLabels[metaDatePreset]}</p>
+              {showInINR && (
+                <div className="flex items-center gap-1 mt-2">
+                  <span className="text-white/30 text-xs">$1 = ₹</span>
+                  <input
+                    type="number"
+                    value={rateInput}
+                    onChange={(e) => handleRateChange(e.target.value)}
+                    className="w-16 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-400"
+                    step="0.01"
+                    min="1"
+                  />
+                  <button
+                    onClick={fetchExchangeRate}
+                    disabled={rateLoading}
+                    className="p-1 rounded bg-white/10 hover:bg-white/20 transition-colors"
+                    title="Fetch live rate"
+                  >
+                    <RefreshCw className={`w-3 h-3 text-white/60 ${rateLoading ? "animate-spin" : ""}`} />
+                  </button>
+                </div>
+              )}
             </motion.div>
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -1196,7 +1492,7 @@ function MetaAdsSection({
                 <Eye className="w-4 h-4 text-purple-400" />
               </div>
               <p className="text-xl font-bold text-purple-400">{formatNum(metaAds.account.impressions)}</p>
-              <p className="text-white/40 text-xs mt-1">CPM: {formatCurrency(metaAds.account.cpm)}</p>
+              <p className="text-white/40 text-xs mt-1">CPM: {formatMetaCurrency(metaAds.account.cpm)}</p>
             </motion.div>
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -1208,7 +1504,7 @@ function MetaAdsSection({
                 <MousePointerClick className="w-4 h-4 text-cyan-400" />
               </div>
               <p className="text-xl font-bold text-cyan-400">{formatNum(metaAds.account.linkClicks || metaAds.account.clicks)}</p>
-              <p className="text-white/40 text-xs mt-1">CPC: {formatCurrency(metaAds.account.costPerLinkClick || metaAds.account.cpc)}</p>
+              <p className="text-white/40 text-xs mt-1">CPC: {formatMetaCurrency(metaAds.account.costPerLinkClick || metaAds.account.cpc)}</p>
             </motion.div>
             <motion.div
               initial={{ opacity: 0, y: 10 }}
@@ -1238,14 +1534,14 @@ function MetaAdsSection({
               <p className="text-white/50 text-xs mb-1">Leads</p>
               <p className="text-lg font-semibold text-amber-400">{formatNum(metaAds.account.leads)}</p>
               {metaAds.account.costPerLead > 0 && (
-                <p className="text-white/40 text-xs">CPL: {formatCurrency(metaAds.account.costPerLead)}</p>
+                <p className="text-white/40 text-xs">CPL: {formatMetaCurrency(metaAds.account.costPerLead)}</p>
               )}
             </div>
             <div className="bg-[#1A2235] rounded-xl p-3 border border-white/10">
               <p className="text-white/50 text-xs mb-1">Purchases</p>
               <p className="text-lg font-semibold text-green-400">{formatNum(metaAds.account.purchases)}</p>
               {metaAds.account.costPerPurchase > 0 && (
-                <p className="text-white/40 text-xs">CPA: {formatCurrency(metaAds.account.costPerPurchase)}</p>
+                <p className="text-white/40 text-xs">CPA: {formatMetaCurrency(metaAds.account.costPerPurchase)}</p>
               )}
             </div>
             <div className="bg-[#1A2235] rounded-xl p-3 border border-white/10">
@@ -1273,7 +1569,7 @@ function MetaAdsSection({
                       style={{ height: `${Math.max((day.spend / maxSpend) * 100, 2)}%` }}
                     >
                       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-black/80 rounded text-xs text-white whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                        {day.date}: {formatCurrency(day.spend)}
+                        {day.date}: {formatMetaCurrency(day.spend)}
                         <br />
                         {formatNum(day.impressions)} imp • {formatNum(day.clicks)} clicks
                       </div>
@@ -1321,11 +1617,11 @@ function MetaAdsSection({
                       {metaAds.campaigns.map((c) => (
                         <tr key={c.id} className="border-b border-white/5 hover:bg-white/5">
                           <td className="text-white/80 text-sm px-4 py-2 max-w-[200px] truncate">{c.name}</td>
-                          <td className="text-blue-400 text-sm px-4 py-2 text-right font-medium">{formatCurrency(c.spend)}</td>
+                          <td className="text-blue-400 text-sm px-4 py-2 text-right font-medium">{formatMetaCurrency(c.spend)}</td>
                           <td className="text-white/70 text-sm px-4 py-2 text-right">{formatNum(c.impressions)}</td>
                           <td className="text-white/70 text-sm px-4 py-2 text-right">{formatNum(c.clicks)}</td>
                           <td className="text-white/70 text-sm px-4 py-2 text-right">{c.ctr.toFixed(2)}%</td>
-                          <td className="text-white/70 text-sm px-4 py-2 text-right">{formatCurrency(c.cpc)}</td>
+                          <td className="text-white/70 text-sm px-4 py-2 text-right">{formatMetaCurrency(c.cpc)}</td>
                           <td className="text-white/70 text-sm px-4 py-2 text-right">{formatNum(c.reach)}</td>
                         </tr>
                       ))}
@@ -1352,10 +1648,10 @@ function MetaAdsSection({
                     </div>
                     <div className="text-right">
                       {c.dailyBudget && (
-                        <p className="text-white/60 text-xs">{formatCurrency(c.dailyBudget)}/day</p>
+                        <p className="text-white/60 text-xs">{formatMetaCurrency(c.dailyBudget)}/day</p>
                       )}
                       {c.lifetimeBudget && (
-                        <p className="text-white/60 text-xs">{formatCurrency(c.lifetimeBudget)} lifetime</p>
+                        <p className="text-white/60 text-xs">{formatMetaCurrency(c.lifetimeBudget)} lifetime</p>
                       )}
                     </div>
                   </div>
