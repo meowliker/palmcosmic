@@ -29,7 +29,27 @@ import {
   MousePointerClick,
   Target,
   ChevronDown,
+  LayoutDashboard,
+  FileSpreadsheet,
+  Facebook,
+  TrendingDown,
 } from "lucide-react";
+
+// Tab type
+type TabType = "dashboard" | "profit-sheet" | "meta-details";
+
+// Profit Sheet row interface
+interface ProfitSheetRow {
+  date: string;           // Costa Rica date (e.g., "2026-03-13")
+  day: string;            // Day of week (e.g., "Sat")
+  revenue: number;        // PayU revenue for that Costa Rica day
+  gst: number;            // 5% of revenue
+  adsCostUSD: number;     // Meta Ads spend in USD
+  adsCostINR: number;     // Meta Ads spend converted to INR
+  netRevenue: number;     // Revenue - GST - Ads Cost (INR)
+  roas: number;           // Revenue / Ads Cost INR (if ads cost > 0)
+  transactionCount: number;
+}
 
 interface RevenueData {
   currency: string;
@@ -174,6 +194,19 @@ export default function AdminRevenuePage() {
   const [metaDatePreset, setMetaDatePreset] = useState<string>("last_30d");
   const [showMetaCampaigns, setShowMetaCampaigns] = useState(false);
 
+  // Tabs
+  const [activeTab, setActiveTab] = useState<TabType>("dashboard");
+  
+  // Profit Sheet state
+  const [profitSheetData, setProfitSheetData] = useState<ProfitSheetRow[]>([]);
+  const [profitSheetLoading, setProfitSheetLoading] = useState(false);
+  const [profitSheetStartDate, setProfitSheetStartDate] = useState<string>("2026-03-13");
+  const [profitSheetEndDate, setProfitSheetEndDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [profitSheetFilter, setProfitSheetFilter] = useState<string>("all");
+  const [profitSheetRoasFilter, setProfitSheetRoasFilter] = useState<string>("all");
+  const [profitSheetExchangeRate, setProfitSheetExchangeRate] = useState<number>(85);
+  const [profitSheetCustomExchangeRate, setProfitSheetCustomExchangeRate] = useState<string>("");
+
   // Backfill
   const [backfillLoading, setBackfillLoading] = useState(false);
   const [backfillResult, setBackfillResult] = useState<string | null>(null);
@@ -297,6 +330,39 @@ export default function AdminRevenuePage() {
     }
   };
 
+  // Fetch Profit Sheet data
+  const fetchProfitSheet = async (customRate?: number) => {
+    try {
+      setProfitSheetLoading(true);
+      const token = localStorage.getItem("admin_session_token");
+      if (!token) return;
+      
+      let url = `/api/admin/profit-sheet?token=${token}&startDate=${profitSheetStartDate}&endDate=${profitSheetEndDate}`;
+      
+      // Use custom exchange rate if provided
+      const rateToUse = customRate || (profitSheetCustomExchangeRate ? parseFloat(profitSheetCustomExchangeRate) : undefined);
+      if (rateToUse) {
+        url += `&exchangeRate=${rateToUse}`;
+      }
+      
+      const res = await fetch(url);
+      if (res.ok) {
+        const result = await res.json();
+        setProfitSheetData(result.rows || []);
+        if (result.exchangeRate) {
+          setProfitSheetExchangeRate(result.exchangeRate);
+          if (!profitSheetCustomExchangeRate) {
+            setProfitSheetCustomExchangeRate(result.exchangeRate.toFixed(2));
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Profit sheet fetch error:", err);
+    } finally {
+      setProfitSheetLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchData();
     fetchMetaAds();
@@ -305,6 +371,13 @@ export default function AdminRevenuePage() {
   useEffect(() => {
     fetchMetaAds(metaDatePreset);
   }, [metaDatePreset]);
+
+  // Fetch profit sheet when tab changes or date range changes
+  useEffect(() => {
+    if (activeTab === "profit-sheet") {
+      fetchProfitSheet();
+    }
+  }, [activeTab, profitSheetStartDate, profitSheetEndDate]);
 
   if (loading) {
     return (
@@ -454,15 +527,15 @@ export default function AdminRevenuePage() {
       {/* Header */}
       <div className="bg-gradient-to-b from-[#1A1F2E] to-transparent px-4 pt-12 pb-6">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-2xl font-bold text-white">Revenue Dashboard</h1>
-            <div className="flex items-center gap-2">
-              <button
+          <div className="flex items-center justify-between mb-4">
+            <button
                 onClick={() => router.push("/admin")}
                 className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors text-white/70 text-sm"
               >
-                ← Admin
+                ←
               </button>
+            <h1 className="text-2xl font-bold text-white">Revenue Dashboard</h1>
+            <div className="flex items-center gap-2">
               {data && data.totalPayments === 0 && data.uniquePayingUsers > 0 && (
                 <button
                   onClick={runBackfill}
@@ -474,14 +547,56 @@ export default function AdminRevenuePage() {
                 </button>
               )}
               <button
-                onClick={fetchData}
-                disabled={refreshing}
+                onClick={() => {
+                  if (activeTab === "dashboard") fetchData();
+                  else if (activeTab === "profit-sheet") fetchProfitSheet();
+                  else if (activeTab === "meta-details") fetchMetaAds();
+                }}
+                disabled={refreshing || profitSheetLoading || metaLoading}
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
               >
-                <RefreshCw className={`w-5 h-5 text-white ${refreshing ? "animate-spin" : ""}`} />
+                <RefreshCw className={`w-5 h-5 text-white ${(refreshing || profitSheetLoading || metaLoading) ? "animate-spin" : ""}`} />
               </button>
             </div>
           </div>
+          
+          {/* Tab Navigation */}
+          <div className="flex items-center gap-2 bg-white/5 rounded-xl p-1">
+            <button
+              onClick={() => setActiveTab("dashboard")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "dashboard"
+                  ? "bg-primary text-white shadow-lg"
+                  : "text-white/60 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              Dashboard
+            </button>
+            <button
+              onClick={() => setActiveTab("profit-sheet")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "profit-sheet"
+                  ? "bg-primary text-white shadow-lg"
+                  : "text-white/60 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Profit Sheet
+            </button>
+            <button
+              onClick={() => setActiveTab("meta-details")}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === "meta-details"
+                  ? "bg-primary text-white shadow-lg"
+                  : "text-white/60 hover:text-white hover:bg-white/10"
+              }`}
+            >
+              <Facebook className="w-4 h-4" />
+              Meta Details
+            </button>
+          </div>
+          
           {backfillResult && (
             <div className={`mt-2 px-3 py-2 rounded-lg text-sm ${backfillResult.startsWith("Error") ? "bg-red-500/20 text-red-400" : "bg-green-500/20 text-green-400"}`}>
               {backfillResult}
@@ -491,6 +606,9 @@ export default function AdminRevenuePage() {
       </div>
 
       <div className="max-w-6xl mx-auto px-4 space-y-6">
+        {/* Dashboard Tab Content */}
+        {activeTab === "dashboard" && (
+          <>
         {/* Toolbar */}
         <div className="flex flex-wrap items-center gap-3">
           <button
@@ -1157,6 +1275,328 @@ export default function AdminRevenuePage() {
             </div>
           </div>
         </section>
+          </>
+        )}
+
+        {/* Profit Sheet Tab Content */}
+        {activeTab === "profit-sheet" && (
+          <ProfitSheetTab
+            data={profitSheetData}
+            loading={profitSheetLoading}
+            startDate={profitSheetStartDate}
+            endDate={profitSheetEndDate}
+            setStartDate={setProfitSheetStartDate}
+            setEndDate={setProfitSheetEndDate}
+            periodFilter={profitSheetFilter}
+            setPeriodFilter={setProfitSheetFilter}
+            roasFilter={profitSheetRoasFilter}
+            setRoasFilter={setProfitSheetRoasFilter}
+            exchangeRate={profitSheetCustomExchangeRate}
+            setExchangeRate={setProfitSheetCustomExchangeRate}
+            onRefresh={() => fetchProfitSheet()}
+            onRefreshWithRate={(rate) => fetchProfitSheet(rate)}
+          />
+        )}
+
+        {/* Meta Details Tab Content */}
+        {activeTab === "meta-details" && (
+          <MetaAdsSection
+            metaAds={metaAds}
+            metaLoading={metaLoading}
+            metaDatePreset={metaDatePreset}
+            setMetaDatePreset={setMetaDatePreset}
+            showMetaCampaigns={showMetaCampaigns}
+            setShowMetaCampaigns={setShowMetaCampaigns}
+            formatCurrency={formatCurrency}
+            onRefresh={() => fetchMetaAds()}
+            onCustomDateRefresh={(startDate, endDate) => fetchMetaAds(undefined, startDate, endDate)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Profit Sheet Tab Component
+function ProfitSheetTab({
+  data,
+  loading,
+  startDate,
+  endDate,
+  setStartDate,
+  setEndDate,
+  periodFilter,
+  setPeriodFilter,
+  roasFilter,
+  setRoasFilter,
+  exchangeRate,
+  setExchangeRate,
+  onRefresh,
+  onRefreshWithRate,
+}: {
+  data: ProfitSheetRow[];
+  loading: boolean;
+  startDate: string;
+  endDate: string;
+  setStartDate: (v: string) => void;
+  setEndDate: (v: string) => void;
+  periodFilter: string;
+  setPeriodFilter: (v: string) => void;
+  roasFilter: string;
+  setRoasFilter: (v: string) => void;
+  exchangeRate: string;
+  setExchangeRate: (v: string) => void;
+  onRefresh: () => void;
+  onRefreshWithRate: (rate: number) => void;
+}) {
+  const formatCurrency = (value: number) => {
+    return new Intl.NumberFormat("en-IN", {
+      style: "currency",
+      currency: "INR",
+      minimumFractionDigits: 2,
+    }).format(value);
+  };
+
+  const formatDate = (dateStr: string) => {
+    const date = new Date(dateStr);
+    return date.toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  // Filter data based on filters
+  let filteredData = [...data];
+
+  // Period filter
+  if (periodFilter === "last7") {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    filteredData = filteredData.filter(row => new Date(row.date) >= cutoff);
+  } else if (periodFilter === "last14") {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 14);
+    filteredData = filteredData.filter(row => new Date(row.date) >= cutoff);
+  } else if (periodFilter === "last30") {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 30);
+    filteredData = filteredData.filter(row => new Date(row.date) >= cutoff);
+  }
+
+  // ROAS filter
+  if (roasFilter === "positive") {
+    filteredData = filteredData.filter(row => row.roas > 1);
+  } else if (roasFilter === "negative") {
+    filteredData = filteredData.filter(row => row.roas > 0 && row.roas <= 1);
+  } else if (roasFilter === "noads") {
+    filteredData = filteredData.filter(row => row.adsCostINR === 0);
+  }
+
+  // Calculate totals
+  const totals = filteredData.reduce(
+    (acc, row) => ({
+      revenue: acc.revenue + row.revenue,
+      gst: acc.gst + row.gst,
+      adsCostUSD: acc.adsCostUSD + row.adsCostUSD,
+      adsCostINR: acc.adsCostINR + row.adsCostINR,
+      netRevenue: acc.netRevenue + row.netRevenue,
+      transactionCount: acc.transactionCount + row.transactionCount,
+    }),
+    { revenue: 0, gst: 0, adsCostUSD: 0, adsCostINR: 0, netRevenue: 0, transactionCount: 0 }
+  );
+  const overallRoas = totals.adsCostINR > 0 ? totals.revenue / totals.adsCostINR : 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+        <div className="flex flex-wrap items-end gap-4">
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">Start Date</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+            />
+          </div>
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">End Date</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+            />
+          </div>
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">Period</label>
+            <select
+              value={periodFilter}
+              onChange={(e) => setPeriodFilter(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+            >
+              <option value="all">All Time</option>
+              <option value="last7">Last 7 Days</option>
+              <option value="last14">Last 14 Days</option>
+              <option value="last30">Last 30 Days</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">ROAS Filter</label>
+            <select
+              value={roasFilter}
+              onChange={(e) => setRoasFilter(e.target.value)}
+              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+            >
+              <option value="all">All</option>
+              <option value="positive">Profitable (ROAS &gt; 1)</option>
+              <option value="negative">Loss (ROAS ≤ 1)</option>
+              <option value="noads">No Ads</option>
+            </select>
+          </div>
+          <div>
+            <label className="text-white/50 text-xs mb-1 block">USD to INR Rate</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                step="0.01"
+                value={exchangeRate}
+                onChange={(e) => setExchangeRate(e.target.value)}
+                className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+                placeholder="85.00"
+              />
+              <button
+                onClick={() => {
+                  const rate = parseFloat(exchangeRate);
+                  if (rate > 0) onRefreshWithRate(rate);
+                }}
+                disabled={loading}
+                className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm rounded-lg transition-colors disabled:opacity-50"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="px-4 py-2 bg-primary hover:bg-primary/80 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+        <p className="text-white/30 text-xs mt-3">
+          Note: Each date represents Costa Rica timezone (UTC-6). Revenue is calculated from 11:30 AM IST to next day 11:29 AM IST. Ads cost is fetched in USD and converted to INR.
+        </p>
+      </div>
+
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <p className="text-white/50 text-xs mb-1">Total Revenue</p>
+          <p className="text-green-400 text-xl font-bold">{formatCurrency(totals.revenue)}</p>
+        </div>
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <p className="text-white/50 text-xs mb-1">Total GST (5%)</p>
+          <p className="text-amber-400 text-xl font-bold">{formatCurrency(totals.gst)}</p>
+        </div>
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <p className="text-white/50 text-xs mb-1">Ads Cost (USD)</p>
+          <p className="text-red-400/70 text-lg font-bold">${totals.adsCostUSD.toFixed(2)}</p>
+        </div>
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <p className="text-white/50 text-xs mb-1">Ads Cost (INR)</p>
+          <p className="text-red-400 text-xl font-bold">{formatCurrency(totals.adsCostINR)}</p>
+        </div>
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <p className="text-white/50 text-xs mb-1">Net Revenue</p>
+          <p className={`text-xl font-bold ${totals.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {formatCurrency(totals.netRevenue)}
+          </p>
+        </div>
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+          <p className="text-white/50 text-xs mb-1">Overall ROAS</p>
+          <p className={`text-xl font-bold ${overallRoas >= 1 ? "text-green-400" : overallRoas > 0 ? "text-amber-400" : "text-white/40"}`}>
+            {overallRoas > 0 ? overallRoas.toFixed(2) : "-"}
+          </p>
+        </div>
+      </div>
+
+      {/* Data Table */}
+      <div className="bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-6 h-6 text-primary animate-spin" />
+            <span className="ml-2 text-white/60">Loading profit sheet...</span>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/10 bg-white/5">
+                  <th className="text-left text-white/70 text-xs font-semibold px-4 py-3">Date</th>
+                  <th className="text-left text-white/70 text-xs font-semibold px-4 py-3">Day</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Revenue</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">GST (5%)</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Ads (USD)</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Ads (INR)</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Net Revenue</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">ROAS</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Orders</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredData.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="text-center text-white/40 py-8">
+                      No data available for the selected filters
+                    </td>
+                  </tr>
+                ) : (
+                  <>
+                    {filteredData.map((row, idx) => (
+                      <tr key={row.date} className={`border-b border-white/5 hover:bg-white/5 ${idx % 2 === 0 ? "bg-white/[0.02]" : ""}`}>
+                        <td className="text-white/80 text-sm px-4 py-3">{formatDate(row.date)}</td>
+                        <td className="text-white/60 text-sm px-4 py-3">{row.day}</td>
+                        <td className="text-green-400 text-sm px-4 py-3 text-right font-medium">{formatCurrency(row.revenue)}</td>
+                        <td className="text-amber-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.gst)}</td>
+                        <td className="text-red-400/50 text-sm px-4 py-3 text-right">${row.adsCostUSD.toFixed(2)}</td>
+                        <td className="text-red-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.adsCostINR)}</td>
+                        <td className={`text-sm px-4 py-3 text-right font-medium ${row.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
+                          {formatCurrency(row.netRevenue)}
+                        </td>
+                        <td className={`text-sm px-4 py-3 text-right font-medium ${
+                          row.roas >= 1 ? "text-green-400" : row.roas > 0 ? "text-amber-400" : "text-white/30"
+                        }`}>
+                          {row.roas > 0 ? row.roas.toFixed(2) : "-"}
+                        </td>
+                        <td className="text-white/60 text-sm px-4 py-3 text-right">{row.transactionCount}</td>
+                      </tr>
+                    ))}
+                    {/* Totals Row */}
+                    <tr className="bg-white/10 border-t-2 border-white/20 font-semibold">
+                      <td className="text-white text-sm px-4 py-3" colSpan={2}>TOTAL</td>
+                      <td className="text-green-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.revenue)}</td>
+                      <td className="text-amber-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.gst)}</td>
+                      <td className="text-red-400/70 text-sm px-4 py-3 text-right">${totals.adsCostUSD.toFixed(2)}</td>
+                      <td className="text-red-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.adsCostINR)}</td>
+                      <td className={`text-sm px-4 py-3 text-right ${totals.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {formatCurrency(totals.netRevenue)}
+                      </td>
+                      <td className={`text-sm px-4 py-3 text-right ${overallRoas >= 1 ? "text-green-400" : "text-amber-400"}`}>
+                        {overallRoas > 0 ? overallRoas.toFixed(2) : "-"}
+                      </td>
+                      <td className="text-white text-sm px-4 py-3 text-right">{totals.transactionCount}</td>
+                    </tr>
+                  </>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

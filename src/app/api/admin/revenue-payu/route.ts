@@ -199,6 +199,7 @@ export async function GET(request: NextRequest) {
         payuEndDate = endDateParam;
         
         // Parse as IST (UTC+5:30)
+        // Use exact times specified by user
         filterStartTime = new Date(`${startDateParam}T${startTimeParam}:00+05:30`);
         filterEndTime = new Date(`${endDateParam}T${endTimeParam}:59+05:30`);
       }
