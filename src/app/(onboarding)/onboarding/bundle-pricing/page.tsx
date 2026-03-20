@@ -11,8 +11,8 @@ import { pixelEvents } from "@/lib/pixel-events";
 import { detectHandLandmarks } from "@/lib/palm-detection";
 import { useUserStore } from "@/lib/user-store";
 import Link from "next/link";
-import Script from "next/script";
 import { usePricing } from "@/hooks/usePricing";
+import { startStripeCheckout } from "@/lib/stripe-checkout";
 
 const predictionLabels = [
   { text: "Children", emoji: "👶", top: "15%", left: "20%", rotation: -15 },
@@ -49,22 +49,22 @@ function generateCompatibilityStats() {
 const testimonials = [
   {
     name: "Priya",
-    country: "India",
-    flag: "🇮🇳",
+    country: "United States",
+    flag: "🇺🇸",
     time: "4 days ago",
     review: "Finally a palm reading app that actually works. Scanned my palm and got insights about my career path that were spot on. The AI guide feels like talking to a real astrologer.",
   },
   {
     name: "Rahul",
-    country: "India",
-    flag: "🇮🇳",
+    country: "United States",
+    flag: "🇺🇸",
     time: "1 week ago",
     review: "The birth chart analysis was incredibly detailed. Asked questions about my love line and got thoughtful, personal answers. This app feels magical and premium at the same time.",
   },
   {
     name: "Ananya",
-    country: "India",
-    flag: "🇮🇳",
+    country: "United States",
+    flag: "🇺🇸",
     time: "5 days ago",
     review: "Going through a tough phase and this app gave me so much clarity. The reading explained why things weren't working out and what kind of energy I should seek next. Truly healing.",
   },
@@ -265,98 +265,21 @@ export default function BundlePricingPage() {
     }
 
     try {
-      const response = await fetch("/api/payu/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "bundle",
-          bundleId: selectedPlan,
-          userId: userId || generateUserId(),
-          email: localStorage.getItem("astrorekha_email") || "",
-          firstName: localStorage.getItem("astrorekha_name") || "Customer",
-        }),
+      pixelEvents.initiateCheckout(plan.price, [plan.name]);
+      pixelEvents.addPaymentInfo(plan.price, plan.name);
+
+      await startStripeCheckout({
+        type: "bundle",
+        bundleId: selectedPlan,
+        userId: userId || generateUserId(),
+        email: localStorage.getItem("astrorekha_email") || "",
+        firstName: localStorage.getItem("astrorekha_name") || "Customer",
+        successPath: "/onboarding/bundle-upsell",
+        cancelPath: "/onboarding/bundle-pricing",
       });
-
-      const data = await response.json();
-
-      if (data.txnId) {
-        pixelEvents.initiateCheckout(plan.price, [plan.name]);
-        pixelEvents.addPaymentInfo(plan.price, plan.name);
-        
-        // Open PayU Bolt checkout
-        const bolt = (window as any).bolt;
-        bolt.launch({
-          key: data.key,
-          txnid: data.txnId,
-          hash: data.hash,
-          amount: data.amount,
-          firstname: data.firstName,
-          email: data.email,
-          phone: "",
-          productinfo: data.productInfo,
-          udf1: data.udf1,
-          udf2: data.udf2,
-          udf3: data.udf3,
-          udf4: data.udf4,
-          udf5: data.udf5,
-          surl: `${window.location.origin}/api/payu/success`,
-          furl: `${window.location.origin}/api/payu/failure`,
-        }, {
-          responseHandler: async (response: any) => {
-            if (response.response.txnStatus === "SUCCESS") {
-              // Verify payment on server
-              const verifyRes = await fetch("/api/payu/verify-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  txnid: response.response.txnid,
-                  mihpayid: response.response.mihpayid,
-                  status: "success",
-                  hash: response.response.hash,
-                  amount: data.amount,
-                  productinfo: data.productInfo,
-                  firstname: data.firstName,
-                  email: data.email,
-                  udf1: data.udf1,
-                  udf2: data.udf2,
-                  udf3: data.udf3,
-                  udf4: data.udf4,
-                  udf5: data.udf5,
-                  key: data.key,
-                }),
-              });
-              const verifyData = await verifyRes.json();
-              if (verifyData.success) {
-                localStorage.setItem("astrorekha_payment_completed", "true");
-                localStorage.setItem("astrorekha_purchase_type", "one-time");
-                localStorage.setItem("astrorekha_bundle_id", selectedPlan);
-                pixelEvents.purchase(plan.price, selectedPlan, plan.name);
-                router.push("/onboarding/bundle-upsell");
-              } else {
-                setPaymentError("Payment verification failed. Please contact support.");
-                setIsProcessing(false);
-              }
-            } else {
-              setPaymentError("Payment failed. Please try again.");
-              setIsProcessing(false);
-            }
-          },
-          catchException: (error: any) => {
-            console.error("PayU Bolt error:", error);
-            setPaymentError("Payment was cancelled or failed.");
-            setIsProcessing(false);
-          }
-        });
-      } else if (data.error) {
-        setPaymentError(data.error);
-        setIsProcessing(false);
-      } else {
-        setPaymentError("Unable to start checkout. Please try again.");
-        setIsProcessing(false);
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Checkout error:", error);
-      setPaymentError("Something went wrong. Please try again.");
+      setPaymentError(error?.message || "Something went wrong. Please try again.");
       setIsProcessing(false);
     }
   };
@@ -378,8 +301,8 @@ export default function BundlePricingPage() {
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-col items-center gap-1 mb-2"
         >
-          <img src="/logo.png" alt="AstroRekha" className="w-20 h-20 object-contain" />
-          <span className="text-sm text-muted-foreground">AstroRekha</span>
+          <img src="/logo.png" alt="PalmCosmic" className="w-20 h-20 object-contain" />
+          <span className="text-sm text-muted-foreground">PalmCosmic</span>
         </motion.div>
 
         <motion.h1
@@ -531,8 +454,8 @@ export default function BundlePricingPage() {
                   
                   {/* Price */}
                   <div className="flex items-baseline gap-2 mb-3">
-                    <span className="text-2xl font-bold text-primary">₹{plan.displayPrice || plan.price}</span>
-                    <span className="text-muted-foreground line-through text-sm">₹{plan.originalPrice}</span>
+                    <span className="text-2xl font-bold text-primary">${((plan.displayPrice || plan.price) / 100).toFixed(2)}</span>
+                    <span className="text-muted-foreground line-through text-sm">${(plan.originalPrice / 100).toFixed(2)}</span>
                   </div>
 
                   {/* Features */}
@@ -600,7 +523,7 @@ export default function BundlePricingPage() {
                 Processing...
               </span>
             ) : (
-              `Get My Reading - ₹${selectedPlanData?.displayPrice || selectedPlanData?.price}`
+              `Get My Reading - $${((selectedPlanData?.displayPrice || selectedPlanData?.price || 0) / 100).toFixed(2)}`
             )}
           </Button>
         </motion.div>
@@ -631,8 +554,8 @@ export default function BundlePricingPage() {
             <div className="w-10 h-6 bg-[#006FCF] rounded flex items-center justify-center">
               <span className="text-white text-[8px] font-bold">AMEX</span>
             </div>
-            <div className="w-10 h-6 bg-[#5F259F] rounded flex items-center justify-center">
-              <span className="text-white text-[8px] font-bold">UPI</span>
+            <div className="w-10 h-6 bg-[#FF6000] rounded flex items-center justify-center">
+              <span className="text-white text-[8px] font-bold">DISC</span>
             </div>
           </div>
         </motion.div>
@@ -993,14 +916,14 @@ export default function BundlePricingPage() {
           </motion.div>
         </div>
 
-        {/* What you'll find in AstroRekha */}
+        {/* What you'll find in PalmCosmic */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.7 }}
           className="w-full max-w-sm bg-gradient-to-b from-slate-800/80 to-slate-900/90 rounded-3xl p-6 mb-8"
         >
-          <h3 className="text-xl font-bold text-center mb-6">What you&apos;ll find in AstroRekha</h3>
+          <h3 className="text-xl font-bold text-center mb-6">What you&apos;ll find in PalmCosmic</h3>
 
           <div className="space-y-4">
             {[
@@ -1026,7 +949,7 @@ export default function BundlePricingPage() {
             className="w-full h-12 text-base font-semibold bg-blue-500 hover:bg-blue-600 mt-6"
             size="lg"
           >
-            Try AstroRekha
+            Try PalmCosmic
           </Button>
         </motion.div>
 
@@ -1041,10 +964,10 @@ export default function BundlePricingPage() {
           <div className="flex flex-col items-center mb-6">
             <img
               src="/logo.png"
-              alt="AstroRekha"
+              alt="PalmCosmic"
               className="w-12 h-12 mb-2"
             />
-            <p className="text-sm font-medium">AstroRekha</p>
+            <p className="text-sm font-medium">PalmCosmic</p>
           </div>
 
           {/* Contact Us */}
@@ -1094,9 +1017,6 @@ export default function BundlePricingPage() {
           </div>
         </motion.div>
       )}
-      
-      {/* Load PayU Bolt script eagerly for faster checkout */}
-      <Script src="https://jssdk.payu.in/bolt/bolt.min.js" strategy="afterInteractive" />
     </motion.div>
   );
 }

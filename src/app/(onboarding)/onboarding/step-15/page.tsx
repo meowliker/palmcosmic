@@ -232,7 +232,7 @@ export default function Step15Page() {
           className="w-full max-w-sm"
         >
           <h2 className="text-lg font-semibold text-center mb-4">
-            Sign up to understand yourself better with AstroRekha
+            Sign up to understand yourself better with PalmCosmic
           </h2>
 
           <input

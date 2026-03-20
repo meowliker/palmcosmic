@@ -10,8 +10,8 @@ import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore } from "@/lib/user-store";
 import { supabase } from "@/lib/supabase";
 import { generateUserId } from "@/lib/user-profile";
-import Script from "next/script";
 import { usePricing } from "@/hooks/usePricing";
+import { startStripeCheckout } from "@/lib/stripe-checkout";
 
 interface Message {
   role: "user" | "assistant";
@@ -37,10 +37,10 @@ const suggestedQuestions = [
 
 // Fallback coin packages (used while loading from API)
 const defaultCoinPackages = [
-  { id: 1, coins: 50, price: 199, discount: null, popular: false },
-  { id: 2, coins: 150, price: 509, discount: 15, popular: true },
-  { id: 3, coins: 300, price: 839, discount: 30, popular: false },
-  { id: 4, coins: 500, price: 1199, discount: 40, popular: false },
+  { id: 1, coins: 50, price: 299, discount: 50, popular: false },
+  { id: 2, coins: 150, price: 799, discount: 50, popular: true },
+  { id: 3, coins: 300, price: 1299, discount: 50, popular: false },
+  { id: 4, coins: 500, price: 1799, discount: 50, popular: false },
 ];
 
 function formatMessage(text: string): React.ReactNode[] {
@@ -92,81 +92,18 @@ export default function ChatPage() {
     setPurchasingPackage(pkg.id);
 
     try {
-      const response = await fetch("/api/payu/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: generateUserId(),
-          packageId: pkg.packageId,
-          type: "coins",
-          email: localStorage.getItem("astrorekha_email") || "",
-          firstName: localStorage.getItem("astrorekha_name") || "Customer",
-        }),
+      await startStripeCheckout({
+        type: "coins",
+        packageId: pkg.packageId,
+        userId: generateUserId(),
+        email: localStorage.getItem("astrorekha_email") || "",
+        firstName: localStorage.getItem("astrorekha_name") || "Customer",
+        successPath: window.location.pathname,
+        cancelPath: window.location.pathname,
       });
-
-      const data = await response.json();
-
-      if (data.txnId) {
-        const bolt = (window as any).bolt;
-        bolt.launch({
-          key: data.key,
-          txnid: data.txnId,
-          hash: data.hash,
-          amount: data.amount,
-          firstname: data.firstName,
-          email: data.email,
-          phone: "",
-          productinfo: data.productInfo,
-          udf1: data.udf1,
-          udf2: data.udf2,
-          udf3: data.udf3,
-          udf4: data.udf4,
-          udf5: data.udf5,
-          surl: `${window.location.origin}/api/payu/success`,
-          furl: `${window.location.origin}/api/payu/failure`,
-        }, {
-          responseHandler: async (response: any) => {
-            if (response.response.txnStatus === "SUCCESS") {
-              await fetch("/api/payu/verify-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  txnid: response.response.txnid,
-                  mihpayid: response.response.mihpayid,
-                  status: "success",
-                  hash: response.response.hash,
-                  amount: data.amount,
-                  productinfo: data.productInfo,
-                  firstname: data.firstName,
-                  email: data.email,
-                  udf1: data.udf1,
-                  udf2: data.udf2,
-                  udf3: data.udf3,
-                  udf4: data.udf4,
-                  udf5: data.udf5,
-                  key: data.key,
-                }),
-              });
-              setPurchasingPackage(null);
-              window.location.reload();
-            } else {
-              setPurchaseError("Payment failed. Please try again.");
-              setPurchasingPackage(null);
-            }
-          },
-          catchException: (error: any) => {
-            console.error("PayU Bolt error:", error);
-            setPurchaseError("Payment was cancelled or failed.");
-            setPurchasingPackage(null);
-          }
-        });
-      } else {
-        setPurchaseError(data.error || "Unable to start checkout. Please try again.");
-        setPurchasingPackage(null);
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Coin purchase error:", error);
-      setPurchaseError("Something went wrong. Please try again.");
+      setPurchaseError(error?.message || "Something went wrong. Please try again.");
       setPurchasingPackage(null);
     }
   };
@@ -782,7 +719,7 @@ export default function ChatPage() {
 
                     {/* Price */}
                     <div className="text-center mb-2 sm:mb-4">
-                      <p className="text-white text-lg sm:text-2xl font-bold">₹{pkg.price}</p>
+                      <p className="text-white text-lg sm:text-2xl font-bold">${(pkg.price / 100).toFixed(2)}</p>
                     </div>
 
                     {/* Buy Button */}
@@ -814,7 +751,7 @@ export default function ChatPage() {
               {/* Footer */}
               <div className="mt-2 sm:mt-3 text-center">
                 <p className="text-white/40 text-[10px] sm:text-xs">
-                  Secure payment powered by Razorpay
+                  Secure payment processing
                 </p>
               </div>
             </motion.div>
@@ -822,8 +759,6 @@ export default function ChatPage() {
         )}
       </AnimatePresence>
       </div>
-      {/* Load PayU Bolt script only on this page */}
-      <Script src="https://jssdk.payu.in/bolt/bolt.min.js" strategy="afterInteractive" />
     </div>
   );
 }

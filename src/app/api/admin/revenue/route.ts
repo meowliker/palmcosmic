@@ -82,8 +82,8 @@ export async function GET(request: NextRequest) {
       console.log("Sample payment:", JSON.stringify(payments[0]).slice(0, 500));
     }
 
-    // Helper: amount is stored in paise, convert to INR
-    const getAmountINR = (p: any) => (p.amount || 0) / 100;
+    // Helper: amount is stored in cents, convert to USD
+    const getAmountUSD = (p: any) => (p.amount || 0) / 100;
 
     // Count all successful payments (paid, success, captured)
     const paidPayments = payments.filter(p => 
@@ -95,30 +95,30 @@ export async function GET(request: NextRequest) {
     console.log("Paid payments count:", paidPayments.length);
 
     // Revenue metrics
-    const totalRevenue = paidPayments.reduce((sum, p) => sum + getAmountINR(p), 0);
+    const totalRevenue = paidPayments.reduce((sum, p) => sum + getAmountUSD(p), 0);
 
     const revenueToday = paidPayments
       .filter(p => new Date(p.createdAt) >= startOfToday)
-      .reduce((sum, p) => sum + getAmountINR(p), 0);
+      .reduce((sum, p) => sum + getAmountUSD(p), 0);
 
     const revenueThisWeek = paidPayments
       .filter(p => new Date(p.createdAt) >= startOfWeek)
-      .reduce((sum, p) => sum + getAmountINR(p), 0);
+      .reduce((sum, p) => sum + getAmountUSD(p), 0);
 
     const revenueThisMonth = paidPayments
       .filter(p => new Date(p.createdAt) >= startOfMonth)
-      .reduce((sum, p) => sum + getAmountINR(p), 0);
+      .reduce((sum, p) => sum + getAmountUSD(p), 0);
 
     const revenueThisYear = paidPayments
       .filter(p => new Date(p.createdAt) >= startOfYear)
-      .reduce((sum, p) => sum + getAmountINR(p), 0);
+      .reduce((sum, p) => sum + getAmountUSD(p), 0);
 
     const revenueLastMonth = paidPayments
       .filter(p => {
         const date = new Date(p.createdAt);
         return date >= startOfLastMonth && date <= endOfLastMonth;
       })
-      .reduce((sum, p) => sum + getAmountINR(p), 0);
+      .reduce((sum, p) => sum + getAmountUSD(p), 0);
 
     const momGrowth = revenueLastMonth > 0
       ? ((revenueThisMonth - revenueLastMonth) / revenueLastMonth * 100).toFixed(1)
@@ -126,25 +126,25 @@ export async function GET(request: NextRequest) {
 
     // Revenue by type (handle both "bundle" and "bundle_payment" types)
     const revenueByType = {
-      bundle: paidPayments.filter(p => p.type === "bundle" || p.type === "bundle_payment").reduce((sum, p) => sum + getAmountINR(p), 0),
-      upsell: paidPayments.filter(p => p.type === "upsell").reduce((sum, p) => sum + getAmountINR(p), 0),
-      coins: paidPayments.filter(p => p.type === "coins").reduce((sum, p) => sum + getAmountINR(p), 0),
-      report: paidPayments.filter(p => p.type === "report").reduce((sum, p) => sum + getAmountINR(p), 0),
+      bundle: paidPayments.filter(p => p.type === "bundle" || p.type === "bundle_payment").reduce((sum, p) => sum + getAmountUSD(p), 0),
+      upsell: paidPayments.filter(p => p.type === "upsell").reduce((sum, p) => sum + getAmountUSD(p), 0),
+      coins: paidPayments.filter(p => p.type === "coins").reduce((sum, p) => sum + getAmountUSD(p), 0),
+      report: paidPayments.filter(p => p.type === "report").reduce((sum, p) => sum + getAmountUSD(p), 0),
     };
 
     // Bundle breakdown
     const bundleBreakdown = {
       "palm-reading": {
         count: paidPayments.filter(p => p.bundle_id === "palm-reading").length,
-        revenue: paidPayments.filter(p => p.bundle_id === "palm-reading").reduce((sum, p) => sum + getAmountINR(p), 0),
+        revenue: paidPayments.filter(p => p.bundle_id === "palm-reading").reduce((sum, p) => sum + getAmountUSD(p), 0),
       },
       "palm-birth": {
         count: paidPayments.filter(p => p.bundle_id === "palm-birth").length,
-        revenue: paidPayments.filter(p => p.bundle_id === "palm-birth").reduce((sum, p) => sum + getAmountINR(p), 0),
+        revenue: paidPayments.filter(p => p.bundle_id === "palm-birth").reduce((sum, p) => sum + getAmountUSD(p), 0),
       },
       "palm-birth-compat": {
         count: paidPayments.filter(p => p.bundle_id === "palm-birth-compat").length,
-        revenue: paidPayments.filter(p => p.bundle_id === "palm-birth-compat").reduce((sum, p) => sum + getAmountINR(p), 0),
+        revenue: paidPayments.filter(p => p.bundle_id === "palm-birth-compat").reduce((sum, p) => sum + getAmountUSD(p), 0),
       },
     };
 
@@ -180,7 +180,7 @@ export async function GET(request: NextRequest) {
           const pd = new Date(p.createdAt);
           return pd >= dayStart && pd <= dayEnd;
         })
-        .reduce((sum, p) => sum + getAmountINR(p), 0);
+        .reduce((sum, p) => sum + getAmountUSD(p), 0);
       revenueOverTime.push({ date: dateStr, revenue: dayRevenue });
     }
 
@@ -197,7 +197,7 @@ export async function GET(request: NextRequest) {
         userId: p.userId,
         userEmail: ud.email || p.customerEmail || "Unknown",
         userName: ud.name || "Unknown",
-        amount: getAmountINR(p),
+        amount: getAmountUSD(p),
         bundleId: p.bundle_id,
         type: p.type,
         status: p.payment_status,
@@ -222,7 +222,7 @@ export async function GET(request: NextRequest) {
         return d >= customStart && d <= customEnd;
       });
 
-      customDateRevenue = customPayments.reduce((sum, p) => sum + getAmountINR(p), 0);
+      customDateRevenue = customPayments.reduce((sum, p) => sum + getAmountUSD(p), 0);
       customDatePaymentCount = customPayments.length;
       customDateTransactions = customPayments.map(p => {
         const ud = userMap.get(p.userId) || {};
@@ -232,7 +232,7 @@ export async function GET(request: NextRequest) {
           userId: p.userId,
           userEmail: (ud as any).email || p.customerEmail || "Unknown",
           userName: (ud as any).name || "Unknown",
-          amount: getAmountINR(p),
+          amount: getAmountUSD(p),
           bundleId: p.bundle_id,
           type: p.type,
           status: p.payment_status,
@@ -241,8 +241,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      // Revenue KPIs (INR)
-      currency: "INR",
+      // Revenue KPIs (USD)
+      currency: "USD",
       totalRevenue: totalRevenue.toFixed(2),
       revenueToday: revenueToday.toFixed(2),
       revenueThisWeek: revenueThisWeek.toFixed(2),
@@ -296,4 +296,3 @@ export async function GET(request: NextRequest) {
     );
   }
 }
-// Force redeploy Mon Mar  9 17:24:14 IST 2026

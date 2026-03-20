@@ -70,9 +70,9 @@ export async function POST(request: NextRequest) {
       const transporter = createTransporter();
       
       await transporter.sendMail({
-        from: `"AstroRekha" <${process.env.EMAIL_USER}>`,
+        from: `"PalmCosmic" <${process.env.EMAIL_USER}>`,
         to: normalizedEmail,
-        subject: "Your AstroRekha Verification Code",
+        subject: "Your PalmCosmic Verification Code",
         html: `
           <!DOCTYPE html>
           <html>
@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
                         <table border="0" cellpadding="0" cellspacing="0">
                           <tr>
                             <td align="center">
-                              <h1 style="color: #ffffff; font-size: 28px; margin: 0; font-weight: 600;">✨ AstroRekha</h1>
+                              <h1 style="color: #ffffff; font-size: 28px; margin: 0; font-weight: 600;">✨ PalmCosmic</h1>
                             </td>
                           </tr>
                           <tr>
@@ -115,7 +115,7 @@ export async function POST(request: NextRequest) {
                           <tr>
                             <td align="center" style="padding-bottom: 24px;">
                               <p style="color: #9CA3AF; font-size: 14px; margin: 0;">
-                                Enter this code to sign in to your AstroRekha account
+                                Enter this code to sign in to your PalmCosmic account
                               </p>
                             </td>
                           </tr>
@@ -145,7 +145,7 @@ export async function POST(request: NextRequest) {
                     <tr>
                       <td align="center" style="padding-top: 32px;">
                         <p style="color: #4B5563; font-size: 12px; margin: 0;">
-                          © ${new Date().getFullYear()} AstroRekha. All rights reserved.
+                          © ${new Date().getFullYear()} PalmCosmic. All rights reserved.
                         </p>
                       </td>
                     </tr>

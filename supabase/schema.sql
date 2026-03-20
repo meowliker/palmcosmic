@@ -1,4 +1,4 @@
--- AstroRekha Supabase Database Schema (v2 — One-time purchase model with Razorpay)
+-- PalmCosmic Supabase Database Schema (v2 — One-time purchase model)
 -- Run this in the Supabase SQL Editor to set up all tables
 
 -- ============================================================
@@ -13,10 +13,7 @@ CREATE TABLE IF NOT EXISTS public.users (
   purchase_type TEXT,                -- 'bundle_payment', 'coins', 'report', 'upsell'
   bundle_purchased TEXT,             -- 'palm-reading', 'palm-birth', 'palm-birth-compat'
   payment_status TEXT,               -- 'paid', 'pending', 'failed'
-  razorpay_payment_id TEXT,
-  razorpay_order_id TEXT,
-  payu_payment_id TEXT,
-  payu_txn_id TEXT,
+  stripe_customer_id TEXT,
   password_hash TEXT,
   
   -- Coins & Features
@@ -105,30 +102,29 @@ CREATE TABLE IF NOT EXISTS public.otp_codes (
 );
 
 -- ============================================================
--- 4. PAYMENTS TABLE (Razorpay one-time payments)
+-- 4. PAYMENTS TABLE (one-time payments)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.payments (
-  id TEXT PRIMARY KEY,                    -- razorpay_payment_id or generated ID
-  razorpay_order_id TEXT,
-  razorpay_payment_id TEXT,
-  razorpay_signature TEXT,
-  payu_txn_id TEXT,
-  payu_payment_id TEXT,
+  id TEXT PRIMARY KEY,                    -- generated payment ID
+  stripe_session_id TEXT,
+  stripe_payment_intent_id TEXT,
+  stripe_customer_id TEXT,
   user_id TEXT REFERENCES public.users(id),
-  type TEXT NOT NULL,                     -- 'bundle_payment', 'upsell', 'coins', 'report'
+  type TEXT NOT NULL,                     -- 'bundle', 'upsell', 'coins', 'report'
   bundle_id TEXT,                         -- 'palm-reading', 'palm-birth', 'palm-birth-compat'
   feature TEXT,                           -- specific feature unlocked (e.g. 'prediction2026')
   coins INTEGER,                          -- coins purchased (for coin purchases)
   customer_email TEXT,
-  amount INTEGER NOT NULL,                -- amount in paise (INR smallest unit)
-  currency TEXT DEFAULT 'INR',
+  amount INTEGER NOT NULL,                -- amount in cents (USD smallest unit)
+  currency TEXT DEFAULT 'USD',
   payment_status TEXT DEFAULT 'created',  -- 'created', 'paid', 'failed'
   fulfilled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
-CREATE INDEX IF NOT EXISTS idx_payments_razorpay_order ON public.payments(razorpay_order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_stripe_session ON public.payments(stripe_session_id);
+CREATE INDEX IF NOT EXISTS idx_payments_stripe_intent ON public.payments(stripe_payment_intent_id);
 
 -- ============================================================
 -- 5. LEADS TABLE (abandoned checkout leads)

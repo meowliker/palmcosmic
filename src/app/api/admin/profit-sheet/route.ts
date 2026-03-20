@@ -1,270 +1,198 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import crypto from "crypto";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const APP_LAUNCH_DATE = "2026-03-13";
-
-// PayU API URL
-const PAYU_BASE_URL = process.env.PAYU_MODE === "live" 
-  ? "https://info.payu.in/merchant/postservice?form=2"
-  : "https://test.payu.in/merchant/postservice?form=2";
-
-// Meta API
 const META_API_VERSION = "v21.0";
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
-
-interface PayUTransaction {
-  mihpayid: string;
-  txnid: string;
-  amount: string;
-  status: string;
-  addedon: string;
-  email: string;
-}
 
 interface ProfitSheetRow {
   date: string;
   day: string;
-  revenue: number;
-  gst: number;
+  revenue: number; // INR
+  gst: number; // INR
   adsCostUSD: number;
   adsCostINR: number;
-  netRevenue: number;
+  netRevenue: number; // INR
   roas: number;
   transactionCount: number;
 }
 
-// Fetch exchange rate
-async function fetchExchangeRate(): Promise<number> {
+interface PaymentRecord {
+  amount: number | null;
+  created_at: string | null;
+  payment_status: string | null;
+}
+
+function parseDateOnly(dateStr: string): Date {
+  return new Date(`${dateStr}T00:00:00.000Z`);
+}
+
+function formatDateOnly(date: Date): string {
+  return date.toISOString().split("T")[0];
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function getISTWindowForLabelDate(dateStr: string): { start: Date; end: Date } {
+  // Day label D means:
+  // start = D 11:30:00 IST
+  // end   = D+1 11:29:59.999 IST
+  const start = new Date(`${dateStr}T11:30:00.000+05:30`);
+  const nextDay = addDays(parseDateOnly(dateStr), 1);
+  const nextDayStr = formatDateOnly(nextDay);
+  const end = new Date(`${nextDayStr}T11:29:59.999+05:30`);
+  return { start, end };
+}
+
+function getDayOfWeek(dateStr: string): string {
+  const d = parseDateOnly(dateStr);
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return days[d.getUTCDay()];
+}
+
+async function fetchExchangeRateINR(customExchangeRate?: string | null): Promise<number> {
+  if (customExchangeRate) {
+    const parsed = parseFloat(customExchangeRate);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+
   try {
     const response = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
     const data = await response.json();
-    return data.rates?.INR || 85;
+    const rate = data?.rates?.INR;
+    if (Number.isFinite(rate) && rate > 0) return rate;
   } catch {
-    return 85; // Default fallback
+    // ignore and fallback
   }
+
+  return 85;
 }
 
-function generateHash(params: string): string {
-  return crypto.createHash("sha512").update(params).digest("hex");
-}
-
-// Fetch PayU transactions for a date range
-async function fetchPayUTransactions(fromDate: string, toDate: string): Promise<PayUTransaction[]> {
-  const merchantKey = process.env.PAYU_MERCHANT_KEY;
-  const merchantSalt = process.env.PAYU_MERCHANT_SALT;
-
-  if (!merchantKey || !merchantSalt) {
-    throw new Error("PayU credentials not configured");
-  }
-
-  const command = "get_Transaction_Details";
-  const hashString = `${merchantKey}|${command}|${fromDate}|${merchantSalt}`;
-  const hash = generateHash(hashString);
-
-  const formData = new URLSearchParams();
-  formData.append("key", merchantKey);
-  formData.append("command", command);
-  formData.append("var1", fromDate);
-  formData.append("var2", toDate);
-  formData.append("hash", hash);
-
-  const response = await fetch(PAYU_BASE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-    },
-    body: formData.toString(),
-  });
-
-  const responseText = await response.text();
-  let data;
-  try {
-    data = JSON.parse(responseText);
-  } catch {
-    return [];
-  }
-
-  if (data.status === 1 && data.Transaction_details) {
-    const allTxns = Array.isArray(data.Transaction_details) 
-      ? data.Transaction_details 
-      : Object.values(data.Transaction_details);
-    return allTxns.filter(
-      (txn: PayUTransaction) => txn.status === "success" || txn.status === "captured"
-    );
-  }
-
-  return [];
-}
-
-// Fetch Meta Ads daily spend for a date range
-async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promise<Map<string, number>> {
+async function fetchMetaAdsDailySpendUSD(startDate: string, endDate: string): Promise<Map<string, number>> {
   const metaAccessToken = process.env.META_ACCESS_TOKEN;
   const adAccountId = process.env.META_AD_ACCOUNT_ID;
-
-  if (!metaAccessToken || !adAccountId) {
-    return new Map();
-  }
+  if (!metaAccessToken || !adAccountId) return new Map();
 
   try {
     const dateParams = `time_range={"since":"${startDate}","until":"${endDate}"}`;
-    const dailyUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
-
-    const response = await fetch(dailyUrl);
+    const url = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
+    const response = await fetch(url);
     const data = await response.json();
 
-    const spendMap = new Map<string, number>();
-    if (data.data) {
-      data.data.forEach((day: { date_start: string; spend: string }) => {
-        spendMap.set(day.date_start, parseFloat(day.spend || "0"));
+    const spendByDate = new Map<string, number>();
+    if (Array.isArray(data?.data)) {
+      data.data.forEach((row: { date_start?: string; spend?: string }) => {
+        if (!row?.date_start) return;
+        const spend = parseFloat(row.spend || "0");
+        spendByDate.set(row.date_start, Number.isFinite(spend) ? spend : 0);
       });
     }
-    return spendMap;
-  } catch (error) {
-    console.error("Meta Ads fetch error:", error);
+    return spendByDate;
+  } catch {
     return new Map();
   }
-}
-
-// Convert Costa Rica date to IST date range
-// Costa Rica is UTC-6, IST is UTC+5:30
-// Difference: 11.5 hours (IST is ahead)
-// Costa Rica "March 13 00:00" = IST "March 13 11:30"
-// Costa Rica "March 13 23:59:59" = IST "March 14 11:29:59"
-function getISTRangeForCostaRicaDate(costaRicaDate: string): { start: Date; end: Date } {
-  const [year, month, day] = costaRicaDate.split("-").map(Number);
-  
-  // Costa Rica midnight (00:00:00 UTC-6) = UTC 06:00:00
-  // IST = UTC + 5:30, so UTC 06:00 = IST 11:30
-  // Create start time: Costa Rica date at 00:00 = IST same date at 11:30
-  const startIST = new Date(`${costaRicaDate}T11:30:00+05:30`);
-  
-  // Costa Rica end of day (23:59:59 UTC-6) = UTC next day 05:59:59
-  // IST = UTC + 5:30, so UTC 05:59:59 = IST 11:29:59
-  // Create end time: next day IST at 11:29:59
-  // Use UTC date to avoid timezone issues
-  const nextDayYear = day === 31 ? (month === 12 ? year + 1 : year) : year;
-  const nextDayMonth = day === 31 ? (month === 12 ? 1 : month + 1) : (day >= 28 && month === 2 ? 3 : month);
-  const nextDayDay = day >= 28 ? (month === 2 ? 1 : (day === 31 ? 1 : (day === 30 && [4,6,9,11].includes(month) ? 1 : day + 1))) : day + 1;
-  
-  // Simpler approach: add 1 day in milliseconds to start, then set to 11:29:59
-  const nextDayDate = new Date(startIST.getTime() + 24 * 60 * 60 * 1000);
-  const nextDayStr = `${nextDayDate.getUTCFullYear()}-${String(nextDayDate.getUTCMonth() + 1).padStart(2, '0')}-${String(nextDayDate.getUTCDate()).padStart(2, '0')}`;
-  const endIST = new Date(`${nextDayStr}T11:29:59+05:30`);
-  
-  return { start: startIST, end: endIST };
-}
-
-// Get day of week
-function getDayOfWeek(dateStr: string): string {
-  const date = new Date(dateStr);
-  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return days[date.getDay()];
 }
 
 export async function GET(request: NextRequest) {
   try {
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-    const supabase = createClient(url, serviceKey, {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+    const supabase = createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
 
     const { searchParams } = new URL(request.url);
     const token = searchParams.get("token");
-    const startDate = searchParams.get("startDate") || APP_LAUNCH_DATE;
-    const endDate = searchParams.get("endDate") || new Date().toISOString().split("T")[0];
+    const requestedStart = searchParams.get("startDate") || APP_LAUNCH_DATE;
+    const requestedEnd = searchParams.get("endDate") || formatDateOnly(new Date());
+    const customExchangeRate = searchParams.get("exchangeRate");
 
     if (!token) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify admin session
     const { data: sessionData } = await supabase
       .from("admin_sessions")
       .select("*")
       .eq("id", token)
       .single();
-
     if (!sessionData) {
       return NextResponse.json({ error: "Invalid session" }, { status: 401 });
     }
-
     if (new Date(sessionData.expires_at) < new Date()) {
       return NextResponse.json({ error: "Session expired" }, { status: 401 });
     }
 
-    // Get exchange rate (use custom if provided, otherwise fetch)
-    const customExchangeRate = searchParams.get("exchangeRate");
-    const exchangeRate = customExchangeRate ? parseFloat(customExchangeRate) : await fetchExchangeRate();
-    console.log(`Using exchange rate: ${exchangeRate}`);
+    const startDate = requestedStart < APP_LAUNCH_DATE ? APP_LAUNCH_DATE : requestedStart;
+    const endDate = requestedEnd < startDate ? startDate : requestedEnd;
 
-    // Fetch PayU transactions for the entire range
-    const transactions = await fetchPayUTransactions(startDate, endDate);
-    console.log(`Fetched ${transactions.length} PayU transactions for profit sheet`);
+    const exchangeRate = await fetchExchangeRateINR(customExchangeRate);
+    const metaSpendUSDByDate = await fetchMetaAdsDailySpendUSD(startDate, endDate);
 
-    // Fetch Meta Ads daily spend (in USD)
-    const metaSpendMap = await fetchMetaAdsDailySpend(startDate, endDate);
-    console.log(`Fetched Meta Ads spend for ${metaSpendMap.size} days`);
+    const startWindow = getISTWindowForLabelDate(startDate).start;
+    const endWindow = getISTWindowForLabelDate(endDate).end;
 
-    // Generate date range
-    const dates: string[] = [];
-    const current = new Date(startDate);
-    const end = new Date(endDate);
-    while (current <= end) {
-      dates.push(current.toISOString().split("T")[0]);
-      current.setDate(current.getDate() + 1);
+    const { data: paymentsRaw, error: paymentsError } = await supabase
+      .from("payments")
+      .select("amount, created_at, payment_status")
+      .gte("created_at", startWindow.toISOString())
+      .lte("created_at", endWindow.toISOString())
+      .limit(10000);
+
+    if (paymentsError) {
+      return NextResponse.json({ error: paymentsError.message }, { status: 500 });
     }
 
-    // Build profit sheet rows
-    const profitSheet: ProfitSheetRow[] = dates.map(costaRicaDate => {
-      const { start: istStart, end: istEnd } = getISTRangeForCostaRicaDate(costaRicaDate);
-      
-      // Debug log for first date
-      if (costaRicaDate === dates[0]) {
-        console.log(`Profit Sheet Debug - Date: ${costaRicaDate}`);
-        console.log(`IST Start: ${istStart.toISOString()} (${istStart.toString()})`);
-        console.log(`IST End: ${istEnd.toISOString()} (${istEnd.toString()})`);
-        if (transactions.length > 0) {
-          const sampleTxn = transactions[0];
-          const sampleDate = new Date(sampleTxn.addedon.replace(" ", "T") + "+05:30");
-          console.log(`Sample txn: ${sampleTxn.addedon} -> ${sampleDate.toISOString()}`);
-        }
-      }
-      
-      // Filter transactions for this Costa Rica day (IST 11:30 AM to next day 11:29 AM)
-      const dayTransactions = transactions.filter(txn => {
-        // PayU addedon is in IST format: "2026-03-15 14:03:53"
-        const txnDate = new Date(txn.addedon.replace(" ", "T") + "+05:30");
-        return txnDate >= istStart && txnDate <= istEnd;
+    const successfulPayments: PaymentRecord[] = (paymentsRaw || []).filter((p: PaymentRecord) =>
+      p.payment_status === "paid" || p.payment_status === "success" || p.payment_status === "captured"
+    );
+
+    const dayLabels: string[] = [];
+    const cursor = parseDateOnly(startDate);
+    const end = parseDateOnly(endDate);
+    while (cursor <= end) {
+      dayLabels.push(formatDateOnly(cursor));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    const rows: ProfitSheetRow[] = dayLabels.map((label) => {
+      const { start, end } = getISTWindowForLabelDate(label);
+
+      const dayPayments = successfulPayments.filter((p) => {
+        if (!p.created_at) return false;
+        const createdAt = new Date(p.created_at);
+        return createdAt >= start && createdAt <= end;
       });
 
-      const revenue = dayTransactions.reduce((sum, txn) => sum + parseFloat(txn.amount || "0"), 0);
-      const gst = revenue * 0.05; // 5% GST
-      const adsCostUSD = metaSpendMap.get(costaRicaDate) || 0;
-      const adsCostINR = adsCostUSD * exchangeRate; // Convert USD to INR
-      const netRevenue = revenue - gst - adsCostINR;
-      const roas = adsCostINR > 0 ? revenue / adsCostINR : 0;
+      const revenueUSD = dayPayments.reduce((sum, p) => sum + ((p.amount || 0) / 100), 0);
+      const revenueINR = revenueUSD * exchangeRate;
+      const gst = revenueINR * 0.05;
+      const adsCostUSD = metaSpendUSDByDate.get(label) || 0;
+      const adsCostINR = adsCostUSD * exchangeRate;
+      const netRevenue = revenueINR - gst - adsCostINR;
+      const roas = adsCostINR > 0 ? revenueINR / adsCostINR : 0;
 
       return {
-        date: costaRicaDate,
-        day: getDayOfWeek(costaRicaDate),
-        revenue,
+        date: label,
+        day: getDayOfWeek(label),
+        revenue: revenueINR,
         gst,
         adsCostUSD,
         adsCostINR,
         netRevenue,
         roas,
-        transactionCount: dayTransactions.length,
+        transactionCount: dayPayments.length,
       };
     });
 
-    // Calculate totals
-    const totals = profitSheet.reduce(
+    const totals = rows.reduce(
       (acc, row) => ({
         revenue: acc.revenue + row.revenue,
         gst: acc.gst + row.gst,
@@ -279,18 +207,18 @@ export async function GET(request: NextRequest) {
     const overallRoas = totals.adsCostINR > 0 ? totals.revenue / totals.adsCostINR : 0;
 
     return NextResponse.json({
-      rows: profitSheet,
+      rows,
       totals: {
         ...totals,
         roas: overallRoas,
       },
       exchangeRate,
       dateRange: { start: startDate, end: endDate },
+      istDayBoundary: "11:30 to next day 11:29:59 IST",
     });
   } catch (error: any) {
-    console.error("Profit sheet error:", error);
     return NextResponse.json(
-      { error: error.message || "Failed to generate profit sheet" },
+      { error: error?.message || "Failed to generate profit sheet" },
       { status: 500 }
     );
   }

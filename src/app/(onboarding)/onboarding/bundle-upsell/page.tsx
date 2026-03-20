@@ -7,11 +7,9 @@ import { Button } from "@/components/ui/button";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Loader2, Star, Sparkles, Calendar, Heart, Briefcase, Activity } from "lucide-react";
 import { useUserStore } from "@/lib/user-store";
-import { useOnboardingStore } from "@/lib/onboarding-store";
-import { supabase } from "@/lib/supabase";
 import { generateUserId } from "@/lib/user-profile";
 import { pixelEvents } from "@/lib/pixel-events";
-import Script from "next/script";
+import { startStripeCheckout } from "@/lib/stripe-checkout";
 
 const progressSteps = [
   { label: "Order submitted", completed: true },
@@ -20,7 +18,6 @@ const progressSteps = [
   { label: "Access to the app", completed: false },
 ];
 
-// Preview features for 2026 predictions
 const predictionFeatures = [
   { icon: Calendar, label: "Month-by-month forecasts", description: "Detailed predictions for all 12 months" },
   { icon: Heart, label: "Love & relationships", description: "When romance will bloom in your life" },
@@ -35,160 +32,71 @@ function BundleUpsellContent() {
   const [paymentError, setPaymentError] = useState("");
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState(true);
-  
+
   const { userId: storeUserId } = useUserStore();
-  const { birthMonth, birthDay, birthYear } = useOnboardingStore();
 
-  // Fulfill checkout to unlock features in Supabase
-  const fulfillCheckout = async (bundleId: string) => {
-    try {
-      const userId = storeUserId || localStorage.getItem("astrorekha_user_id") || generateUserId();
-      
-      await supabase.from("users").update({
-        bundle_purchased: bundleId,
-      }).eq("id", userId);
-    } catch (err) {
-      console.error("Failed to fulfill bundle checkout:", err);
-    }
-  };
-
-  // Route protection
   useEffect(() => {
     const sessionId = searchParams.get("session_id");
     const hasCompletedPayment = localStorage.getItem("astrorekha_payment_completed") === "true";
     const hasCompletedRegistration = localStorage.getItem("astrorekha_registration_completed") === "true";
     const flow = localStorage.getItem("astrorekha_onboarding_flow");
-    
-    // If not flow-b, redirect to regular upsell
+
     if (flow !== "flow-b") {
       router.replace("/onboarding/step-18");
       return;
     }
-    
+
     if (hasCompletedRegistration) {
       router.replace("/home");
       return;
     }
-    
+
     if (sessionId || hasCompletedPayment) {
       setIsAuthorized(true);
-      
+
       if (sessionId) {
         localStorage.setItem("astrorekha_payment_completed", "true");
         localStorage.setItem("astrorekha_payment_session_id", sessionId);
         localStorage.setItem("astrorekha_purchase_type", "one-time");
-        
-        // Save the bundle ID for later use
+
         const selectedPlan = localStorage.getItem("astrorekha_selected_plan") || "palm-birth";
         localStorage.setItem("astrorekha_bundle_id", selectedPlan);
-        
-        // Track Purchase pixel
+
         const planPrices: Record<string, number> = {
-          "palm-reading": 1163,
-          "palm-birth": 1578,
-          "palm-birth-compat": 3158,
+          "palm-reading": 1199,
+          "palm-birth": 1499,
+          "palm-birth-compat": 2499,
         };
-        pixelEvents.purchase(planPrices[selectedPlan] || 1578, selectedPlan, selectedPlan);
-        
-        // Fulfill the checkout to unlock features
-        fulfillCheckout(selectedPlan);
+
+        pixelEvents.purchase(planPrices[selectedPlan] || 1499, selectedPlan, selectedPlan);
       }
     } else {
       router.replace("/onboarding/bundle-pricing");
-      return;
     }
   }, [searchParams, router]);
 
   const handleAddUpsell = async () => {
     setPaymentError("");
     setIsProcessing(true);
-    
-    const upsellPriceINR = 499;
-    // Track AddToCart for upsell
-    pixelEvents.addToCart(upsellPriceINR, "2026 Future Predictions");
+
+    const upsellPriceUSD = 799;
+    pixelEvents.addToCart(upsellPriceUSD, "2026 Future Predictions");
 
     try {
-      const response = await fetch("/api/payu/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: storeUserId || localStorage.getItem("astrorekha_user_id") || generateUserId(),
-          bundleId: "2026-predictions",
-          type: "upsell",
-          email: localStorage.getItem("astrorekha_email") || "",
-          firstName: localStorage.getItem("astrorekha_name") || "Customer",
-        }),
+      pixelEvents.initiateCheckout(upsellPriceUSD, ["2026 Future Predictions"]);
+
+      await startStripeCheckout({
+        type: "upsell",
+        bundleId: "2026-predictions",
+        userId: storeUserId || localStorage.getItem("astrorekha_user_id") || generateUserId(),
+        email: localStorage.getItem("astrorekha_email") || "",
+        firstName: localStorage.getItem("astrorekha_name") || "Customer",
+        successPath: "/onboarding/step-19",
+        cancelPath: "/onboarding/bundle-upsell",
       });
-
-      const data = await response.json();
-
-      if (data.txnId) {
-        pixelEvents.initiateCheckout(upsellPriceINR, ["2026 Future Predictions"]);
-
-        const bolt = (window as any).bolt;
-        bolt.launch({
-          key: data.key,
-          txnid: data.txnId,
-          hash: data.hash,
-          amount: data.amount,
-          firstname: data.firstName,
-          email: data.email,
-          phone: "",
-          productinfo: data.productInfo,
-          udf1: data.udf1,
-          udf2: data.udf2,
-          udf3: data.udf3,
-          udf4: data.udf4,
-          udf5: data.udf5,
-          surl: `${window.location.origin}/api/payu/success`,
-          furl: `${window.location.origin}/api/payu/failure`,
-        }, {
-          responseHandler: async (response: any) => {
-            if (response.response.txnStatus === "SUCCESS") {
-              await fetch("/api/payu/verify-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  txnid: response.response.txnid,
-                  mihpayid: response.response.mihpayid,
-                  status: "success",
-                  hash: response.response.hash,
-                  amount: data.amount,
-                  productinfo: data.productInfo,
-                  firstname: data.firstName,
-                  email: data.email,
-                  udf1: data.udf1,
-                  udf2: data.udf2,
-                  udf3: data.udf3,
-                  udf4: data.udf4,
-                  udf5: data.udf5,
-                  key: data.key,
-                }),
-              });
-              pixelEvents.purchase(upsellPriceINR, "2026-predictions", "2026 Future Predictions");
-              setIsProcessing(false);
-              router.push("/onboarding/step-19");
-            } else {
-              setPaymentError("Payment failed. Please try again.");
-              setIsProcessing(false);
-            }
-          },
-          catchException: (error: any) => {
-            console.error("PayU Bolt error:", error);
-            setPaymentError("Payment was cancelled or failed.");
-            setIsProcessing(false);
-          }
-        });
-      } else if (data.error) {
-        setPaymentError(data.error);
-        setIsProcessing(false);
-      } else {
-        setPaymentError("Unable to process. Please try again.");
-        setIsProcessing(false);
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upsell error:", error);
-      setPaymentError("Something went wrong. Please try again.");
+      setPaymentError(error?.message || "Something went wrong. Please try again.");
       setIsProcessing(false);
     }
   };
@@ -212,7 +120,6 @@ function BundleUpsellContent() {
       variants={fadeUp}
       className="flex-1 flex flex-col min-h-screen bg-background"
     >
-      {/* Progress Steps */}
       <div className="px-6 pt-6 pb-4">
         <div className="flex items-center justify-between">
           {progressSteps.map((step, index) => (
@@ -241,9 +148,7 @@ function BundleUpsellContent() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 px-6 py-4">
-        {/* Success Message */}
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -254,14 +159,12 @@ function BundleUpsellContent() {
           <p className="text-sm text-muted-foreground">Your reading is being prepared</p>
         </motion.div>
 
-        {/* Upsell Card */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
           className="relative"
         >
-          {/* Special Offer Badge */}
           <div className="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
             <div className="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs px-4 py-1.5 rounded-full font-semibold flex items-center gap-1.5 shadow-lg">
               <Sparkles className="w-3.5 h-3.5" />
@@ -270,14 +173,12 @@ function BundleUpsellContent() {
           </div>
 
           <div className="bg-gradient-to-br from-purple-600/20 via-blue-600/10 to-purple-600/20 rounded-3xl border border-purple-500/30 overflow-hidden">
-            {/* Header */}
             <div className="bg-gradient-to-r from-purple-600/30 to-blue-600/30 px-6 py-5 text-center">
               <div className="text-4xl mb-2">🔮</div>
               <h3 className="text-2xl font-bold text-white mb-1">2026 Future Predictions</h3>
               <p className="text-white/70 text-sm">Know what the stars have in store for you</p>
             </div>
 
-            {/* Features */}
             <div className="px-6 py-5 space-y-4">
               {predictionFeatures.map((feature, index) => (
                 <motion.div
@@ -298,17 +199,15 @@ function BundleUpsellContent() {
               ))}
             </div>
 
-            {/* Price Section */}
             <div className="px-6 py-5 bg-black/20">
               <div className="flex items-center justify-center gap-3 mb-4">
-                <span className="text-white/50 line-through text-lg">₹999</span>
-                <span className="text-4xl font-bold text-white">₹499</span>
+                <span className="text-white/50 line-through text-lg">$15.99</span>
+                <span className="text-4xl font-bold text-white">$7.99</span>
                 <span className="bg-green-500/20 text-green-400 text-xs px-2 py-1 rounded-full font-semibold">
                   50% OFF
                 </span>
               </div>
 
-              {/* Selection Toggle */}
               <label
                 className={`flex items-center gap-3 p-4 rounded-xl cursor-pointer transition-all mb-4 ${
                   selectedOffer
@@ -328,14 +227,12 @@ function BundleUpsellContent() {
                 </div>
               </label>
 
-              {/* Error message */}
               {paymentError && (
                 <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg mb-4">
                   {paymentError}
                 </div>
               )}
 
-              {/* CTA Button */}
               <Button
                 onClick={selectedOffer ? handleAddUpsell : handleSkip}
                 disabled={isProcessing}
@@ -352,7 +249,7 @@ function BundleUpsellContent() {
                     Processing...
                   </span>
                 ) : selectedOffer ? (
-                  "Add to Order - ₹499"
+                  "Add to Order - $7.99"
                 ) : (
                   "Continue without this offer →"
                 )}
@@ -361,7 +258,6 @@ function BundleUpsellContent() {
           </div>
         </motion.div>
 
-        {/* Testimonial */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -376,11 +272,10 @@ function BundleUpsellContent() {
           <p className="text-sm text-muted-foreground italic">
             "The 2026 predictions were incredibly accurate! It helped me prepare for a major career change that happened exactly when predicted."
           </p>
-          <p className="text-xs text-muted-foreground mt-2">— Sarah M., verified buyer</p>
+          <p className="text-xs text-muted-foreground mt-2">- Sarah M., verified buyer</p>
         </motion.div>
       </div>
 
-      {/* Bottom spacing */}
       <div className="pb-8" />
     </motion.div>
   );
@@ -388,18 +283,14 @@ function BundleUpsellContent() {
 
 export default function BundleUpsellPage() {
   return (
-    <>
-      <Suspense
-        fallback={
-          <div className="flex-1 flex items-center justify-center min-h-screen bg-background">
-            <Loader2 className="w-8 h-8 animate-spin text-primary" />
-          </div>
-        }
-      >
-        <BundleUpsellContent />
-      </Suspense>
-      {/* Load PayU Bolt script only on this page */}
-      <Script src="https://jssdk.payu.in/bolt/bolt.min.js" strategy="afterInteractive" />
-    </>
+    <Suspense
+      fallback={
+        <div className="flex-1 flex items-center justify-center min-h-screen bg-background">
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      }
+    >
+      <BundleUpsellContent />
+    </Suspense>
   );
 }

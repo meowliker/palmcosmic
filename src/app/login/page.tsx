@@ -358,7 +358,7 @@ export default function LoginPage() {
             <div className="relative w-20 h-20 rounded-2xl overflow-hidden border border-primary/30">
               <Image
                 src="/logo.png"
-                alt="AstroRekha"
+                alt="PalmCosmic"
                 width={80}
                 height={80}
                 className="object-cover w-full h-full"

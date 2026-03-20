@@ -63,7 +63,7 @@ export default function OnboardingPage() {
         <motion.div variants={staggerItem} className="flex flex-col items-center gap-2 mb-6">
           <Image
             src="/logo.png"
-            alt="AstroRekha"
+            alt="PalmCosmic"
             width={48}
             height={48}
             className="rounded-xl"
@@ -71,7 +71,7 @@ export default function OnboardingPage() {
               e.currentTarget.style.display = "none";
             }}
           />
-          <span className="text-xl font-semibold">AstroRekha</span>
+          <span className="text-xl font-semibold">PalmCosmic</span>
         </motion.div>
 
         <motion.h1

@@ -198,10 +198,10 @@ export const featureNames: Record<keyof UnlockedFeatures, string> = {
   compatibilityTest: "Compatibility Test",
 };
 
-// Feature prices (INR)
+// Feature prices (USD cents)
 export const featurePrices: Record<keyof UnlockedFeatures, number> = {
-  palmReading: 582,
-  prediction2026: 582,
-  birthChart: 582,
-  compatibilityTest: 582,
+  palmReading: 999,
+  prediction2026: 999,
+  birthChart: 999,
+  compatibilityTest: 999,
 };

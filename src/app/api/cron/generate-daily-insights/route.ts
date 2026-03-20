@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
             hour,
             minute,
             second: 0,
-            place: profileData.birth_place || "New Delhi, India",
+            place: profileData.birth_place || "New York, USA",
           });
         } catch {
           console.log(`Astro engine unavailable for user ${userId}, using zodiac fallback`);
@@ -186,7 +186,7 @@ Generate the daily insights JSON now.`;
 DATE: ${dateKey}
 SUN SIGN: ${sunSign}
 BIRTH DATE: ${birthYear}-${String(monthNum).padStart(2, "0")}-${String(d).padStart(2, "0")}
-BIRTH PLACE: ${profileData.birth_place || "India"}
+BIRTH PLACE: ${profileData.birth_place || "United States"}
 
 Generate the daily insights JSON now.`;
         }

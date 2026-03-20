@@ -108,7 +108,7 @@ export async function POST(request: NextRequest) {
       hour: time.hour,
       minute: time.minute,
       second: 0,
-      place: birthPlace || "New Delhi, India",
+      place: birthPlace || "New York, USA",
     });
 
     const bigThree = astroResult.chart?.big_three || {};

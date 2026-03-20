@@ -232,7 +232,7 @@ export default function WelcomeBPage() {
             <div className="relative w-28 h-28 rounded-3xl overflow-hidden border-2 border-primary/30 shadow-2xl shadow-primary/20">
               <Image
                 src="/logo.png"
-                alt="AstroRekha"
+                alt="PalmCosmic"
                 width={112}
                 height={112}
                 className="object-cover w-full h-full"
@@ -247,7 +247,7 @@ export default function WelcomeBPage() {
             transition={{ delay: 0.3, duration: 0.6 }}
             className="text-4xl font-bold text-white tracking-wide"
           >
-            AstroRekha
+            PalmCosmic
           </motion.h1>
           <motion.p
             initial={{ opacity: 0 }}

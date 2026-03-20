@@ -113,8 +113,8 @@ export default function Step16Page() {
           animate={{ opacity: 1, y: 0 }}
           className="flex flex-col items-center gap-1 mb-2"
         >
-          <img src="/logo.png" alt="AstroRekha" className="w-20 h-20 object-contain" />
-          <span className="text-sm text-muted-foreground">AstroRekha</span>
+          <img src="/logo.png" alt="PalmCosmic" className="w-20 h-20 object-contain" />
+          <span className="text-sm text-muted-foreground">PalmCosmic</span>
         </motion.div>
 
         <motion.h1

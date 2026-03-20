@@ -7,12 +7,11 @@ import { Button } from "@/components/ui/button";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Check, Loader2 } from "lucide-react";
 import Image from "next/image";
-import { useUserStore } from "@/lib/user-store";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { supabase } from "@/lib/supabase";
 import { generateUserId } from "@/lib/user-profile";
 import { pixelEvents } from "@/lib/pixel-events";
-import Script from "next/script";
+import { startStripeCheckout } from "@/lib/stripe-checkout";
 
 const progressSteps = [
   { label: "Order submitted", completed: true },
@@ -25,37 +24,37 @@ const upsellOffers = [
   {
     id: "2026-predictions",
     name: "2026 Future Predictions",
-    price: "₹499",
-    priceINR: 499,
-    originalPrice: "₹799",
-    discount: "37% OFF",
+    priceLabel: "$9.99",
+    priceCents: 999,
+    originalPriceLabel: "$19.99",
+    discount: "50% OFF",
     icon: "🔮",
   },
   {
     id: "birth-chart",
     name: "Birth Chart Report",
-    price: "₹499",
-    priceINR: 499,
-    originalPrice: "₹799",
-    discount: "37% OFF",
+    priceLabel: "$9.99",
+    priceCents: 999,
+    originalPriceLabel: "$19.99",
+    discount: "50% OFF",
     icon: "🌙",
   },
   {
     id: "compatibility",
     name: "Compatibility Report",
-    price: "₹499",
-    priceINR: 499,
-    originalPrice: "₹799",
-    discount: "37% OFF",
+    priceLabel: "$9.99",
+    priceCents: 999,
+    originalPriceLabel: "$19.99",
+    discount: "50% OFF",
     icon: "🔮",
   },
   {
     id: "ultra-pack",
     name: "Ultra Pack 3 in 1",
-    price: "₹999",
-    priceINR: 999,
-    originalPrice: "₹1,599",
-    discount: "37% OFF",
+    priceLabel: "$24.99",
+    priceCents: 2499,
+    originalPriceLabel: "$49.99",
+    discount: "50% OFF",
     icon: "📦",
     recommended: true,
   },
@@ -67,10 +66,8 @@ function Step18Content() {
   const [selectedOffers, setSelectedOffers] = useState<Set<string>>(new Set(["ultra-pack"]));
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentError, setPaymentError] = useState("");
-  const [isAnalyzingPalm, setIsAnalyzingPalm] = useState(false);
   const [isAuthorized, setIsAuthorized] = useState(false);
   
-  const { unlockFeature, unlockAllFeatures, purchaseBundle, addCoins } = useUserStore();
   const { birthMonth, birthDay, birthYear } = useOnboardingStore();
 
   // Route protection: Check if user has completed payment
@@ -89,7 +86,7 @@ function Step18Content() {
     if (sessionId || hasCompletedPayment) {
       setIsAuthorized(true);
       
-      // Mark payment as completed if coming from Razorpay callback
+      // Mark payment as completed if coming from payment callback
       if (sessionId) {
         localStorage.setItem("astrorekha_payment_completed", "true");
         localStorage.setItem("astrorekha_payment_session_id", sessionId);
@@ -161,8 +158,6 @@ function Step18Content() {
     const palmImage = localStorage.getItem("astrorekha_palm_image");
     if (!palmImage) return;
 
-    setIsAnalyzingPalm(true);
-
     try {
       const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
       const zodiacSign = calculateZodiacSign(birthMonth, birthDay);
@@ -191,8 +186,6 @@ function Step18Content() {
       }
     } catch (err) {
       console.error("Palm analysis error:", err);
-    } finally {
-      setIsAnalyzingPalm(false);
     }
   };
 
@@ -247,17 +240,12 @@ function Step18Content() {
     });
   };
 
-  const calculateTotal = () => {
-    if (selectedOffers.has("ultra-pack")) return "₹999";
-    const count = selectedOffers.size;
-    if (count === 0) return "₹0";
-    return `₹${count * 499}`;
+  const calculateTotalCents = () => {
+    if (selectedOffers.has("ultra-pack")) return 2499;
+    return selectedOffers.size * 999;
   };
 
-  const calculateTotalINR = () => {
-    if (selectedOffers.has("ultra-pack")) return 999;
-    return selectedOffers.size * 499;
-  };
+  const calculateTotalLabel = () => `$${(calculateTotalCents() / 100).toFixed(2)}`;
 
   const handleGetReport = async () => {
     if (selectedOffers.size === 0) return;
@@ -266,89 +254,25 @@ function Step18Content() {
     setIsProcessing(true);
 
     try {
-      const totalINR = calculateTotalINR();
-      const offerNames = Array.from(selectedOffers).join(", ");
+      const totalCents = calculateTotalCents();
+      const selectedOfferIds = Array.from(selectedOffers);
+      const offerNames = selectedOfferIds.join(", ");
 
-      const response = await fetch("/api/payu/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: generateUserId(),
-          bundleId: selectedOffers.has("ultra-pack") ? "ultra-pack" : Array.from(selectedOffers).join(","),
-          type: "upsell",
-          email: localStorage.getItem("astrorekha_email") || "",
-          firstName: localStorage.getItem("astrorekha_name") || "Customer",
-        }),
+      pixelEvents.initiateCheckout(totalCents, selectedOfferIds);
+      pixelEvents.addPaymentInfo(totalCents, `Upsell: ${offerNames}`);
+
+      await startStripeCheckout({
+        type: "upsell",
+        bundleId: selectedOffers.has("ultra-pack") ? "ultra-pack" : selectedOfferIds.join(","),
+        userId: generateUserId(),
+        email: localStorage.getItem("astrorekha_email") || "",
+        firstName: localStorage.getItem("astrorekha_name") || "Customer",
+        successPath: "/onboarding/step-19",
+        cancelPath: "/onboarding/step-18",
       });
-
-      const data = await response.json();
-
-      if (data.txnId) {
-        // Track pixel events for upsell checkout
-        pixelEvents.initiateCheckout(totalINR, Array.from(selectedOffers));
-        pixelEvents.addPaymentInfo(totalINR, `Upsell: ${offerNames}`);
-
-        const bolt = (window as any).bolt;
-        bolt.launch({
-          key: data.key,
-          txnid: data.txnId,
-          hash: data.hash,
-          amount: data.amount,
-          firstname: data.firstName,
-          email: data.email,
-          phone: "",
-          productinfo: data.productInfo,
-          udf1: data.udf1,
-          udf2: data.udf2,
-          udf3: data.udf3,
-          udf4: data.udf4,
-          udf5: data.udf5,
-          surl: `${window.location.origin}/api/payu/success`,
-          furl: `${window.location.origin}/api/payu/failure`,
-        }, {
-          responseHandler: async (response: any) => {
-            if (response.response.txnStatus === "SUCCESS") {
-              await fetch("/api/payu/verify-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  txnid: response.response.txnid,
-                  mihpayid: response.response.mihpayid,
-                  status: "success",
-                  hash: response.response.hash,
-                  amount: data.amount,
-                  productinfo: data.productInfo,
-                  firstname: data.firstName,
-                  email: data.email,
-                  udf1: data.udf1,
-                  udf2: data.udf2,
-                  udf3: data.udf3,
-                  udf4: data.udf4,
-                  udf5: data.udf5,
-                  key: data.key,
-                }),
-              });
-              pixelEvents.purchase(totalINR, `upsell-${offerNames}`, offerNames);
-              setIsProcessing(false);
-              router.push("/onboarding/step-19");
-            } else {
-              setPaymentError("Payment failed. Please try again.");
-              setIsProcessing(false);
-            }
-          },
-          catchException: (error: any) => {
-            console.error("PayU Bolt error:", error);
-            setPaymentError("Payment was cancelled or failed.");
-            setIsProcessing(false);
-          }
-        });
-      } else {
-        setPaymentError(data.error || "Unable to start checkout. Please try again.");
-        setIsProcessing(false);
-      }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Upsell checkout error:", error);
-      setPaymentError("Something went wrong. Please try again.");
+      setPaymentError(error?.message || "Something went wrong. Please try again.");
       setIsProcessing(false);
     }
   };
@@ -458,9 +382,9 @@ function Step18Content() {
               <div className="flex-1 text-left">
                 <h3 className="font-semibold text-sm">{offer.name}</h3>
                 <div className="flex items-center gap-2 mt-1">
-                  <span className="font-bold">{offer.price}</span>
+                  <span className="font-bold">{offer.priceLabel}</span>
                   <span className="text-muted-foreground text-xs line-through">
-                    (was {offer.originalPrice})
+                    (was {offer.originalPriceLabel})
                   </span>
                   <span className="text-primary text-xs font-semibold">
                     {offer.discount}
@@ -504,7 +428,7 @@ function Step18Content() {
             ? "Processing..." 
             : selectedOffers.size === 0 
               ? "Select an offer" 
-              : `Get my reports - ${calculateTotal()}`}
+              : `Get my reports - ${calculateTotalLabel()}`}
         </Button>
 
         <button
@@ -516,7 +440,7 @@ function Step18Content() {
         </button>
 
         <p className="text-[10px] text-muted-foreground text-center leading-relaxed">
-          Purchase the Ultra Pack 3 in 1 for ₹999, charged via Razorpay.
+          Purchase the Ultra Pack 3 in 1 for $24.99, charged securely via Stripe.
           By clicking &quot;Get my reports&quot;, you confirm your purchase. The report will be
           delivered electronically after purchase. All sales are final and non-refundable.
         </p>
@@ -527,21 +451,17 @@ function Step18Content() {
 
 export default function Step18Page() {
   return (
-    <>
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-background flex items-center justify-center">
-            <div className="text-center">
-              <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-4" />
-              <p className="text-muted-foreground">Loading...</p>
-            </div>
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-background flex items-center justify-center">
+          <div className="text-center">
+            <Loader2 className="w-10 h-10 text-primary animate-spin mx-auto mb-4" />
+            <p className="text-muted-foreground">Loading...</p>
           </div>
-        }
-      >
-        <Step18Content />
-      </Suspense>
-      {/* Load PayU Bolt script only on this page */}
-      <Script src="https://jssdk.payu.in/bolt/bolt.min.js" strategy="afterInteractive" />
-    </>
+        </div>
+      }
+    >
+      <Step18Content />
+    </Suspense>
   );
 }

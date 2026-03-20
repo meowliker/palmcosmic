@@ -176,7 +176,7 @@ export default function Step20Page() {
           transition={{ delay: 0.4 }}
           className="text-muted-foreground text-center text-sm mb-8 max-w-xs"
         >
-          Your AstroRekha account is ready. Explore all the cosmic insights waiting for you.
+          Your PalmCosmic account is ready. Explore all the cosmic insights waiting for you.
         </motion.p>
 
         {/* Features */}

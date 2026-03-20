@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Save, Plus, Trash2, Loader2, Check, ShieldAlert } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Check } from "lucide-react";
 import { useRouter } from "next/navigation";
 import type { PricingConfig, BundlePlan, UpsellPlan, ReportPlan, CoinPackage } from "@/lib/pricing";
 
@@ -232,17 +232,17 @@ export default function AdminPricingPage() {
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-sm text-muted-foreground">PayU Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Stripe Price (USD cents)</label>
                     <input
                       type="number"
                       value={bundle.price}
                       onChange={(e) => updateBundle(index, "price", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged</p>
+                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged in Stripe</p>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Display Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Display Price (USD cents)</label>
                     <input
                       type="number"
                       value={bundle.displayPrice || bundle.price}
@@ -252,7 +252,7 @@ export default function AdminPricingPage() {
                     <p className="text-xs text-muted-foreground mt-1">Shown on paywall</p>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Original Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Original Price (USD cents)</label>
                     <input
                       type="number"
                       value={bundle.originalPrice}
@@ -355,17 +355,17 @@ export default function AdminPricingPage() {
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div>
-                    <label className="text-sm text-muted-foreground">PayU Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Stripe Price (USD cents)</label>
                     <input
                       type="number"
                       value={upsell.price}
                       onChange={(e) => updateUpsell(index, "price", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged</p>
+                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged in Stripe</p>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Display Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Display Price (USD cents)</label>
                     <input
                       type="number"
                       value={upsell.displayPrice || upsell.price}
@@ -375,7 +375,7 @@ export default function AdminPricingPage() {
                     <p className="text-xs text-muted-foreground mt-1">Shown on paywall</p>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Original Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Original Price (USD cents)</label>
                     <input
                       type="number"
                       value={upsell.originalPrice}
@@ -457,7 +457,7 @@ export default function AdminPricingPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-sm text-muted-foreground">Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Price (USD cents)</label>
                     <input
                       type="number"
                       value={report.price}
@@ -466,7 +466,7 @@ export default function AdminPricingPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Original Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Original Price (USD cents)</label>
                     <input
                       type="number"
                       value={report.originalPrice}
@@ -515,17 +515,17 @@ export default function AdminPricingPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">PayU Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Stripe Price (USD cents)</label>
                     <input
                       type="number"
                       value={pkg.price}
                       onChange={(e) => updateCoinPackage(index, "price", parseInt(e.target.value) || 0)}
                       className="w-full mt-1 px-3 py-2 bg-background border border-border rounded-lg"
                     />
-                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged</p>
+                    <p className="text-xs text-muted-foreground mt-1">Actual amount charged in Stripe</p>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Display Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Display Price (USD cents)</label>
                     <input
                       type="number"
                       value={pkg.displayPrice || pkg.price}
@@ -535,7 +535,7 @@ export default function AdminPricingPage() {
                     <p className="text-xs text-muted-foreground mt-1">Shown on UI</p>
                   </div>
                   <div>
-                    <label className="text-sm text-muted-foreground">Original Price (₹)</label>
+                    <label className="text-sm text-muted-foreground">Original Price (USD cents)</label>
                     <input
                       type="number"
                       value={pkg.originalPrice}

@@ -10,7 +10,7 @@ declare global {
 /**
  * Track a standard event with Meta Pixel.
  * Retries up to 10 times (500ms apart) if fbq isn't loaded yet,
- * which commonly happens after returning from Razorpay checkout.
+ * which commonly happens after returning from Stripe checkout.
  */
 export const trackPixelEvent = (eventName: string, params?: Record<string, any>) => {
   if (typeof window === "undefined") return;
@@ -45,8 +45,16 @@ export const trackCustomEvent = (eventName: string, params?: Record<string, any>
   fire(0);
 };
 
+function normalizeUsdValue(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (Number.isInteger(value) && value >= 100) {
+    return Number((value / 100).toFixed(2));
+  }
+  return Number(value.toFixed(2));
+}
+
 // ============================================
-// Standard Meta Pixel Events for AstroRekha
+// Standard Meta Pixel Events for PalmCosmic
 // ============================================
 
 export const pixelEvents = {
@@ -65,8 +73,8 @@ export const pixelEvents = {
   /** User clicks "Start Trial" button (before payment) */
   addToCart: (value: number, contentName: string) => 
     trackPixelEvent("AddToCart", { 
-      value, 
-      currency: "INR",
+      value: normalizeUsdValue(value), 
+      currency: "USD",
       content_name: contentName,
       content_type: "product"
     }),
@@ -74,7 +82,7 @@ export const pixelEvents = {
   /** User completes sign-up (creates account) */
   completeRegistration: (email?: string) => 
     trackPixelEvent("CompleteRegistration", { 
-      content_name: "AstroRekha Account",
+      content_name: "PalmCosmic Account",
       ...(email && { email })
     }),
   
@@ -83,18 +91,18 @@ export const pixelEvents = {
   /** User starts a purchase flow */
   startTrial: (value: number = 0) => 
     trackPixelEvent("StartTrial", { 
-      value, 
-      currency: "INR",
-      content_name: "AstroRekha Bundle"
+      value: normalizeUsdValue(value), 
+      currency: "USD",
+      content_name: "PalmCosmic Bundle"
     }),
   
   /** User completes a bundle purchase */
   subscribe: (value: number, plan: string) => 
     trackPixelEvent("Subscribe", { 
-      value, 
-      currency: "INR",
+      value: normalizeUsdValue(value), 
+      currency: "USD",
       content_name: plan,
-      predicted_ltv: value
+      predicted_ltv: normalizeUsdValue(value)
     }),
   
   // --- Purchases ---
@@ -102,17 +110,17 @@ export const pixelEvents = {
   /** User initiates checkout */
   initiateCheckout: (value: number, items: string[]) => 
     trackPixelEvent("InitiateCheckout", { 
-      value, 
-      currency: "INR",
+      value: normalizeUsdValue(value), 
+      currency: "USD",
       content_ids: items,
       num_items: items.length
     }),
   
-  /** User adds payment info (redirected to Razorpay checkout) */
+  /** User adds payment info (redirected to checkout) */
   addPaymentInfo: (value: number, contentName: string) => 
     trackPixelEvent("AddPaymentInfo", { 
-      value, 
-      currency: "INR",
+      value: normalizeUsdValue(value), 
+      currency: "USD",
       content_name: contentName,
       content_category: "Bundle"
     }),
@@ -120,8 +128,8 @@ export const pixelEvents = {
   /** User completes a purchase */
   purchase: (value: number, productId: string, productName: string) => 
     trackPixelEvent("Purchase", { 
-      value, 
-      currency: "INR",
+      value: normalizeUsdValue(value), 
+      currency: "USD",
       content_ids: [productId],
       content_name: productName,
       content_type: "product"
@@ -130,8 +138,8 @@ export const pixelEvents = {
   /** User buys coins */
   purchaseCoins: (value: number, coinAmount: number) => 
     trackPixelEvent("Purchase", { 
-      value, 
-      currency: "INR",
+      value: normalizeUsdValue(value), 
+      currency: "USD",
       content_ids: [`coins-${coinAmount}`],
       content_name: `${coinAmount} Coins`,
       content_type: "product"

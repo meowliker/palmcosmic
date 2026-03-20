@@ -6,8 +6,9 @@ import { X, Lock, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUserStore, featureNames, featurePrices, UnlockedFeatures } from "@/lib/user-store";
 import { generateUserId } from "@/lib/user-profile";
+import { startStripeCheckout } from "@/lib/stripe-checkout";
 
-// Map feature keys to report IDs for Razorpay checkout
+// Map feature keys to report IDs for checkout
 const featureToReportId: Record<keyof UnlockedFeatures, string> = {
   palmReading: "report-palm",
   prediction2026: "report-2026",
@@ -22,7 +23,7 @@ interface UpsellPopupProps {
   onPurchase?: () => void;
 }
 
-export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopupProps) {
+export function UpsellPopup({ isOpen, onClose, feature }: UpsellPopupProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
 
@@ -38,84 +39,19 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
 
     try {
       const reportId = featureToReportId[feature];
-      
-      const response = await fetch("/api/payu/initiate-payment", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: generateUserId(),
-          packageId: reportId,
-          type: "report",
-          email: localStorage.getItem("astrorekha_email") || "",
-          firstName: localStorage.getItem("astrorekha_name") || "Customer",
-        }),
+
+      await startStripeCheckout({
+        type: "report",
+        packageId: reportId,
+        userId: generateUserId(),
+        email: localStorage.getItem("astrorekha_email") || "",
+        firstName: localStorage.getItem("astrorekha_name") || "Customer",
+        successPath: window.location.pathname,
+        cancelPath: window.location.pathname,
       });
-
-      const data = await response.json();
-
-      if (data.txnId) {
-        const bolt = (window as any).bolt;
-        bolt.launch({
-          key: data.key,
-          txnid: data.txnId,
-          hash: data.hash,
-          amount: data.amount,
-          firstname: data.firstName,
-          email: data.email,
-          phone: "",
-          productinfo: data.productInfo,
-          udf1: data.udf1,
-          udf2: data.udf2,
-          udf3: data.udf3,
-          udf4: data.udf4,
-          udf5: data.udf5,
-          surl: `${window.location.origin}/api/payu/success`,
-          furl: `${window.location.origin}/api/payu/failure`,
-        }, {
-          responseHandler: async (response: any) => {
-            if (response.response.txnStatus === "SUCCESS") {
-              await fetch("/api/payu/verify-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  txnid: response.response.txnid,
-                  mihpayid: response.response.mihpayid,
-                  status: "success",
-                  hash: response.response.hash,
-                  amount: data.amount,
-                  productinfo: data.productInfo,
-                  firstname: data.firstName,
-                  email: data.email,
-                  udf1: data.udf1,
-                  udf2: data.udf2,
-                  udf3: data.udf3,
-                  udf4: data.udf4,
-                  udf5: data.udf5,
-                  key: data.key,
-                }),
-              });
-              setIsProcessing(false);
-              onPurchase?.();
-              onClose();
-              window.location.reload();
-            } else {
-              setError("Payment failed. Please try again.");
-              setIsProcessing(false);
-            }
-          },
-          catchException: (error: any) => {
-            console.error("PayU Bolt error:", error);
-            setError("Payment was cancelled or failed.");
-            setIsProcessing(false);
-          }
-        });
-      } else {
-        setError(data.error || "Unable to start checkout. Please try again.");
-        setIsProcessing(false);
-      }
-    } catch (err) {
+    } catch (err: any) {
       console.error("Checkout error:", err);
-      setError("Something went wrong. Please try again.");
+      setError(err?.message || "Something went wrong. Please try again.");
       setIsProcessing(false);
     }
   };
@@ -156,9 +92,7 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
             </div>
 
             {/* Title */}
-            <h2 className="text-white text-xl font-bold text-center mb-2">
-              Unlock {featureName}
-            </h2>
+            <h2 className="text-white text-xl font-bold text-center mb-2">Unlock {featureName}</h2>
 
             {/* Description */}
             <p className="text-white/60 text-center text-sm mb-6">
@@ -173,7 +107,7 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
                   <span className="text-white font-medium">{featureName}</span>
                 </div>
                 <div className="text-right">
-                  <span className="text-white text-xl font-bold">₹{price}</span>
+                  <span className="text-white text-xl font-bold">${(price / 100).toFixed(2)}</span>
                 </div>
               </div>
             </div>
@@ -192,199 +126,12 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
               className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
               size="lg"
             >
-              {isProcessing ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                `Get ${featureName}`
-              )}
+              {isProcessing ? <Loader2 className="w-5 h-5 animate-spin" /> : `Get ${featureName}`}
             </Button>
 
             {/* Cancel Link */}
             <button
               onClick={onClose}
-              className="w-full mt-3 text-white/50 text-sm hover:text-white/70 transition-colors"
-            >
-              Maybe later
-            </button>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
-}
-
-// Pack of 3 Upsell Popup
-interface AllUpsellsPopupProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onPurchase?: () => void;
-}
-
-export function AllUpsellsPopup({ isOpen, onClose, onPurchase }: AllUpsellsPopupProps) {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState("");
-
-  const handlePurchase = async () => {
-    setIsProcessing(true);
-    setError("");
-
-    try {
-      const response = await fetch("/api/razorpay/create-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: totalPrice * 100, // paise
-          userId: generateUserId(),
-          bundleId: "ultra-pack",
-          type: "upsell",
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.orderId) {
-        const options = {
-          key: process.env.NEXT_PUBLIC_RAZORPAY_KEY_ID,
-          amount: totalPrice * 100,
-          currency: "INR",
-          name: "AstroRekha",
-          description: "Unlock All Reports",
-          order_id: data.orderId,
-          handler: async (res: any) => {
-            await fetch("/api/razorpay/verify-payment", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                razorpay_order_id: res.razorpay_order_id,
-                razorpay_payment_id: res.razorpay_payment_id,
-                razorpay_signature: res.razorpay_signature,
-              }),
-            });
-            setIsProcessing(false);
-            onPurchase?.();
-            onClose();
-            window.location.reload();
-          },
-          prefill: { email: localStorage.getItem("astrorekha_email") || "" },
-          theme: { color: "#7C3AED" },
-        };
-        const rzp = new (window as any).Razorpay(options);
-        rzp.on("payment.failed", () => {
-          setError("Payment failed. Please try again.");
-          setIsProcessing(false);
-        });
-        rzp.open();
-      } else {
-        setError(data.error || "Unable to start checkout. Please try again.");
-        setIsProcessing(false);
-      }
-    } catch (err) {
-      console.error("Checkout error:", err);
-      setError("Something went wrong. Please try again.");
-      setIsProcessing(false);
-    }
-  };
-
-  const totalPrice = 1249; // INR discounted bundle price
-  const originalPrice = 1749; // INR original price
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            onClick={(e) => e.stopPropagation()}
-            className="bg-gradient-to-b from-[#1A1F2E] to-[#0A0E1A] rounded-3xl w-full max-w-sm p-6 border border-primary/30"
-          >
-            {/* Close Button */}
-            <button
-              onClick={onClose}
-              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
-            >
-              <X className="w-4 h-4 text-white" />
-            </button>
-
-            {/* Badge */}
-            <div className="flex justify-center mb-4">
-              <span className="px-3 py-1 bg-gradient-to-r from-primary to-purple-600 text-white text-xs font-bold rounded-full">
-                BEST VALUE
-              </span>
-            </div>
-
-            {/* Icon */}
-            <div className="flex justify-center mb-4">
-              <div className="w-20 h-20 rounded-full bg-gradient-to-br from-primary/30 to-purple-500/30 flex items-center justify-center">
-                <Sparkles className="w-10 h-10 text-primary" />
-              </div>
-            </div>
-
-            {/* Title */}
-            <h2 className="text-white text-xl font-bold text-center mb-2">
-              Unlock Everything
-            </h2>
-
-            {/* Description */}
-            <p className="text-white/60 text-center text-sm mb-6">
-              Get all premium reports and unlock your complete cosmic profile.
-            </p>
-
-            {/* Features List */}
-            <div className="space-y-2 mb-6">
-              {(["prediction2026", "birthChart", "compatibilityTest"] as const).map((feature) => (
-                <div key={feature} className="flex items-center gap-2 text-white/80 text-sm">
-                  <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center">
-                    <Sparkles className="w-3 h-3 text-primary" />
-                  </div>
-                  <span>{featureNames[feature]}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* Price */}
-            <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-primary/20">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-white/50 text-sm line-through">₹{originalPrice}</span>
-                  <span className="ml-2 text-green-400 text-xs font-semibold">Save 28%</span>
-                </div>
-                <span className="text-white text-2xl font-bold">₹{totalPrice}</span>
-              </div>
-            </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
-                <p className="text-red-400 text-sm text-center">{error}</p>
-              </div>
-            )}
-
-            {/* Purchase Button */}
-            <Button
-              onClick={handlePurchase}
-              disabled={isProcessing}
-              className="w-full h-14 text-lg font-semibold bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
-              size="lg"
-            >
-              {isProcessing ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                "Unlock All Reports"
-              )}
-            </Button>
-
-            {/* Cancel Link */}
-            <button
-              onClick={onClose}
-              disabled={isProcessing}
               className="w-full mt-3 text-white/50 text-sm hover:text-white/70 transition-colors"
             >
               Maybe later

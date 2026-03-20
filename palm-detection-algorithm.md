@@ -1,5 +1,5 @@
 # Palm Detection Algorithm Specification
-## AstroRekha - Computer Vision Pipeline
+## PalmCosmic - Computer Vision Pipeline
 
 ---
 

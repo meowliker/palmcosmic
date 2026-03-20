@@ -197,7 +197,7 @@ export default function AdminDashboardPage() {
           transition={{ delay: 0.5 }}
           className="text-center text-white/30 text-sm mt-8"
         >
-          AstroRekha Admin Panel • Secure Access
+          PalmCosmic Admin Panel • Secure Access
         </motion.p>
       </div>
     </div>

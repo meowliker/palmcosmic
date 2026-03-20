@@ -64,9 +64,9 @@ export async function POST(request: NextRequest) {
       const transporter = createTransporter();
       
       await transporter.sendMail({
-        from: `"AstroRekha" <${process.env.EMAIL_USER}>`,
+        from: `"PalmCosmic" <${process.env.EMAIL_USER}>`,
         to: normalizedEmail,
-        subject: "Reset Your AstroRekha Password",
+        subject: "Reset Your PalmCosmic Password",
         html: `
           <!DOCTYPE html>
           <html>
@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
                         <table border="0" cellpadding="0" cellspacing="0">
                           <tr>
                             <td align="center">
-                              <h1 style="color: #ffffff; font-size: 28px; margin: 0; font-weight: 600;">✨ AstroRekha</h1>
+                              <h1 style="color: #ffffff; font-size: 28px; margin: 0; font-weight: 600;">✨ PalmCosmic</h1>
                             </td>
                           </tr>
                           <tr>
@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
                     <tr>
                       <td align="center" style="padding-top: 32px;">
                         <p style="color: #4B5563; font-size: 12px; margin: 0;">
-                          © ${new Date().getFullYear()} AstroRekha. All rights reserved.
+                          © ${new Date().getFullYear()} PalmCosmic. All rights reserved.
                         </p>
                       </td>
                     </tr>

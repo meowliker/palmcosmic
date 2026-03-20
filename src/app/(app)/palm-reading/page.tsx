@@ -218,8 +218,8 @@ export default function PalmReadingPage() {
 
   const handleShare = async () => {
     const shareText = reading?.cosmicInsight 
-      ? `✨ My Palm Reading\n\n${reading.cosmicInsight}\n\nGet your reading at AstroRekha!`
-      : "Check out my palm reading on AstroRekha!";
+      ? `✨ My Palm Reading\n\n${reading.cosmicInsight}\n\nGet your reading at PalmCosmic!`
+      : "Check out my palm reading on PalmCosmic!";
     
     if (navigator.share) {
       try {

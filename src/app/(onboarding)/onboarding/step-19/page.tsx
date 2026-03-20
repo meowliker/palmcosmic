@@ -339,7 +339,7 @@ function Step19Content() {
           transition={{ delay: 0.1 }}
           className="text-muted-foreground text-center text-sm mb-8"
         >
-          Create an account to access your AstroRekha account
+          Create an account to access your PalmCosmic account
         </motion.p>
 
         {/* Form */}
@@ -508,7 +508,7 @@ function Step19Content() {
                   transition={{ delay: 0.4 }}
                   className="text-muted-foreground text-center mb-8 max-w-xs"
                 >
-                  You have successfully registered for AstroRekha. You can now access the app.
+                  You have successfully registered for PalmCosmic. You can now access the app.
                 </motion.p>
 
                 <motion.div
