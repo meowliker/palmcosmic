@@ -48,21 +48,21 @@ function generateCompatibilityStats() {
 // Testimonials data
 const testimonials = [
   {
-    name: "Priya",
+    name: "Emily",
     country: "United States",
     flag: "🇺🇸",
     time: "4 days ago",
     review: "Finally a palm reading app that actually works. Scanned my palm and got insights about my career path that were spot on. The AI guide feels like talking to a real astrologer.",
   },
   {
-    name: "Rahul",
+    name: "Michael",
     country: "United States",
     flag: "🇺🇸",
     time: "1 week ago",
     review: "The birth chart analysis was incredibly detailed. Asked questions about my love line and got thoughtful, personal answers. This app feels magical and premium at the same time.",
   },
   {
-    name: "Ananya",
+    name: "Jessica",
     country: "United States",
     flag: "🇺🇸",
     time: "5 days ago",
@@ -72,12 +72,12 @@ const testimonials = [
 
 // Scrolling emails for social proof
 const scrollingEmails = [
-  "Kev***@protonmail.com",
-  "Ali***@zoho.com",
-  "Sar***@gmail.com",
-  "Mik***@outlook.com",
-  "Emm***@yahoo.com",
-  "Dav***@icloud.com",
+  "Emi***@gmail.com",
+  "Mic***@outlook.com",
+  "Jes***@yahoo.com",
+  "Ash***@icloud.com",
+  "Chr***@hotmail.com",
+  "Bri***@aol.com",
 ];
 
 // Bundle pricing plans are now fetched dynamically via usePricing hook
