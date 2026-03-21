@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getStripeClient } from "@/lib/stripe";
 import { getPricing, getBundleById, getCoinPackageById, getReportById, getUpsellById } from "@/lib/pricing";
+import { markStripePaymentStatus } from "@/lib/payment-fulfillment";
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -18,6 +19,10 @@ function appendQuery(path: string, query: Record<string, string>): string {
   const params = new URLSearchParams(existingQuery || "");
   Object.entries(query).forEach(([k, v]) => params.set(k, v));
   return `${pathname}?${params.toString()}`;
+}
+
+function normalizeEmail(email: string | undefined): string {
+  return (email || "").trim().toLowerCase();
 }
 
 export async function POST(request: NextRequest) {
@@ -49,6 +54,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Purchase type is required" }, { status: 400 });
     }
 
+    const normalizedEmail = normalizeEmail(email);
     const pricing = await getPricing();
 
     let amount = 0;
@@ -135,7 +141,7 @@ export async function POST(request: NextRequest) {
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
-      customer_email: email || undefined,
+      customer_email: normalizedEmail || undefined,
       success_url: `${appUrl}/api/stripe/success?session_id={CHECKOUT_SESSION_ID}&next=${encodeURIComponent(successRedirectPath)}`,
       cancel_url: `${appUrl}${cancelRedirectPath}`,
       line_items: [
@@ -152,6 +158,21 @@ export async function POST(request: NextRequest) {
         },
       ],
       metadata,
+    });
+
+    await markStripePaymentStatus({
+      stripeSessionId: session.id,
+      paymentIntentId:
+        typeof session.payment_intent === "string"
+          ? session.payment_intent
+          : session.payment_intent?.id || null,
+      stripeCustomerId:
+        typeof session.customer === "string" ? session.customer : session.customer?.id || null,
+      customerEmail: normalizedEmail || session.customer_email || null,
+      metadata,
+      amount: amount,
+      currency: "USD",
+      paymentStatus: "created",
     });
 
     return NextResponse.json({

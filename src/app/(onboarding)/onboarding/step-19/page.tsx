@@ -56,23 +56,63 @@ function Step19Content() {
 
   // Route protection: Check if user has completed payment
   useEffect(() => {
-    const hasCompletedPayment = localStorage.getItem("astrorekha_payment_completed") === "true";
-    const hasCompletedRegistration = localStorage.getItem("astrorekha_registration_completed") === "true";
-    
-    // If user has completed registration, redirect to app
-    if (hasCompletedRegistration) {
-      router.replace("/home");
-      return;
-    }
-    
-    // Allow access only if payment is completed
-    if (hasCompletedPayment) {
-      setIsAuthorized(true);
-    } else {
-      // No valid payment - redirect to payment page
+    let isCancelled = false;
+
+    const runAuthGuard = async () => {
+      const hasCompletedPayment = localStorage.getItem("astrorekha_payment_completed") === "true";
+      const hasCompletedRegistration = localStorage.getItem("astrorekha_registration_completed") === "true";
+
+      // If user has completed registration, redirect to app
+      if (hasCompletedRegistration) {
+        router.replace("/home");
+        return;
+      }
+
+      // Standard local happy path
+      if (hasCompletedPayment) {
+        if (!isCancelled) setIsAuthorized(true);
+        return;
+      }
+
+      // Recovery path for users returning on a new device/browser
+      const storedEmail = localStorage.getItem("astrorekha_email");
+      if (!storedEmail) {
+        router.replace("/onboarding/step-17");
+        return;
+      }
+
+      try {
+        const stateResponse = await fetch(
+          `/api/user/payment-state?email=${encodeURIComponent(storedEmail)}`,
+          { cache: "no-store" }
+        );
+
+        if (stateResponse.ok) {
+          const stateData = await stateResponse.json();
+
+          if (stateData?.hasPaid && stateData?.isRegistered) {
+            router.replace(`/login?email=${encodeURIComponent(storedEmail)}`);
+            return;
+          }
+
+          if (stateData?.hasPaid) {
+            localStorage.setItem("astrorekha_payment_completed", "true");
+            if (!isCancelled) setIsAuthorized(true);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Step-19 payment recovery auth failed:", err);
+      }
+
       router.replace("/onboarding/step-17");
-      return;
-    }
+    };
+
+    runAuthGuard();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [router]);
 
   // Get stored email from previous step

@@ -90,6 +90,7 @@ export default function Step15Page() {
   const handleContinue = async () => {
     triggerLight();
     const trimmed = email.trim();
+    const normalizedEmail = trimmed.toLowerCase();
 
     // Email is required
     if (trimmed.length === 0) {
@@ -105,9 +106,33 @@ export default function Step15Page() {
 
     setEmailError(null);
 
-    // Store email locally and navigate immediately (no database check)
-    localStorage.setItem("astrorekha_email", trimmed);
+    // Store normalized email for checkout + recovery
+    localStorage.setItem("astrorekha_email", normalizedEmail);
     pixelEvents.addToWishlist("Personalized Palm Reading Report");
+
+    // Recovery guard: paid users should not re-enter checkout flow
+    try {
+      const stateResponse = await fetch(
+        `/api/user/payment-state?email=${encodeURIComponent(normalizedEmail)}`,
+        { cache: "no-store" }
+      );
+
+      if (stateResponse.ok) {
+        const stateData = await stateResponse.json();
+        if (stateData?.hasPaid) {
+          if (stateData?.isRegistered) {
+            router.push(`/login?email=${encodeURIComponent(normalizedEmail)}`);
+            return;
+          }
+
+          localStorage.setItem("astrorekha_payment_completed", "true");
+          router.push("/onboarding/step-19?recovered=true");
+          return;
+        }
+      }
+    } catch (err) {
+      console.error("Payment-state recovery check failed:", err);
+    }
     
     // Navigate to next step immediately
     router.push("/onboarding/step-17");
@@ -121,7 +146,7 @@ export default function Step15Page() {
       try {
         await supabase.from("leads").insert({
           id: `lead_${Date.now()}_${userId.slice(-6)}`,
-          email: trimmed,
+          email: normalizedEmail,
           gender: gender || "not specified",
           age: age,
           relationship_status: relationshipStatus || "not specified",
@@ -134,7 +159,7 @@ export default function Step15Page() {
         
         await supabase.from("users").upsert({
           id: userId,
-          email: trimmed,
+          email: normalizedEmail,
           gender: gender || null,
           age: age,
           relationship_status: relationshipStatus || null,

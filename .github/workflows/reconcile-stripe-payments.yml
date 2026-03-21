@@ -1,0 +1,33 @@
+name: Reconcile Stripe Payments
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: reconcile-stripe-payments
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call reconcile endpoint
+        env:
+          RECONCILE_URL: ${{ secrets.RECONCILE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$RECONCILE_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Missing required secrets: RECONCILE_URL and/or CRON_SECRET"
+            exit 1
+          fi
+
+          echo "Triggering reconcile endpoint..."
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --data '{"staleMinutes":15,"limit":100}' \
+            "$RECONCILE_URL"

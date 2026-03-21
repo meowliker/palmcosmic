@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import bcrypt from "bcryptjs";
+import { reconcilePaidPaymentsForRegistration } from "@/lib/payment-fulfillment";
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
 
     // If there's an anonymous user, migrate their data
     let migratedData: Record<string, any> = {};
+    let hadAnonUser = false;
 
     if (anonId) {
       const { data: anonUser } = await supabase
@@ -53,6 +55,7 @@ export async function POST(request: NextRequest) {
         .maybeSingle();
 
       if (anonUser) {
+        hadAnonUser = true;
         migratedData = {
           coins: anonUser.coins || 0,
           unlocked_features: anonUser.unlocked_features || {},
@@ -109,6 +112,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const reconciliation = await reconcilePaidPaymentsForRegistration({
+      userId: uid,
+      email: normalizedEmail,
+      anonId: anonId || null,
+      skipAnonEntitlementReplay: hadAnonUser,
+    });
+
     // Migrate related tables in background (non-blocking for faster registration)
     if (anonId && anonId !== uid) {
       (async () => {
@@ -137,6 +147,7 @@ export async function POST(request: NextRequest) {
         purchaseType: migratedData.purchase_type || null,
         bundlePurchased: migratedData.bundle_purchased || null,
         unlockedFeatures: migratedData.unlocked_features || {},
+        paymentReconciliation: reconciliation,
       },
     });
   } catch (error: any) {

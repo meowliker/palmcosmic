@@ -125,6 +125,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
 CREATE INDEX IF NOT EXISTS idx_payments_stripe_session ON public.payments(stripe_session_id);
 CREATE INDEX IF NOT EXISTS idx_payments_stripe_intent ON public.payments(stripe_payment_intent_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status_created_at ON public.payments(payment_status, created_at);
 
 -- ============================================================
 -- 5. LEADS TABLE (abandoned checkout leads)
