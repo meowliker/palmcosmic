@@ -194,6 +194,23 @@ async function findPaymentMatch(
   return null;
 }
 
+async function resolveSafeUserId(candidateUserId: string | null | undefined): Promise<string | null> {
+  if (!candidateUserId) return null;
+
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("users")
+    .select("id")
+    .eq("id", candidateUserId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return data?.id || null;
+}
+
 async function applyUserEntitlements(userId: string | null, source: EntitlementSource, stripeCustomerId: string | null, nowIso: string) {
   if (!userId) return;
 
@@ -301,7 +318,7 @@ async function upsertPaidPaymentRecord(input: StripeFulfillmentInput, nowIso: st
     return { row: existing, alreadyPaid: true };
   }
 
-  const userId = metadata.userId || existing?.user_id || null;
+  const userId = await resolveSafeUserId(metadata.userId || existing?.user_id || null);
   const type = metadata.type || existing?.type || "bundle";
   const bundleId = metadata.bundleId || metadata.packageId || existing?.bundle_id || null;
   const feature = metadata.feature || existing?.feature || null;
@@ -363,7 +380,7 @@ export async function markStripePaymentStatus(input: StripePaymentStatusInput): 
   );
 
   const payload: Record<string, any> = {
-    user_id: metadata.userId || existing?.user_id || null,
+    user_id: await resolveSafeUserId(metadata.userId || existing?.user_id || null),
     type: metadata.type || existing?.type || "bundle",
     bundle_id: metadata.bundleId || metadata.packageId || existing?.bundle_id || null,
     feature: metadata.feature || existing?.feature || null,
