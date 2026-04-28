@@ -3,12 +3,15 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, User, Settings, ChevronRight } from "lucide-react";
+import { ArrowLeft, Settings, ChevronRight } from "lucide-react";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore } from "@/lib/user-store";
-import { getZodiacSign, getZodiacSymbol, getZodiacColor } from "@/lib/astrology-api";
+import { getZodiacSign } from "@/lib/astrology-api";
 import { supabase } from "@/lib/supabase";
 import { UserAvatar, getUserDisplayName } from "@/components/UserAvatar";
+import { extractStoredSignName } from "@/lib/zodiac-utils";
+import { trackAnalyticsEvent } from "@/lib/analytics-events";
+import { pixelEvents } from "@/lib/pixel-events";
 
 // Zodiac symbols mapping
 const zodiacSymbols: Record<string, string> = {
@@ -73,8 +76,18 @@ export default function ProfilePage() {
 
   useEffect(() => {
     setIsClient(true);
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+    pixelEvents.viewContent("Profile", "account");
+    trackAnalyticsEvent("ProfileViewed", {
+      route: "/profile",
+      user_id: userId,
+      email,
+      has_bundle: Boolean(purchasedBundle),
+    });
     
     loadUserData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadUserData = async () => {
@@ -95,24 +108,17 @@ export default function ProfilePage() {
           const period = data.birth_period || storeBirthPeriod || "PM";
           const place = data.birth_place || "";
           
-          const extractSignName = (sign: any): string | null => {
-            if (!sign) return null;
-            if (typeof sign === "string") return sign;
-            if (sign.name) return sign.name;
-            return null;
-          };
-
-          let sunSignValue = extractSignName(data.sun_sign);
-          let moonSignValue = extractSignName(data.moon_sign);
-          let ascendantValue = extractSignName(data.ascendant_sign);
+          let sunSignValue = extractStoredSignName(data.sun_sign);
+          let moonSignValue = extractStoredSignName(data.moon_sign);
+          let ascendantValue = extractStoredSignName(data.ascendant_sign);
           
           if (!sunSignValue || !moonSignValue || !ascendantValue) {
             try {
               const { data: profileData } = await supabase.from("user_profiles").select("*").eq("id", userId).single();
               if (profileData) {
-                if (!sunSignValue) sunSignValue = extractSignName(profileData.sun_sign);
-                if (!moonSignValue) moonSignValue = extractSignName(profileData.moon_sign);
-                if (!ascendantValue) ascendantValue = extractSignName(profileData.ascendant_sign);
+                if (!sunSignValue) sunSignValue = extractStoredSignName(profileData.sun_sign);
+                if (!moonSignValue) moonSignValue = extractStoredSignName(profileData.moon_sign);
+                if (!ascendantValue) ascendantValue = extractStoredSignName(profileData.ascendant_sign);
                 
                 if (sunSignValue || moonSignValue || ascendantValue) {
                   await supabase.from("users").update({
@@ -144,9 +150,9 @@ export default function ProfilePage() {
               });
               const signsData = await response.json();
               if (signsData.success) {
-                if (!sunSignValue) sunSignValue = extractSignName(signsData.sunSign);
-                if (!moonSignValue) moonSignValue = extractSignName(signsData.moonSign);
-                if (!ascendantValue) ascendantValue = extractSignName(signsData.ascendant);
+                if (!sunSignValue) sunSignValue = extractStoredSignName(signsData.sunSign);
+                if (!moonSignValue) moonSignValue = extractStoredSignName(signsData.moonSign);
+                if (!ascendantValue) ascendantValue = extractStoredSignName(signsData.ascendant);
                 
                 await supabase.from("users").update({
                   sun_sign: signsData.sunSign?.name || signsData.sunSign,
@@ -235,67 +241,75 @@ export default function ProfilePage() {
 
   if (!isClient) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A]" />
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525]" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col relative">
-        {/* Starry background effect */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {[...Array(50)].map((_, i) => (
-            <div
-              key={i}
-              className="absolute w-0.5 h-0.5 bg-white/30 rounded-full"
-              style={{
-                top: `${Math.random() * 100}%`,
-                left: `${Math.random() * 100}%`,
-                animation: `twinkle ${2 + Math.random() * 3}s infinite`,
-              }}
-            />
-          ))}
-        </div>
-
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col relative">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center justify-between px-4 py-3">
             <button
-              onClick={() => router.push("/dashboard")}
-              className="w-10 h-10 flex items-center justify-center"
+              onClick={() => {
+                trackAnalyticsEvent("ProfileAction", {
+                  route: "/profile",
+                  action: "back_clicked",
+                  destination: "/dashboard",
+                });
+                router.push("/dashboard");
+              }}
+              className="w-10 h-10 flex items-center justify-center rounded-lg text-[#b8c7da] transition-colors hover:bg-[#0b2338] hover:text-white"
+              aria-label="Go back"
             >
-              <ArrowLeft className="w-5 h-5 text-white" />
+              <ArrowLeft className="w-5 h-5" />
             </button>
             <h1 className="text-white text-xl font-semibold">Profile</h1>
             <button
-              onClick={() => router.push("/settings")}
-              className="w-10 h-10 flex items-center justify-center"
+              onClick={() => {
+                trackAnalyticsEvent("ProfileAction", {
+                  route: "/profile",
+                  action: "settings_clicked",
+                  destination: "/settings",
+                });
+                router.push("/settings");
+              }}
+              className="w-10 h-10 flex items-center justify-center rounded-lg text-[#b8c7da] transition-colors hover:bg-[#0b2338] hover:text-white"
+              aria-label="Settings"
             >
-              <Settings className="w-5 h-5 text-white/70" />
+              <Settings className="w-5 h-5" />
             </button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto relative z-10">
-          <div className="px-4 py-4 space-y-6">
+          <div className="px-4 py-5 space-y-6 pb-10">
             {/* User Info Row */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="flex items-center justify-between"
+              className="flex items-center justify-between rounded-lg border border-[#173653] bg-[#0b2338] p-4"
             >
               <div className="flex items-center gap-3">
                 <UserAvatar name={userData?.name} email={userData?.email} size="lg" className="w-14 h-14 text-xl" />
                 <div>
                   <h2 className="text-white text-lg font-semibold">{getUserDisplayName(userData?.name, userData?.email)}</h2>
-                  <p className="text-white/50 text-sm">{formatBirthDateTime()}</p>
+                  <p className="text-[#8fa3b8] text-sm">{formatBirthDateTime()}</p>
                 </div>
               </div>
               <button
-                onClick={() => router.push("/profile/edit")}
-                className="flex items-center gap-1 text-primary hover:text-primary/80 transition-colors"
+                onClick={() => {
+                  trackAnalyticsEvent("ProfileAction", {
+                    route: "/profile",
+                    action: "edit_profile_clicked",
+                    destination: "/profile/edit",
+                  });
+                  router.push("/profile/edit");
+                }}
+                className="flex items-center gap-1 text-[#38bdf8] hover:text-white transition-colors"
               >
                 <span className="text-sm font-medium">Edit</span>
                 <ChevronRight className="w-4 h-4" />
@@ -307,15 +321,15 @@ export default function ProfilePage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="flex flex-col items-center py-6"
+              className="flex flex-col items-center py-6 rounded-lg border border-[#173653] bg-[#082035]"
             >
               <div className="relative">
                 {/* Outer ring */}
-                <div className="w-40 h-40 rounded-full border border-primary/30 flex items-center justify-center">
+                <div className="w-40 h-40 rounded-full border border-[#38bdf8]/35 flex items-center justify-center">
                   {/* Inner decorative circles */}
-                  <div className="w-32 h-32 rounded-full border border-primary/20 flex items-center justify-center">
-                    <div className="w-24 h-24 rounded-full bg-gradient-to-br from-primary/20 to-purple-500/20 flex items-center justify-center">
-                      <span className="text-5xl text-primary">{zodiacSymbols[sunSign] || "♈"}</span>
+                  <div className="w-32 h-32 rounded-full border border-[#38bdf8]/20 flex items-center justify-center">
+                    <div className="w-24 h-24 rounded-full bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                      <span className="text-5xl text-[#38bdf8]">{zodiacSymbols[sunSign] || "♈"}</span>
                     </div>
                   </div>
                 </div>
@@ -323,7 +337,7 @@ export default function ProfilePage() {
                 {[0, 45, 90, 135, 180, 225, 270, 315].map((angle, i) => (
                   <div
                     key={i}
-                    className="absolute w-2 h-2 rounded-full bg-primary/50"
+                    className="absolute w-2 h-2 rounded-full bg-[#38bdf8]/60"
                     style={{
                       top: `${50 - 45 * Math.cos((angle * Math.PI) / 180)}%`,
                       left: `${50 + 45 * Math.sin((angle * Math.PI) / 180)}%`,
@@ -333,6 +347,7 @@ export default function ProfilePage() {
                 ))}
               </div>
               <p className="text-white text-lg font-medium mt-4">Sun sign - {sunSign}</p>
+              <p className="text-[#8fa3b8] text-sm mt-1">Your core profile signature</p>
             </motion.div>
 
             {/* Zodiac Info Grid - Row 1 */}
@@ -344,33 +359,33 @@ export default function ProfilePage() {
             >
               {/* Moon Sign */}
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-[#1A1F2E] flex items-center justify-center border border-primary/20">
-                  <span className="text-2xl text-primary">☽</span>
+                <div className="w-16 h-16 rounded-lg bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                  <span className="text-2xl text-[#38bdf8]">☽</span>
                 </div>
-                <p className="text-white/50 text-xs mt-2">Moon Sign</p>
+                <p className="text-[#8fa3b8] text-xs mt-2">Moon Sign</p>
                 <p className="text-white font-medium text-sm">{userMoonSign}</p>
               </div>
 
               {/* Element */}
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-[#1A1F2E] flex items-center justify-center border border-primary/20">
-                  <span className="text-2xl text-primary">
+                <div className="w-16 h-16 rounded-lg bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                  <span className="text-2xl text-[#38bdf8]">
                     {zodiacElements[sunSign] === "Fire" && "🔥"}
                     {zodiacElements[sunSign] === "Water" && "💧"}
                     {zodiacElements[sunSign] === "Earth" && "🌍"}
                     {zodiacElements[sunSign] === "Air" && "💨"}
                   </span>
                 </div>
-                <p className="text-white/50 text-xs mt-2">Element</p>
+                <p className="text-[#8fa3b8] text-xs mt-2">Element</p>
                 <p className="text-white font-medium text-sm">{zodiacElements[sunSign] || "Fire"}</p>
               </div>
 
               {/* Ascendant */}
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-[#1A1F2E] flex items-center justify-center border border-primary/20">
-                  <span className="text-2xl text-primary">{zodiacSymbols[userAscendant] || "♌"}</span>
+                <div className="w-16 h-16 rounded-lg bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                  <span className="text-2xl text-[#38bdf8]">{zodiacSymbols[userAscendant] || "♌"}</span>
                 </div>
-                <p className="text-white/50 text-xs mt-2">Ascendant</p>
+                <p className="text-[#8fa3b8] text-xs mt-2">Ascendant</p>
                 <p className="text-white font-medium text-sm">{userAscendant}</p>
               </div>
             </motion.div>
@@ -384,40 +399,33 @@ export default function ProfilePage() {
             >
               {/* Planet */}
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-[#1A1F2E] flex items-center justify-center border border-primary/20">
-                  <span className="text-2xl text-primary">♃</span>
+                <div className="w-16 h-16 rounded-lg bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                  <span className="text-2xl text-[#38bdf8]">♃</span>
                 </div>
-                <p className="text-white/50 text-xs mt-2">Planet</p>
+                <p className="text-[#8fa3b8] text-xs mt-2">Planet</p>
                 <p className="text-white font-medium text-sm">{zodiacPlanets[sunSign] || "Jupiter"}</p>
               </div>
 
               {/* Polarity */}
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-[#1A1F2E] flex items-center justify-center border border-primary/20">
-                  <span className="text-2xl text-primary">♂</span>
+                <div className="w-16 h-16 rounded-lg bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                  <span className="text-2xl text-[#38bdf8]">♂</span>
                 </div>
-                <p className="text-white/50 text-xs mt-2">Polarity</p>
+                <p className="text-[#8fa3b8] text-xs mt-2">Polarity</p>
                 <p className="text-white font-medium text-sm">{zodiacPolarity[sunSign] || "Masculine"}</p>
               </div>
 
               {/* Modality */}
               <div className="flex flex-col items-center">
-                <div className="w-16 h-16 rounded-full bg-[#1A1F2E] flex items-center justify-center border border-primary/20">
-                  <span className="text-2xl text-primary">☍</span>
+                <div className="w-16 h-16 rounded-lg bg-[#0b2338] flex items-center justify-center border border-[#173653]">
+                  <span className="text-2xl text-[#38bdf8]">☍</span>
                 </div>
-                <p className="text-white/50 text-xs mt-2">Modality</p>
+                <p className="text-[#8fa3b8] text-xs mt-2">Modality</p>
                 <p className="text-white font-medium text-sm">{zodiacModality[sunSign] || "Mutable"}</p>
               </div>
             </motion.div>
           </div>
         </div>
-
-        <style jsx>{`
-          @keyframes twinkle {
-            0%, 100% { opacity: 0.3; }
-            50% { opacity: 1; }
-          }
-        `}</style>
       </div>
     </div>
   );

@@ -1,42 +1,184 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { DEFAULT_LAYOUT_B_CONFIG, normalizeLayoutBConfig } from "@/lib/layout-b-funnel";
 
 // A/B Test configuration API
 // Handles getting assigned variant for a user and managing test configs
+const SETTINGS_KEY = "funnel_layout_b_config";
+const AB_TESTS_LIVE = false;
+
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 50;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function getNormalizedVariants(testData: any, isOnboardingLayoutTest: boolean) {
+  const defaults = isOnboardingLayoutTest
+    ? { pageA: "bundle-pricing", pageB: "bundle-pricing-b" }
+    : { pageA: "step-17", pageB: "a-step-17" };
+
+  const configA = Number(testData?.variants?.A?.weight);
+  const configB = Number(testData?.variants?.B?.weight);
+  let aWeight = Number.isFinite(configA) ? clampPercent(configA) : NaN;
+  let bWeight = Number.isFinite(configB) ? clampPercent(configB) : NaN;
+
+  if (!Number.isFinite(aWeight) || !Number.isFinite(bWeight) || aWeight + bWeight !== 100) {
+    const rawSplit = Number(testData?.traffic_split);
+    if (Number.isFinite(rawSplit)) {
+      const b = rawSplit <= 1 ? rawSplit * 100 : rawSplit;
+      bWeight = clampPercent(b);
+      aWeight = 100 - bWeight;
+    } else {
+      aWeight = 50;
+      bWeight = 50;
+    }
+  }
+
+  return {
+    A: { weight: aWeight, page: testData?.variants?.A?.page || defaults.pageA },
+    B: { weight: bWeight, page: testData?.variants?.B?.page || defaults.pageB },
+  };
+}
+
+async function resolveDefaultTestId(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const { data } = await supabase
+    .from("settings")
+    .select("value")
+    .eq("key", SETTINGS_KEY)
+    .maybeSingle();
+
+  return normalizeLayoutBConfig(data?.value).testId || DEFAULT_LAYOUT_B_CONFIG.testId;
+}
+
+async function persistUserFlowVariant(params: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  userId: string | null;
+  variant: string;
+  isOnboardingLayoutTest: boolean;
+}) {
+  const { supabase, userId, variant, isOnboardingLayoutTest } = params;
+  if (!userId) return;
+
+  const nowIso = new Date().toISOString();
+  const payload: Record<string, unknown> = {
+    id: userId,
+    ab_variant: variant,
+    updated_at: nowIso,
+  };
+
+  if (isOnboardingLayoutTest) {
+    payload.onboarding_flow = variant === "B" ? "flow-b" : "flow-a";
+  }
+
+  const { error } = await supabase.from("users").upsert(payload, { onConflict: "id" });
+  if (error) {
+    console.error("[ab-test] failed to persist user variant", {
+      userId,
+      variant,
+      isOnboardingLayoutTest,
+      error,
+    });
+  }
+}
 
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const testId = searchParams.get("testId") || "pricing-test-1";
+    const requestedTestId = searchParams.get("testId");
     const visitorId = searchParams.get("visitorId");
+    const userIdFromQuery = searchParams.get("userId")?.trim() || null;
 
     const supabase = getSupabaseAdmin();
+    const testId = requestedTestId || await resolveDefaultTestId(supabase);
+    const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
+
+    if (!AB_TESTS_LIVE) {
+      return NextResponse.json({
+        testId,
+        variant: "A",
+        page: isOnboardingLayoutTest ? "bundle-pricing" : "step-17",
+        test: {
+          id: testId,
+          name: isOnboardingLayoutTest ? "Onboarding Layout A/B (disabled)" : "Pricing Page A/B Test (disabled)",
+          status: "paused",
+          traffic_split: 0,
+          variants: isOnboardingLayoutTest
+            ? {
+                A: { weight: 100, page: "bundle-pricing" },
+                B: { weight: 0, page: "bundle-pricing-b" },
+              }
+            : {
+                A: { weight: 100, page: "step-17" },
+                B: { weight: 0, page: "a-step-17" },
+              },
+        },
+        message: "A/B tests are disabled; defaulting to variant A",
+      });
+    }
+
+    const defaultTest = {
+      id: testId,
+      name: isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test",
+      status: "active",
+      traffic_split: 0.5,
+      variants: isOnboardingLayoutTest
+        ? {
+            A: { weight: 50, page: "bundle-pricing" },
+            B: { weight: 50, page: "bundle-pricing-b" },
+          }
+        : {
+            A: { weight: 50, page: "step-17" },
+            B: { weight: 50, page: "a-step-17" },
+          },
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const defaultTestInsertRow = {
+      id: testId,
+      name: defaultTest.name,
+      status: defaultTest.status,
+      traffic_split: defaultTest.traffic_split,
+      created_at: defaultTest.created_at,
+      updated_at: defaultTest.updated_at,
+    };
+
+    const pageForVariant = (variant: string, test: any): string => {
+      const configured = test?.variants?.[variant]?.page;
+      if (configured && typeof configured === "string") {
+        return configured;
+      }
+      if (isOnboardingLayoutTest) {
+        return variant === "A" ? "bundle-pricing" : "bundle-pricing-b";
+      }
+      return variant === "A" ? "step-17" : "a-step-17";
+    };
 
     // Get test configuration
-    const { data: testData } = await supabase.from("ab_tests").select("*").eq("id", testId).single();
+    const { data: testData, error: testDataError } = await supabase
+      .from("ab_tests")
+      .select("*")
+      .eq("id", testId)
+      .single();
+    if (testDataError && testDataError.code !== "PGRST116") {
+      console.error("[ab-test] failed to fetch test config", { testId, error: testDataError });
+    }
     
     if (!testData) {
       // Create default test if it doesn't exist
-      const defaultTest = {
-        id: testId,
-        name: "Pricing Page A/B Test",
-        status: "active",
-        variants: {
-          A: { weight: 50, page: "step-17" },
-          B: { weight: 50, page: "a-step-17" },
-        },
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-      
-      await supabase.from("ab_tests").insert(defaultTest);
+      const { error: insertDefaultTestError } = await supabase.from("ab_tests").insert(defaultTestInsertRow);
+      if (insertDefaultTestError) {
+        console.error("[ab-test] failed to create default test", {
+          testId,
+          error: insertDefaultTestError,
+        });
+      }
       
       const variant = Math.random() < 0.5 ? "A" : "B";
       
       return NextResponse.json({
         testId,
         variant,
-        page: variant === "A" ? "step-17" : "a-step-17",
+        page: pageForVariant(variant, defaultTest),
         test: defaultTest,
       });
     }
@@ -46,7 +188,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({
         testId,
         variant: "A",
-        page: "step-17",
+        page: pageForVariant("A", testData),
         test: testData,
         message: "Test is not active, defaulting to variant A",
       });
@@ -54,17 +196,31 @@ export async function GET(request: NextRequest) {
 
     // Check if visitor already has an assigned variant
     if (visitorId) {
-      const { data: assignment } = await supabase
+      const { data: assignment, error: assignmentLookupError } = await supabase
         .from("ab_test_assignments")
         .select("variant")
         .eq("id", `${testId}_${visitorId}`)
-        .single();
+        .maybeSingle();
+      if (assignmentLookupError && assignmentLookupError.code !== "PGRST116") {
+        console.error("[ab-test] failed to read assignment", {
+          testId,
+          visitorId,
+          error: assignmentLookupError,
+        });
+      }
       
       if (assignment) {
+        await persistUserFlowVariant({
+          supabase,
+          userId: userIdFromQuery || visitorId,
+          variant: assignment.variant,
+          isOnboardingLayoutTest,
+        });
+
         return NextResponse.json({
           testId,
           variant: assignment.variant,
-          page: assignment.variant === "A" ? "step-17" : "a-step-17",
+          page: pageForVariant(assignment.variant, testData),
           test: testData,
           cached: true,
         });
@@ -72,7 +228,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Assign variant based on weights
-    const variants = testData.variants || { A: { weight: 50 }, B: { weight: 50 } };
+    const variants = getNormalizedVariants(testData, isOnboardingLayoutTest);
     const totalWeight = Object.values(variants).reduce(
       (sum: number, v: any) => sum + (v.weight || 0),
       0
@@ -91,27 +247,45 @@ export async function GET(request: NextRequest) {
 
     // Save assignment if visitor ID provided
     if (visitorId) {
-      await supabase.from("ab_test_assignments").upsert({
+      const assignmentPayload = {
         id: `${testId}_${visitorId}`,
         test_id: testId,
         visitor_id: visitorId,
         variant: assignedVariant,
-        assigned_at: new Date().toISOString(),
-      }, { onConflict: "id" });
+        created_at: new Date().toISOString(),
+      };
+      const { error: assignmentUpsertError } = await supabase
+        .from("ab_test_assignments")
+        .upsert(assignmentPayload, { onConflict: "id" });
+      if (assignmentUpsertError) {
+        console.error("[ab-test] failed to persist assignment", {
+          testId,
+          visitorId,
+          variant: assignedVariant,
+          error: assignmentUpsertError,
+        });
+      }
     }
+
+    await persistUserFlowVariant({
+      supabase,
+      userId: userIdFromQuery || visitorId,
+      variant: assignedVariant,
+      isOnboardingLayoutTest,
+    });
 
     return NextResponse.json({
       testId,
       variant: assignedVariant,
-      page: assignedVariant === "A" ? "step-17" : "a-step-17",
+      page: pageForVariant(assignedVariant, testData),
       test: testData,
     });
   } catch (error) {
     console.error("A/B test error:", error);
     return NextResponse.json({
-      testId: "pricing-test-1",
+      testId: DEFAULT_LAYOUT_B_CONFIG.testId,
       variant: "A",
-      page: "step-17",
+      page: "bundle-pricing",
       error: "Failed to get A/B test assignment",
     });
   }
@@ -129,6 +303,7 @@ export async function POST(request: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
+    let nextTrafficSplit: number | null = null;
     if (variants) {
       const totalWeight = Object.values(variants).reduce(
         (sum: number, v: any) => sum + (v.weight || 0),
@@ -141,13 +316,15 @@ export async function POST(request: NextRequest) {
           { status: 400 }
         );
       }
+      const bWeight = clampPercent(Number((variants as any)?.B?.weight ?? 50));
+      nextTrafficSplit = bWeight / 100;
     }
 
     const updateData: any = {
       updated_at: new Date().toISOString(),
     };
 
-    if (variants) updateData.variants = variants;
+    if (nextTrafficSplit !== null) updateData.traffic_split = nextTrafficSplit;
     if (status) updateData.status = status;
     if (name) updateData.name = name;
 

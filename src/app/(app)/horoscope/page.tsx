@@ -7,6 +7,7 @@ import { ArrowLeft, ChevronDown, Loader2, Sparkles, Star } from "lucide-react";
 import { getZodiacSign, getZodiacSymbol } from "@/lib/astrology-api";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { supabase } from "@/lib/supabase";
+import { extractStoredSignName } from "@/lib/zodiac-utils";
 
 const ZODIAC_SIGNS = [
   { sign: "Aries", symbol: "♈", gradient: "from-red-500 to-orange-500", element: "Fire" },
@@ -36,6 +37,7 @@ interface HoroscopeSection {
 
 interface SignHoroscopeData {
   horoscope: string;
+  date?: string;
   horoscope_sections?: HoroscopeSection[];
   focus_areas?: string[];
   challenges?: string[];
@@ -46,7 +48,7 @@ interface SignHoroscopeData {
 export default function HoroscopePage() {
   const router = useRouter();
   const [selectedSign, setSelectedSign] = useState("Aries");
-    const [selectedPeriod, setSelectedPeriod] = useState("today");
+  const [selectedPeriod, setSelectedPeriod] = useState("today");
   const [showSignPicker, setShowSignPicker] = useState(false);
   const [loading, setLoading] = useState(true);
   const [horoscopeData, setHoroscopeData] = useState<SignHoroscopeData | null>(null);
@@ -63,20 +65,13 @@ export default function HoroscopePage() {
 
   const loadUserSign = async () => {
     try {
-      const extractSignName = (sign: any): string | null => {
-        if (!sign) return null;
-        if (typeof sign === "string") return sign;
-        if (sign.name) return sign.name;
-        return null;
-      };
-
-      const userId = localStorage.getItem("astrorekha_user_id");
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
 
       if (userId) {
         const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
 
         if (userData) {
-          const storedSunSign = extractSignName(userData.sun_sign);
+          const storedSunSign = extractStoredSignName(userData.sun_sign);
           if (storedSunSign) {
             setSelectedSign(storedSunSign);
             setUserSign(storedSunSign);
@@ -86,7 +81,7 @@ export default function HoroscopePage() {
           try {
             const { data: profile } = await supabase.from("user_profiles").select("sun_sign").eq("id", userId).single();
             if (profile) {
-              const profileSunSign = extractSignName(profile.sun_sign);
+              const profileSunSign = extractStoredSignName(profile.sun_sign);
               if (profileSunSign) {
                 setSelectedSign(profileSunSign);
                 setUserSign(profileSunSign);
@@ -133,13 +128,20 @@ export default function HoroscopePage() {
     try {
       // Fetch horoscope (cached by sign+date, different API for today vs tomorrow)
       const day = selectedPeriod === "tomorrow" ? "tomorrow" : "today";
-      const res = await fetch(`/api/horoscope/user-daily?sign=${selectedSign}&day=${day}`);
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+      const params = new URLSearchParams({
+        sign: selectedSign,
+        day,
+      });
+      if (userId) params.set("userId", userId);
+      const res = await fetch(`/api/horoscope/user-daily?${params.toString()}`);
       
       if (res.ok) {
         const result = await res.json();
         if (result.success && result.horoscope) {
           setHoroscopeData({
             horoscope: result.horoscope,
+            date: result.date,
           });
           return;
         }
@@ -151,7 +153,23 @@ export default function HoroscopePage() {
     }
   };
 
-  const currentDate = new Date().toLocaleDateString("en-US", {
+  const formatDateKey = (dateKey?: string) => {
+    if (!dateKey) return null;
+    const [year, month, day] = dateKey.split("-").map(Number);
+    if (!year || !month || !day) return null;
+    return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+      year: "numeric",
+    });
+  };
+
+  const fallbackDisplayDate = new Date();
+  if (selectedPeriod === "tomorrow") {
+    fallbackDisplayDate.setDate(fallbackDisplayDate.getDate() + 1);
+  }
+  const currentDate = formatDateKey(horoscopeData?.date) || fallbackDisplayDate.toLocaleDateString("en-US", {
     weekday: "long",
     month: "long",
     day: "numeric",
@@ -161,8 +179,8 @@ export default function HoroscopePage() {
   const periodTitle = selectedPeriod === "tomorrow" ? "Tomorrow's" : "Daily";
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md min-h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md min-h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col">
         {/* Hero Header with Gradient */}
         <div className={`relative bg-gradient-to-br ${currentSignData.gradient} overflow-hidden`}>
           {/* Decorative stars */}
@@ -179,7 +197,7 @@ export default function HoroscopePage() {
           <div className="flex items-center justify-between px-4 pt-4 pb-2 relative z-10">
             <button
               onClick={() => router.push("/reports")}
-              className="w-9 h-9 rounded-full bg-black/20 backdrop-blur-sm flex items-center justify-center hover:bg-black/30 transition-colors"
+              className="w-9 h-9 rounded-lg bg-black/20 backdrop-blur-sm flex items-center justify-center hover:bg-black/30 transition-colors"
             >
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
@@ -206,15 +224,15 @@ export default function HoroscopePage() {
         </div>
 
         {/* Period Tabs */}
-        <div className="flex gap-2 px-4 py-3 bg-[#0A0E1A] border-b border-white/5">
+        <div className="flex gap-2 px-4 py-3 bg-[#061525] border-b border-[#173653]">
           {PERIODS.map((period) => (
             <button
               key={period.id}
               onClick={() => setSelectedPeriod(period.id)}
-              className={`flex-1 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${
                 selectedPeriod === period.id
-                  ? `bg-gradient-to-r ${currentSignData.gradient} text-white shadow-lg`
-                  : "text-white/40 hover:text-white/60 hover:bg-white/5"
+                  ? `bg-gradient-to-r ${currentSignData.gradient} text-white shadow-lg shadow-black/20`
+                  : "border border-[#173653] bg-[#0b2338] text-[#8fa3b8] hover:border-[#38bdf8]/60 hover:text-white"
               }`}
             >
               {period.label}
@@ -226,10 +244,10 @@ export default function HoroscopePage() {
         <div className="flex-1 overflow-y-auto">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <div className={`w-12 h-12 rounded-full bg-gradient-to-br ${currentSignData.gradient} flex items-center justify-center animate-pulse`}>
+              <div className={`w-12 h-12 rounded-lg bg-gradient-to-br ${currentSignData.gradient} flex items-center justify-center animate-pulse shadow-lg shadow-black/20`}>
                 <Star className="w-6 h-6 text-white" />
               </div>
-              <p className="text-white/40 text-sm">Reading the stars...</p>
+              <p className="text-[#8fa3b8] text-sm">Reading the stars...</p>
             </div>
           ) : horoscopeData ? (
             <motion.div
@@ -246,23 +264,23 @@ export default function HoroscopePage() {
               {/* Focus & Challenges (if available from pre-generated data) */}
               {horoscopeData.focus_areas && horoscopeData.challenges && (
                 <div className="grid grid-cols-2 gap-3 mb-6">
-                  <div className="bg-emerald-500/10 rounded-xl p-4 border border-emerald-500/20">
-                    <h3 className="text-emerald-400 font-semibold text-xs uppercase tracking-wider mb-2">Focus</h3>
+                  <div className="rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-4">
+                    <h3 className="text-[#38bdf8] font-semibold text-xs uppercase tracking-wider mb-2">Focus</h3>
                     <ul className="space-y-1.5">
                       {horoscopeData.focus_areas.map((item, idx) => (
-                        <li key={idx} className="text-white/80 text-sm flex items-center gap-2">
-                          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        <li key={idx} className="text-[#dce8f5] text-sm flex items-center gap-2">
+                          <div className={`w-1.5 h-1.5 rounded-full bg-gradient-to-r ${currentSignData.gradient}`} />
                           {item}
                         </li>
                       ))}
                     </ul>
                   </div>
-                  <div className="bg-amber-500/10 rounded-xl p-4 border border-amber-500/20">
-                    <h3 className="text-amber-400 font-semibold text-xs uppercase tracking-wider mb-2">Watch Out</h3>
+                  <div className="rounded-lg border border-[#173653] bg-[#0b2338] p-4">
+                    <h3 className="text-[#7dd3fc] font-semibold text-xs uppercase tracking-wider mb-2">Watch Out</h3>
                     <ul className="space-y-1.5">
                       {horoscopeData.challenges.map((item, idx) => (
-                        <li key={idx} className="text-white/80 text-sm flex items-center gap-2">
-                          <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                        <li key={idx} className="text-[#dce8f5] text-sm flex items-center gap-2">
+                          <div className="w-1.5 h-1.5 rounded-full bg-[#7dd3fc]" />
                           {item}
                         </li>
                       ))}
@@ -292,14 +310,14 @@ export default function HoroscopePage() {
                   // Use structured sections if available (from Divine API)
                   if (horoscopeData.horoscope_sections && horoscopeData.horoscope_sections.length > 0) {
                     return horoscopeData.horoscope_sections.map((section, idx) => (
-                      <div key={idx} className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                      <div key={idx} className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
                         <div className="flex items-center gap-2 mb-3">
                           <span className="text-lg">
                             {sectionIcons[section.title.toLowerCase()] || "🔮"}
                           </span>
                           <h3 className="text-white font-semibold text-sm">{section.title}</h3>
                         </div>
-                        <p className="text-white/70 leading-relaxed text-[14px]">
+                        <p className="text-[#b8c7da] leading-relaxed text-[14px]">
                           {section.content}
                         </p>
                       </div>
@@ -325,7 +343,7 @@ export default function HoroscopePage() {
                     }
 
                     return sections.map((section, idx) => (
-                      <div key={idx} className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                      <div key={idx} className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
                         {section.title && (
                           <div className="flex items-center gap-2 mb-3">
                             <span className="text-lg">
@@ -338,7 +356,7 @@ export default function HoroscopePage() {
                           .split(/\n\n|\n/)
                           .filter((p: string) => p.trim())
                           .map((paragraph: string, pIdx: number) => (
-                            <p key={pIdx} className="text-white/70 leading-relaxed text-[14px] mb-2 last:mb-0">
+                            <p key={pIdx} className="text-[#b8c7da] leading-relaxed text-[14px] mb-2 last:mb-0">
                               {paragraph.trim()}
                             </p>
                           ))}
@@ -346,10 +364,11 @@ export default function HoroscopePage() {
                     ));
                   }
 
-                  // Last fallback: split long text into logical sections by sentence grouping
+                  // Last fallback: split paragraph text into the same four logical cards.
                   const sentences = text.split(/(?<=\.)\s+/).filter((s: string) => s.trim());
-                  if (sentences.length > 4) {
-                    const chunkSize = Math.ceil(sentences.length / 4);
+                  if (sentences.length >= 4) {
+                    const sectionCount = 4;
+                    const chunkSize = Math.ceil(sentences.length / sectionCount);
                     const autoSections = [
                       { title: "Overview", icon: "✨", sentences: sentences.slice(0, chunkSize) },
                       { title: "Love & Relationships", icon: "💕", sentences: sentences.slice(chunkSize, chunkSize * 2) },
@@ -358,12 +377,12 @@ export default function HoroscopePage() {
                     ].filter(s => s.sentences.length > 0);
 
                     return autoSections.map((section, idx) => (
-                      <div key={idx} className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
+                      <div key={idx} className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
                         <div className="flex items-center gap-2 mb-3">
                           <span className="text-lg">{section.icon}</span>
                           <h3 className="text-white font-semibold text-sm">{section.title}</h3>
                         </div>
-                        <p className="text-white/70 leading-relaxed text-[14px]">
+                        <p className="text-[#b8c7da] leading-relaxed text-[14px]">
                           {section.sentences.join(" ")}
                         </p>
                       </div>
@@ -372,8 +391,8 @@ export default function HoroscopePage() {
 
                   // Absolute fallback: just render the text
                   return (
-                    <div className="bg-white/[0.03] rounded-xl p-4 border border-white/5">
-                      <p className="text-white/70 leading-relaxed text-[15px]">{text}</p>
+                    <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
+                      <p className="text-[#b8c7da] leading-relaxed text-[15px]">{text}</p>
                     </div>
                   );
                 })()}
@@ -381,21 +400,21 @@ export default function HoroscopePage() {
 
               {/* Decorative divider */}
               <div className="flex items-center gap-3 my-6">
-                <div className="flex-1 h-px bg-white/10" />
-                <Sparkles className="w-4 h-4 text-white/20" />
-                <div className="flex-1 h-px bg-white/10" />
+                <div className="flex-1 h-px bg-[#173653]" />
+                <Sparkles className="w-4 h-4 text-[#38bdf8]/45" />
+                <div className="flex-1 h-px bg-[#173653]" />
               </div>
 
               {/* Source badge */}
               <div className="flex items-center justify-center gap-2 mb-4">
                 <div className={`w-2 h-2 rounded-full bg-gradient-to-r ${currentSignData.gradient}`} />
-                <span className="text-white/30 text-xs">Powered by Swiss Ephemeris + AI</span>
+                <span className="text-[#8fa3b8] text-xs">Powered by Swiss Ephemeris + AI</span>
               </div>
             </motion.div>
           ) : (
             <div className="flex flex-col items-center justify-center py-20 gap-3">
-              <p className="text-white/40 text-sm">Horoscope not available yet</p>
-              <p className="text-white/30 text-xs">Check back soon</p>
+              <p className="text-[#b8c7da] text-sm">Horoscope not available yet</p>
+              <p className="text-[#8fa3b8] text-xs">Check back soon</p>
             </div>
           )}
         </div>
@@ -407,7 +426,7 @@ export default function HoroscopePage() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/80 z-50 flex items-end justify-center"
+              className="fixed inset-0 bg-[#020b15]/85 backdrop-blur-sm z-50 flex items-end justify-center"
               onClick={() => setShowSignPicker(false)}
             >
               <motion.div
@@ -415,10 +434,10 @@ export default function HoroscopePage() {
                 animate={{ y: 0 }}
                 exit={{ y: "100%" }}
                 transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                className="w-full max-w-md bg-[#1A1F2E] rounded-t-3xl p-6"
+                className="w-full max-w-md bg-[#061525] border-t border-[#38bdf8]/25 rounded-t-2xl p-6 shadow-2xl shadow-black/40"
                 onClick={(e) => e.stopPropagation()}
               >
-                <div className="w-12 h-1 bg-white/20 rounded-full mx-auto mb-6" />
+                <div className="w-12 h-1 bg-[#38bdf8]/35 rounded-full mx-auto mb-6" />
                 <h2 className="text-white text-xl font-bold mb-4 text-center">Select Sign</h2>
                 <div className="grid grid-cols-3 gap-3">
                   {ZODIAC_SIGNS.map((zodiac) => (
@@ -428,16 +447,16 @@ export default function HoroscopePage() {
                         setSelectedSign(zodiac.sign);
                         setShowSignPicker(false);
                       }}
-                      className={`flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all ${
+                      className={`flex flex-col items-center gap-1.5 p-3 rounded-lg transition-all ${
                         selectedSign === zodiac.sign
-                          ? `bg-gradient-to-br ${zodiac.gradient} bg-opacity-20 border border-white/30 shadow-lg`
-                          : "bg-white/5 hover:bg-white/10 border border-transparent"
+                          ? `bg-gradient-to-br ${zodiac.gradient} border border-white/30 shadow-lg shadow-black/20`
+                          : "bg-[#0b2338] hover:border-[#38bdf8]/60 border border-[#173653]"
                       }`}
                     >
                       <span className="text-2xl">{zodiac.symbol}</span>
-                      <span className="text-white/80 text-xs font-medium">{zodiac.sign}</span>
+                      <span className="text-white text-xs font-medium">{zodiac.sign}</span>
                       {userSign === zodiac.sign && (
-                        <span className="text-[10px] text-white/40">You</span>
+                        <span className="text-[10px] text-[#b8c7da]">You</span>
                       )}
                     </button>
                   ))}

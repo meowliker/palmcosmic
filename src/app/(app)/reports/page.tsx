@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ChevronRight, Star, Sun, Moon, Sparkles, Loader2, Lock, MessageCircle, Lightbulb, CheckCircle, XCircle, Clock } from "lucide-react";
 import Image from "next/image";
 import { getZodiacSign, getZodiacSymbol, getZodiacColor } from "@/lib/astrology-api";
+import { extractStoredSignName } from "@/lib/zodiac-utils";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore, UnlockedFeatures } from "@/lib/user-store";
 import { UpsellPopup } from "@/components/UpsellPopup";
@@ -13,6 +14,8 @@ import { TrialStatusBanner } from "@/components/TrialStatusBanner";
 import { supabase } from "@/lib/supabase";
 import { UserAvatar, cacheUserInfo } from "@/components/UserAvatar";
 import { BirthChartTimer } from "@/components/BirthChartTimer";
+import { trackAnalyticsEvent } from "@/lib/analytics-events";
+import { pixelEvents } from "@/lib/pixel-events";
 
 // Removed unused DailyData interface - these API calls were failing and not displayed in UI
 
@@ -30,6 +33,11 @@ interface DailyInsights {
   current_dasha?: string;
 }
 
+interface SoulmateSketchStatus {
+  status?: "not_started" | "pending" | "generating" | "complete" | "failed";
+  sketch_image_url?: string | null;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [userZodiac, setUserZodiac] = useState({ sign: "Aries", symbol: "♈", color: "from-red-500 to-orange-500" });
@@ -44,34 +52,100 @@ export default function DashboardPage() {
   const [birthChartTimerExpired, setBirthChartTimerExpired] = useState(false);
   const [dailyInsights, setDailyInsights] = useState<DailyInsights | null>(null);
   const [insightsLoading, setInsightsLoading] = useState(true);
+  const [insightsError, setInsightsError] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
+  const [soulmateSketchStatus, setSoulmateSketchStatus] = useState<SoulmateSketchStatus | null>(null);
 
   // Get sun sign from onboarding store as fallback
   const { birthMonth: storeBirthMonth, birthDay: storeBirthDay, sunSign: storeSunSign } = useOnboardingStore();
-  
+
   // Get unlocked features from user store
-  const { unlockedFeatures, birthChartGenerating, birthChartReady, syncFromServer } = useUserStore();
+  const { unlockedFeatures, birthChartGenerating, birthChartReady, syncFromServer, unlockFeature } = useUserStore();
 
   useEffect(() => {
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+    pixelEvents.viewContent("Reports Dashboard", "dashboard");
+    trackAnalyticsEvent("ReportsDashboardViewed", {
+      route: "/reports",
+      user_id: userId,
+      email,
+      palm_reading_unlocked: unlockedFeatures.palmReading,
+      birth_chart_unlocked: unlockedFeatures.birthChart,
+      prediction_2026_unlocked: unlockedFeatures.prediction2026,
+      compatibility_unlocked: unlockedFeatures.compatibilityTest,
+      soulmate_sketch_unlocked: unlockedFeatures.soulmateSketch,
+      future_partner_unlocked: unlockedFeatures.futurePartnerReport,
+    });
     loadUserZodiac();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     fetchDailyInsightsV2();
   }, []);
 
+  useEffect(() => {
+    if (!unlockedFeatures.soulmateSketch) return;
+
+    let stopped = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+
+    const pollSoulmateSketch = async () => {
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+      if (!userId) return;
+
+      try {
+        const response = await fetch(`/api/soulmate-sketch/status?userId=${encodeURIComponent(userId)}`, {
+          cache: "no-store",
+        });
+        const json = (await response.json().catch(() => ({}))) as SoulmateSketchStatus;
+        if (!response.ok || stopped) return;
+
+        setSoulmateSketchStatus(json);
+
+        const isActive = json.status === "generating" || json.status === "pending";
+        if (!isActive && intervalId) {
+          clearInterval(intervalId);
+          intervalId = null;
+        }
+      } catch (pollError) {
+        console.error("[reports] soulmate sketch status poll failed", pollError);
+      }
+    };
+
+    pollSoulmateSketch();
+    intervalId = setInterval(pollSoulmateSketch, 7000);
+
+    return () => {
+      stopped = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [unlockedFeatures.soulmateSketch]);
+
   const loadUserZodiac = async () => {
     try {
-      const userId = localStorage.getItem("astrorekha_user_id");
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
 
       if (userId) {
+        await fetch("/api/user/refresh-entitlements", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            email: localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "",
+          }),
+        }).catch((refreshError) => {
+          console.error("Error refreshing entitlements:", refreshError);
+        });
+
         const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
 
         if (userData) {
           if (userData.name) setUserName(userData.name);
           if (userData.email) setUserEmail(userData.email);
           cacheUserInfo(userData.name, userData.email);
-          
+
           syncFromServer({
             unlockedFeatures: userData.unlocked_features,
             palmReading: userData.palm_reading,
@@ -81,28 +155,21 @@ export default function DashboardPage() {
             coins: userData.coins,
             purchasedBundle: userData.bundle_purchased || null,
           });
-          
+
           if (userData.birth_chart_timer_active !== undefined) {
             setBirthChartTimerActive(userData.birth_chart_timer_active);
           }
           if (userData.birth_chart_timer_started_at) {
             setBirthChartTimerStartedAt(userData.birth_chart_timer_started_at);
           }
-          
-          const extractSignName = (sign: any): string | null => {
-            if (!sign) return null;
-            if (typeof sign === "string") return sign;
-            if (sign.name) return sign.name;
-            return null;
-          };
 
-          let sunSignName = extractSignName(userData.sun_sign);
+          let sunSignName = extractStoredSignName(userData.sun_sign);
 
           if (!sunSignName && userId) {
             try {
               const { data: profile } = await supabase.from("user_profiles").select("sun_sign").eq("id", userId).single();
               if (profile) {
-                sunSignName = extractSignName(profile.sun_sign);
+                sunSignName = extractStoredSignName(profile.sun_sign);
               }
             } catch (profileErr) {
               console.error("Error reading user_profiles:", profileErr);
@@ -119,17 +186,17 @@ export default function DashboardPage() {
               symbol: getZodiacSymbol(sunSignName),
               color: getZodiacColor(sunSignName),
             });
-            
+
             const storedEmail = localStorage.getItem("astrorekha_email");
             if (storedEmail && !userEmail) {
               setUserEmail(storedEmail);
             }
-            
+
             return;
           }
         }
       }
-      
+
       // Also try to get email from localStorage as fallback
       const storedEmail = localStorage.getItem("astrorekha_email");
       if (storedEmail && !userEmail) {
@@ -138,7 +205,7 @@ export default function DashboardPage() {
     } catch (error) {
       console.error("Error loading user zodiac:", error);
     }
-    
+
     // Fallback to onboarding store sun sign or calculate from birth date
     // This only runs if Supabase fetch failed or user not found
     if (storeSunSign?.name) {
@@ -161,34 +228,114 @@ export default function DashboardPage() {
   };
 
 
-  const fetchDailyInsightsV2 = async () => {
+  const fetchDailyInsightsV2 = async (options?: { force?: boolean }) => {
     try {
       setInsightsLoading(true);
-      const userId = localStorage.getItem("astrorekha_user_id");
-      if (!userId) return;
+      setInsightsError(null);
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
+      const params = new URLSearchParams();
+      if (userId) {
+        params.set("userId", userId);
+      } else if (userZodiac.sign) {
+        params.set("sign", userZodiac.sign);
+      }
+      if (options?.force) {
+        params.set("force", "true");
+        trackAnalyticsEvent("ReportsDashboardAction", {
+          action: "daily_insights_retry_clicked",
+          route: "/reports",
+          sign: userZodiac.sign,
+          user_id: userId || "",
+        });
+      }
 
-      const response = await fetch(`/api/horoscope/daily-insights-v2?userId=${userId}`);
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success && result.data) {
-          setDailyInsights(result.data);
-        }
+      if (!params.has("userId") && !params.has("sign")) {
+        setDailyInsights(null);
+        setInsightsError("We need your zodiac sign to load today's insights.");
+        return;
+      }
+
+      const response = await fetch(`/api/horoscope/daily-insights-v2?${params.toString()}`);
+      const result = await response.json().catch(() => null);
+      if (response.ok && result?.success && result.data) {
+        setDailyInsights(result.data);
+        setInsightsError(null);
+      } else {
+        setDailyInsights(null);
+        setInsightsError(result?.error || "Insights unavailable right now.");
       }
     } catch (error) {
       console.error("Failed to fetch daily insights:", error);
+      setDailyInsights(null);
+      setInsightsError("Insights unavailable right now.");
     } finally {
       setInsightsLoading(false);
     }
   };
 
+  const trackReportAction = (
+    action: string,
+    params: {
+      reportKey: string;
+      feature: keyof UnlockedFeatures;
+      reportName: string;
+      destination?: string;
+      unlocked: boolean;
+    }
+  ) => {
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+
+    trackAnalyticsEvent("ReportsDashboardAction", {
+      action,
+      route: "/reports",
+      report_key: params.reportKey,
+      feature: params.feature,
+      report_name: params.reportName,
+      destination: params.destination,
+      unlocked: params.unlocked,
+      user_id: userId,
+      email,
+    });
+  };
+
+  const openReportOrUpsell = (params: {
+    reportKey: string;
+    feature: keyof UnlockedFeatures;
+    reportName: string;
+    destination: string;
+    unlocked: boolean;
+  }) => {
+    trackReportAction("report_card_clicked", params);
+
+    if (params.unlocked) {
+      pixelEvents.viewContent(params.reportName, "report");
+      trackReportAction("report_opened", params);
+      router.push(params.destination);
+      return;
+    }
+
+    trackReportAction("locked_report_selected", params);
+    setUpsellPopup({ isOpen: true, feature: params.feature });
+  };
+
+  const handleInsightCardClick = (card: string) => {
+    setExpandedCard(card);
+    trackAnalyticsEvent("ReportsDashboardAction", {
+      action: "daily_insight_card_opened",
+      route: "/reports",
+      card,
+    });
+  };
+
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
       {/* Trial/Payment Status Banner */}
       <TrialStatusBanner />
-      
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
+
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm border-b border-white/10">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center justify-between px-4 py-3">
             <button
               onClick={() => router.push("/profile")}
@@ -196,33 +343,40 @@ export default function DashboardPage() {
             >
               <UserAvatar name={userName} email={userEmail} size="md" />
             </button>
-            <h1 className="text-white text-xl font-semibold">Dashboard</h1>
+            <h1 className="text-white text-xl font-semibold">Reports</h1>
             <div className="w-10" />
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          <div className="px-4 py-4 space-y-6 pb-24">
+          <div className="px-4 py-5 space-y-6 pb-24">
             {/* Chat with Elysia */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="relative bg-gradient-to-br from-purple-600/20 via-pink-500/20 to-purple-600/20 rounded-2xl p-5 border-2 border-purple-500/30 cursor-pointer hover:border-purple-500/50 transition-all overflow-hidden group"
-              onClick={() => router.push("/chat")}
+              className="relative overflow-hidden rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-5 cursor-pointer transition-all hover:border-[#38bdf8]/60 hover:bg-[#0d2a45] group"
+              onClick={() => {
+                trackAnalyticsEvent("ReportsDashboardAction", {
+                  action: "chat_card_clicked",
+                  route: "/reports",
+                });
+                pixelEvents.contact();
+                router.push("/chat");
+              }}
             >
               {/* Animated background effect */}
-              <div className="absolute inset-0 bg-gradient-to-r from-purple-500/10 via-pink-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
-              
+              <div className="absolute inset-0 bg-[#38bdf8]/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+
               {/* Sparkle decorations */}
               <div className="absolute top-3 right-3 text-yellow-400 animate-pulse">
                 <Sparkles className="w-4 h-4" />
               </div>
-              
+
               <div className="relative flex items-center gap-4">
                 <div className="relative flex-shrink-0">
                   {/* Pulsing ring */}
-                  <div className="absolute inset-0 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 animate-ping opacity-20" />
-                  <div className="relative w-16 h-16 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/50 overflow-hidden">
+                  <div className="absolute inset-0 rounded-full bg-[#38bdf8] animate-ping opacity-10" />
+                  <div className="relative w-16 h-16 rounded-full bg-[#082035] flex items-center justify-center shadow-lg shadow-[#38bdf8]/15 overflow-hidden border border-[#38bdf8]/30">
                     <Image
                       src="/elysia.png"
                       alt="Elysia"
@@ -239,14 +393,14 @@ export default function DashboardPage() {
                   <h3 className="text-white font-bold text-xl mb-1">
                     Chat with Elysia
                   </h3>
-                  <p className="text-purple-200/80 text-sm">
+                  <p className="text-[#b8c7da] text-sm">
                     Your personal cosmic guide & advisor
                   </p>
                 </div>
-                <ChevronRight className="w-6 h-6 text-purple-300 group-hover:translate-x-1 transition-transform" />
+                <ChevronRight className="w-6 h-6 text-[#38bdf8] group-hover:translate-x-1 transition-transform" />
               </div>
             </motion.div>
-            
+
             {/* Today's Cosmic Insights - 3 Cards */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -254,7 +408,7 @@ export default function DashboardPage() {
               transition={{ delay: 0.1 }}
             >
               <h2 className="text-white font-semibold text-lg mb-3">Today&apos;s Cosmic Insights</h2>
-              
+
               {insightsLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
@@ -263,141 +417,157 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-3 gap-3">
                   {/* Today's Luck Card */}
                   <div
-                    onClick={() => setExpandedCard("luck")}
-                    className="bg-gradient-to-br from-yellow-500/20 to-amber-600/20 rounded-2xl p-4 border border-yellow-500/20 cursor-pointer hover:border-yellow-500/40 transition-all aspect-square flex flex-col items-center justify-center text-center relative overflow-hidden group"
+                    onClick={() => handleInsightCardClick("luck")}
+                    className="bg-[#0b2338] rounded-lg p-4 border border-[#173653] cursor-pointer hover:border-[#38bdf8]/50 transition-all aspect-square flex flex-col items-center justify-center text-center relative overflow-hidden group"
                   >
                     <div className="absolute top-2 right-2 opacity-20 group-hover:opacity-40 transition-opacity">
                       <Star className="w-8 h-8 text-yellow-400" />
                     </div>
                     <span className="text-3xl mb-2">🍀</span>
-                    <p className="text-yellow-400 font-bold text-xs">Today&apos;s Luck</p>
-                    <p className="text-yellow-300 text-2xl font-bold mt-1">{dailyInsights.lucky_number}</p>
+                    <p className="text-[#b8c7da] font-bold text-xs">Today&apos;s Luck</p>
+                    <p className="text-[#38bdf8] text-2xl font-bold mt-1">{dailyInsights.lucky_number}</p>
                   </div>
 
                   {/* Do's & Don'ts Card */}
                   <div
-                    onClick={() => setExpandedCard("dosdonts")}
-                    className="bg-gradient-to-br from-emerald-500/20 to-teal-600/20 rounded-2xl p-4 border border-emerald-500/20 cursor-pointer hover:border-emerald-500/40 transition-all aspect-square flex flex-col items-center justify-center text-center relative overflow-hidden group"
+                    onClick={() => handleInsightCardClick("dosdonts")}
+                    className="bg-[#0b2338] rounded-lg p-4 border border-[#173653] cursor-pointer hover:border-[#38bdf8]/50 transition-all aspect-square flex flex-col items-center justify-center text-center relative overflow-hidden group"
                   >
                     <div className="absolute top-2 right-2 opacity-20 group-hover:opacity-40 transition-opacity">
                       <CheckCircle className="w-8 h-8 text-emerald-400" />
                     </div>
                     <span className="text-3xl mb-2">✅</span>
-                    <p className="text-emerald-400 font-bold text-xs">Do&apos;s &amp;</p>
-                    <p className="text-emerald-400 font-bold text-xs">Don&apos;ts</p>
+                    <p className="text-[#b8c7da] font-bold text-xs">Do&apos;s &amp;</p>
+                    <p className="text-[#b8c7da] font-bold text-xs">Don&apos;ts</p>
                   </div>
 
                   {/* Daily Tip Card */}
                   <div
-                    onClick={() => setExpandedCard("tip")}
-                    className="bg-gradient-to-br from-purple-500/20 to-violet-600/20 rounded-2xl p-4 border border-purple-500/20 cursor-pointer hover:border-purple-500/40 transition-all aspect-square flex flex-col items-center justify-center text-center relative overflow-hidden group"
+                    onClick={() => handleInsightCardClick("tip")}
+                    className="bg-[#0b2338] rounded-lg p-4 border border-[#173653] cursor-pointer hover:border-[#38bdf8]/50 transition-all aspect-square flex flex-col items-center justify-center text-center relative overflow-hidden group"
                   >
                     <div className="absolute top-2 right-2 opacity-20 group-hover:opacity-40 transition-opacity">
                       <Lightbulb className="w-8 h-8 text-purple-400" />
                     </div>
                     <span className="text-3xl mb-2">💡</span>
-                    <p className="text-purple-400 font-bold text-xs">Daily</p>
-                    <p className="text-purple-400 font-bold text-xs">Tip</p>
+                    <p className="text-[#b8c7da] font-bold text-xs">Daily</p>
+                    <p className="text-[#b8c7da] font-bold text-xs">Tip</p>
                   </div>
                 </div>
               ) : (
-                <p className="text-white/30 text-sm text-center py-4">Insights unavailable right now. Check back later!</p>
+                <div className="py-4 text-center">
+                  <p className="text-white/35 text-sm">
+                    {insightsError || "Insights unavailable right now."}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => fetchDailyInsightsV2({ force: true })}
+                    disabled={insightsLoading}
+                    className="mt-2 text-sm font-semibold text-[#38bdf8] underline-offset-4 transition-colors hover:text-[#7dd3fc] hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Retry
+                  </button>
+                </div>
               )}
             </motion.div>
 
             {/* Expanded Card Modal */}
             {expandedCard && dailyInsights && (
               <div
-                className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+                className="fixed inset-0 z-50 flex items-center justify-center bg-[#020b15]/80 p-6 backdrop-blur-sm"
                 onClick={() => setExpandedCard(null)}
               >
                 <motion.div
                   initial={{ opacity: 0, scale: 0.9 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  className="w-full max-w-sm rounded-3xl overflow-hidden"
+                  className="w-full max-w-sm overflow-hidden rounded-lg border border-[#38bdf8]/25 bg-[#061525] shadow-2xl shadow-black/40"
                   onClick={(e) => e.stopPropagation()}
                 >
                   {expandedCard === "luck" && (
-                    <div className="bg-gradient-to-br from-[#1A1F2E] to-[#252D3F] p-6 border border-yellow-500/20">
+                    <div className="bg-[#061525] p-6">
                       <div className="flex items-center gap-3 mb-5">
-                        <span className="text-4xl">🍀</span>
+                        <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] text-3xl">🍀</span>
                         <h3 className="text-white text-xl font-bold">Today&apos;s Luck</h3>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
-                        <div className="bg-yellow-500/10 rounded-xl p-4 text-center border border-yellow-500/20">
-                          <p className="text-white/40 text-xs mb-1">Lucky Number</p>
-                          <p className="text-yellow-400 text-3xl font-bold">{dailyInsights.lucky_number}</p>
+                        <div className="rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-4 text-center shadow-inner shadow-[#38bdf8]/5">
+                          <p className="text-[#8fa3b8] text-xs mb-1">Lucky Number</p>
+                          <p className="bg-gradient-to-b from-[#e0f7ff] to-[#38bdf8] bg-clip-text text-4xl font-extrabold text-transparent drop-shadow-[0_0_14px_rgba(56,189,248,0.35)]">{dailyInsights.lucky_number}</p>
                         </div>
-                        <div className="bg-emerald-500/10 rounded-xl p-4 text-center border border-emerald-500/20">
-                          <p className="text-white/40 text-xs mb-1">Lucky Color</p>
-                          <p className="text-emerald-400 text-lg font-bold">{dailyInsights.lucky_color}</p>
+                        <div className="rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-4 text-center shadow-inner shadow-[#38bdf8]/5">
+                          <p className="text-[#8fa3b8] text-xs mb-1">Lucky Color</p>
+                          <p className="bg-gradient-to-b from-[#f0fbff] to-[#7dd3fc] bg-clip-text text-lg font-extrabold text-transparent drop-shadow-[0_0_12px_rgba(125,211,252,0.25)]">{dailyInsights.lucky_color}</p>
                         </div>
-                        <div className="bg-blue-500/10 rounded-xl p-4 text-center border border-blue-500/20">
-                          <p className="text-white/40 text-xs mb-1">Lucky Time</p>
-                          <p className="text-blue-400 text-sm font-bold">{dailyInsights.lucky_time}</p>
+                        <div className="rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-4 text-center shadow-inner shadow-[#38bdf8]/5">
+                          <p className="text-[#8fa3b8] text-xs mb-1">Lucky Time</p>
+                          <p className="text-base font-extrabold leading-snug text-[#38bdf8] drop-shadow-[0_0_10px_rgba(56,189,248,0.3)]">{dailyInsights.lucky_time}</p>
                         </div>
-                        <div className="bg-purple-500/10 rounded-xl p-4 text-center border border-purple-500/20">
-                          <p className="text-white/40 text-xs mb-1">Mood</p>
-                          <p className="text-purple-400 text-lg font-bold">{dailyInsights.mood}</p>
+                        <div className="rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-4 text-center shadow-inner shadow-[#38bdf8]/5">
+                          <p className="text-[#8fa3b8] text-xs mb-1">Mood</p>
+                          <p className="bg-gradient-to-b from-[#f0fbff] to-[#7dd3fc] bg-clip-text text-lg font-extrabold text-transparent drop-shadow-[0_0_12px_rgba(125,211,252,0.25)]">{dailyInsights.mood}</p>
                         </div>
                       </div>
-                      <button onClick={() => setExpandedCard(null)} className="w-full mt-5 py-3 bg-white/10 rounded-xl text-white/60 text-sm hover:bg-white/20 transition-colors">Close</button>
+                      <button onClick={() => setExpandedCard(null)} className="w-full mt-5 rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] py-3 text-sm font-semibold text-[#b8c7da] transition-colors hover:border-[#38bdf8]/60 hover:text-white">Close</button>
                     </div>
                   )}
 
                   {expandedCard === "dosdonts" && (
-                    <div className="bg-gradient-to-br from-[#1A1F2E] to-[#252D3F] p-6 border border-emerald-500/20">
+                    <div className="bg-[#061525] p-6">
                       <div className="flex items-center gap-3 mb-5">
-                        <span className="text-4xl">✅</span>
+                        <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] text-3xl">✅</span>
                         <h3 className="text-white text-xl font-bold">Do&apos;s &amp; Don&apos;ts</h3>
                       </div>
                       <div className="space-y-4">
-                        <div className="bg-emerald-500/10 rounded-xl p-4 border border-emerald-500/20">
-                          <h4 className="text-emerald-400 font-bold text-sm mb-3 flex items-center gap-2">
+                        <div className="rounded-lg border border-[#173653] bg-[#0b2338] p-4">
+                          <h4 className="text-[#38bdf8] font-bold text-sm mb-3 flex items-center gap-2">
                             <CheckCircle className="w-4 h-4" /> Do&apos;s
                           </h4>
                           <ul className="space-y-2">
                             {dailyInsights.dos.map((item, idx) => (
-                              <li key={idx} className="text-white/70 text-sm flex items-start gap-2">
-                                <span className="text-emerald-400 mt-0.5">&#10003;</span>
+                              <li key={idx} className="text-[#dce8f5] text-sm flex items-start gap-2">
+                                <span className="text-[#38bdf8] mt-0.5">&#10003;</span>
                                 {item}
                               </li>
                             ))}
                           </ul>
                         </div>
-                        <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20">
-                          <h4 className="text-red-400 font-bold text-sm mb-3 flex items-center gap-2">
+                        <div className="rounded-lg border border-[#173653] bg-[#0b2338] p-4">
+                          <h4 className="text-[#fca5a5] font-bold text-sm mb-3 flex items-center gap-2">
                             <XCircle className="w-4 h-4" /> Don&apos;ts
                           </h4>
                           <ul className="space-y-2">
                             {dailyInsights.donts.map((item, idx) => (
-                              <li key={idx} className="text-white/70 text-sm flex items-start gap-2">
-                                <span className="text-red-400 mt-0.5">&#10007;</span>
+                              <li key={idx} className="text-[#dce8f5] text-sm flex items-start gap-2">
+                                <span className="text-[#fca5a5] mt-0.5">&#10007;</span>
                                 {item}
                               </li>
                             ))}
                           </ul>
                         </div>
                       </div>
-                      <button onClick={() => setExpandedCard(null)} className="w-full mt-5 py-3 bg-white/10 rounded-xl text-white/60 text-sm hover:bg-white/20 transition-colors">Close</button>
+                      <button onClick={() => setExpandedCard(null)} className="w-full mt-5 rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] py-3 text-sm font-semibold text-[#b8c7da] transition-colors hover:border-[#38bdf8]/60 hover:text-white">Close</button>
                     </div>
                   )}
 
                   {expandedCard === "tip" && (
-                    <div className="bg-gradient-to-br from-[#1A1F2E] to-[#252D3F] p-6 border border-purple-500/20">
+                    <div className="bg-[#061525] p-6">
                       <div className="flex items-center gap-3 mb-5">
-                        <span className="text-4xl">💡</span>
+                        <span className="flex h-12 w-12 items-center justify-center rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] text-3xl">💡</span>
                         <h3 className="text-white text-xl font-bold">Daily Tip</h3>
                       </div>
-                      <div className="bg-purple-500/10 rounded-xl p-5 border border-purple-500/20">
-                        <p className="text-white/80 leading-relaxed">
+                      <div className="relative overflow-hidden rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-5 shadow-inner shadow-[#38bdf8]/5">
+                        <div className="absolute left-0 top-0 h-full w-1 bg-[#38bdf8]" />
+                        <div className="mb-3 inline-flex items-center rounded-full border border-[#38bdf8]/25 bg-[#38bdf8]/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-[#7dd3fc]">
+                          Focus
+                        </div>
+                        <p className="text-xl font-semibold leading-relaxed text-[#e8f6ff] drop-shadow-[0_0_12px_rgba(56,189,248,0.12)]">
                           {dailyInsights.daily_tip}
                         </p>
                       </div>
-                      <p className="text-white/30 text-xs mt-3 text-center">
-                        Personalized based on your birth chart
+                      <p className="text-[#8fa3b8] text-xs mt-3 text-center">
+                        Updated daily for {dailyInsights.sun_sign || userZodiac.sign}
                       </p>
-                      <button onClick={() => setExpandedCard(null)} className="w-full mt-5 py-3 bg-white/10 rounded-xl text-white/60 text-sm hover:bg-white/20 transition-colors">Close</button>
+                      <button onClick={() => setExpandedCard(null)} className="w-full mt-5 rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] py-3 text-sm font-semibold text-[#b8c7da] transition-colors hover:border-[#38bdf8]/60 hover:text-white">Close</button>
                     </div>
                   )}
                 </motion.div>
@@ -409,14 +579,21 @@ export default function DashboardPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 }}
-              className="relative rounded-2xl overflow-hidden cursor-pointer group border border-white/10"
-              onClick={() => router.push("/horoscope")}
+              className="relative rounded-lg overflow-hidden cursor-pointer group border border-[#173653]"
+              onClick={() => {
+                trackAnalyticsEvent("ReportsDashboardAction", {
+                  action: "horoscope_card_clicked",
+                  route: "/reports",
+                  sign: userZodiac.sign,
+                });
+                router.push("/horoscope");
+              }}
             >
               {/* Gradient background */}
-              <div className="absolute inset-0 bg-[#1A1F2E]" />
+              <div className="absolute inset-0 bg-[#0b2338]" />
               <div className={`absolute inset-0 bg-gradient-to-br ${userZodiac.color} opacity-50 group-hover:opacity-60 transition-opacity`} />
               <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
-              
+
               {/* Decorative stars */}
               <div className="absolute top-3 right-4 opacity-20">
                 <Star className="w-16 h-16 text-white" />
@@ -427,7 +604,7 @@ export default function DashboardPage() {
 
               <div className="relative p-5">
                 <div className="flex items-start gap-4">
-                  <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${userZodiac.color} flex items-center justify-center shadow-lg flex-shrink-0`}>
+                  <div className={`w-14 h-14 rounded-lg bg-gradient-to-br ${userZodiac.color} flex items-center justify-center shadow-lg flex-shrink-0`}>
                     <span className="text-white text-2xl">{userZodiac.symbol}</span>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -442,7 +619,7 @@ export default function DashboardPage() {
                     <ChevronRight className="w-3.5 h-3.5 text-white/50" />
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2 mt-4">
                   {["Daily", "Weekly", "Monthly"].map((label) => (
                     <span key={label} className="bg-white/10 backdrop-blur-sm rounded-full px-3 py-1 text-white/60 text-[11px] font-medium">
@@ -452,7 +629,7 @@ export default function DashboardPage() {
                 </div>
               </div>
             </motion.div>
-            
+
             {/* Reports from Advisors */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -460,41 +637,74 @@ export default function DashboardPage() {
               transition={{ delay: 0.2 }}
             >
               <h2 className="text-white font-semibold text-xl mb-4">Reports from Advisors</h2>
-              
+
               <div className="space-y-3">
-                {/* Palm Reading Report - Always unlocked with subscription */}
-                <div 
-                  onClick={() => router.push("/palm-reading")}
-                  className="bg-[#1A2235] rounded-2xl border border-primary/20 p-3 cursor-pointer hover:border-primary/40 transition-colors relative"
+                {/* Palm Reading Report */}
+                <div
+                  onClick={() =>
+                    openReportOrUpsell({
+                      reportKey: "palm_reading",
+                      feature: "palmReading",
+                      reportName: "Palm Reading Report",
+                      destination: "/palm-reading",
+                      unlocked: unlockedFeatures.palmReading,
+                    })
+                  }
+                  className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
+                  {!unlockedFeatures.palmReading && (
+                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
+                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    </div>
+                  )}
                   <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-rose-500/30 to-pink-600/30 flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/10">
+                    <div className="w-16 h-16 rounded-lg bg-[#082035] flex items-center justify-center flex-shrink-0 overflow-hidden border border-[#173653]">
                       <span className="text-3xl">🖐️</span>
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-white font-semibold">Palm Reading Report</h3>
-                      <p className="text-white/50 text-xs mt-0.5">Discover your life path & destiny</p>
+                      <p className="text-[#8fa3b8] text-xs mt-0.5">Discover your life path & destiny</p>
+                      {!unlockedFeatures.palmReading && (
+                        <span className="mt-2 inline-flex px-3 py-1 bg-[#38bdf8]/12 text-[#38bdf8] text-xs rounded-full">
+                          Get Report
+                        </span>
+                      )}
                     </div>
-                    <ChevronRight className="w-6 h-6 text-white/40" />
+                    <ChevronRight className="w-6 h-6 text-[#8fa3b8]" />
                   </div>
                 </div>
 
                 {/* Birth Chart Report */}
-                <div 
-                  className={`bg-[#1A2235] border border-primary/20 transition-colors ${
-                    birthChartTimerActive && !birthChartTimerExpired 
-                      ? "rounded-2xl" 
-                      : "rounded-2xl"
+                <div
+                  className={`bg-[#0b2338] border border-[#173653] transition-colors ${
+                    birthChartTimerActive && !birthChartTimerExpired
+                      ? "rounded-lg"
+                      : "rounded-lg"
                   }`}
                 >
-                  <div 
+                  <div
                     onClick={async () => {
                       // Don't allow click if timer is active and not expired
                       if (birthChartTimerActive && !birthChartTimerExpired) {
                         return;
                       }
                       if (unlockedFeatures.birthChart) {
+                        trackReportAction("report_card_clicked", {
+                          reportKey: "birth_chart",
+                          feature: "birthChart",
+                          reportName: "Birth Chart Report",
+                          destination: "/birth-chart",
+                          unlocked: true,
+                        });
                         if (!birthChartGenerating) {
+                          pixelEvents.viewContent("Birth Chart Report", "report");
+                          trackReportAction("report_opened", {
+                            reportKey: "birth_chart",
+                            feature: "birthChart",
+                            reportName: "Birth Chart Report",
+                            destination: "/birth-chart",
+                            unlocked: true,
+                          });
                           // Deactivate timer when user opens the report (with delay so user doesn't see it disappear)
                           if (birthChartTimerActive) {
                             // Update Supabase to deactivate timer after a delay
@@ -513,49 +723,56 @@ export default function DashboardPage() {
                           router.push("/birth-chart");
                         }
                       } else {
+                        trackReportAction("locked_report_selected", {
+                          reportKey: "birth_chart",
+                          feature: "birthChart",
+                          reportName: "Birth Chart Report",
+                          destination: "/birth-chart",
+                          unlocked: false,
+                        });
                         setUpsellPopup({ isOpen: true, feature: "birthChart" });
                       }
                     }}
                     className={`p-3 relative ${
-                      birthChartTimerActive && !birthChartTimerExpired 
-                        ? "cursor-not-allowed opacity-70" 
-                        : "cursor-pointer hover:bg-white/5"
+                      birthChartTimerActive && !birthChartTimerExpired
+                        ? "cursor-not-allowed opacity-70"
+                        : "cursor-pointer hover:bg-[#0d2a45]"
                     }`}
                   >
                     {!unlockedFeatures.birthChart && (
-                      <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
-                        <Lock className="w-3 h-3 text-white/60" />
+                      <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
+                        <Lock className="w-3 h-3 text-[#8fa3b8]" />
                       </div>
                     )}
                     {birthChartGenerating && (
                       <div className="absolute top-2 right-2">
-                        <Loader2 className="w-5 h-5 text-primary animate-spin" />
+                        <Loader2 className="w-5 h-5 text-[#38bdf8] animate-spin" />
                       </div>
                     )}
                     <div className="flex items-center gap-3">
-                      <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-orange-500/30 to-amber-600/30 flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/10">
+                      <div className="w-16 h-16 rounded-lg bg-[#082035] flex items-center justify-center flex-shrink-0 overflow-hidden border border-[#173653]">
                         <span className="text-3xl">📊</span>
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="text-white font-semibold">Birth Chart Report</h3>
-                        <p className="text-white/50 text-xs mt-0.5">Your complete astrological blueprint</p>
+                        <p className="text-[#8fa3b8] text-xs mt-0.5">Your complete astrological blueprint</p>
                         {!unlockedFeatures.birthChart && (
-                          <button className="mt-1 px-3 py-1 bg-primary/20 text-primary text-xs rounded-full">
+                          <button className="mt-1 px-3 py-1 bg-[#38bdf8]/12 text-[#38bdf8] text-xs rounded-full">
                             Get Report
                           </button>
                         )}
                         {birthChartGenerating && (
-                          <p className="text-white/50 text-xs mt-1">Generating your chart...</p>
+                          <p className="text-[#8fa3b8] text-xs mt-1">Generating your chart...</p>
                         )}
                       </div>
-                      <ChevronRight className="w-6 h-6 text-white/40" />
+                      <ChevronRight className="w-6 h-6 text-[#8fa3b8]" />
                     </div>
                   </div>
                   {/* Timer Bar */}
                   {unlockedFeatures.birthChart && birthChartTimerActive && (
-                    <div className="bg-gradient-to-r from-amber-500/20 to-orange-500/20 px-4 py-2.5 flex items-center justify-center gap-2 border-t border-primary/20">
-                      <BirthChartTimer 
-                        startedAt={birthChartTimerStartedAt} 
+                    <div className="bg-[#082035] px-4 py-2.5 flex items-center justify-center gap-2 border-t border-[#173653]">
+                      <BirthChartTimer
+                        startedAt={birthChartTimerStartedAt}
                         isActive={birthChartTimerActive}
                         onExpire={() => setBirthChartTimerExpired(true)}
                       />
@@ -567,71 +784,155 @@ export default function DashboardPage() {
                 </div>
 
                 {/* Compatibility Test */}
-                <div 
-                  onClick={() => {
-                    if (unlockedFeatures.compatibilityTest) {
-                      router.push("/compatibility");
-                    } else {
-                      setUpsellPopup({ isOpen: true, feature: "compatibilityTest" });
-                    }
-                  }}
-                  className="bg-[#1A2235] rounded-2xl border border-primary/20 p-3 cursor-pointer hover:border-primary/40 transition-colors relative"
+                <div
+                  onClick={() =>
+                    openReportOrUpsell({
+                      reportKey: "compatibility",
+                      feature: "compatibilityTest",
+                      reportName: "Compatibility Test",
+                      destination: "/compatibility",
+                      unlocked: unlockedFeatures.compatibilityTest,
+                    })
+                  }
+                  className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.compatibilityTest && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-white/60" />
+                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
+                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
                     </div>
                   )}
                   <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-pink-500/30 to-rose-600/30 flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/10">
+                    <div className="w-16 h-16 rounded-lg bg-[#082035] flex items-center justify-center flex-shrink-0 overflow-hidden border border-[#173653]">
                       <span className="text-3xl">💕</span>
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-white font-semibold">Compatibility Test</h3>
-                      <p className="text-white/50 text-xs mt-0.5">Find your perfect cosmic match</p>
+                      <p className="text-[#8fa3b8] text-xs mt-0.5">Find your perfect cosmic match</p>
                       {!unlockedFeatures.compatibilityTest && (
-                        <button className="mt-1 px-3 py-1 bg-primary/20 text-primary text-xs rounded-full">
+                        <button className="mt-1 px-3 py-1 bg-[#38bdf8]/12 text-[#38bdf8] text-xs rounded-full">
                           Get Report
                         </button>
                       )}
                     </div>
-                    <ChevronRight className="w-6 h-6 text-white/40" />
+                    <ChevronRight className="w-6 h-6 text-[#8fa3b8]" />
+                  </div>
+                </div>
+
+                {/* Soulmate Sketch */}
+                <div
+                  onClick={() =>
+                    openReportOrUpsell({
+                      reportKey: "soulmate_sketch",
+                      feature: "soulmateSketch",
+                      reportName: "Soulmate Sketch",
+                      destination: "/soulmate-sketch",
+                      unlocked: unlockedFeatures.soulmateSketch,
+                    })
+                  }
+                  className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
+                >
+                  {!unlockedFeatures.soulmateSketch && (
+                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
+                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-lg bg-[#082035] flex items-center justify-center flex-shrink-0 overflow-hidden border border-[#173653]">
+                      <span className="text-3xl">🎨</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-white font-semibold">Soulmate Sketch</h3>
+                      <p className="text-[#8fa3b8] text-xs mt-0.5">
+                        {soulmateSketchStatus?.status === "generating" || soulmateSketchStatus?.status === "pending"
+                          ? "Generating your portrait..."
+                          : soulmateSketchStatus?.status === "complete" || soulmateSketchStatus?.sketch_image_url
+                            ? "Your portrait is ready"
+                            : "AI portrait + relationship timeline highlights"}
+                      </p>
+                      {!unlockedFeatures.soulmateSketch && (
+                        <button className="mt-1 px-3 py-1 bg-[#38bdf8]/12 text-[#38bdf8] text-xs rounded-full">
+                          Get Report
+                        </button>
+                      )}
+                    </div>
+                    {soulmateSketchStatus?.status === "generating" || soulmateSketchStatus?.status === "pending" ? (
+                      <Loader2 className="w-5 h-5 animate-spin text-[#38bdf8]" />
+                    ) : (
+                      <ChevronRight className="w-6 h-6 text-[#8fa3b8]" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Future Partner Report */}
+                <div
+                  onClick={() =>
+                    openReportOrUpsell({
+                      reportKey: "future_partner",
+                      feature: "futurePartnerReport",
+                      reportName: "Future Partner Report",
+                      destination: "/future-partner",
+                      unlocked: unlockedFeatures.futurePartnerReport,
+                    })
+                  }
+                  className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
+                >
+                  {!unlockedFeatures.futurePartnerReport && (
+                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
+                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    </div>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <div className="w-16 h-16 rounded-lg bg-[#082035] flex items-center justify-center flex-shrink-0 overflow-hidden border border-[#173653]">
+                      <span className="text-3xl">💍</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-white font-semibold">Future Partner Report</h3>
+                      <p className="text-[#8fa3b8] text-xs mt-0.5">Name, marriage year, age and marriage compatibility</p>
+                      {!unlockedFeatures.futurePartnerReport && (
+                        <button className="mt-1 px-3 py-1 bg-[#38bdf8]/12 text-[#38bdf8] text-xs rounded-full">
+                          Get Report
+                        </button>
+                      )}
+                    </div>
+                    <ChevronRight className="w-6 h-6 text-[#8fa3b8]" />
                   </div>
                 </div>
 
                 {/* Prediction 2026 Report */}
-                <div 
-                  onClick={() => {
-                    if (unlockedFeatures.prediction2026) {
-                      router.push("/prediction-2026");
-                    } else {
-                      setUpsellPopup({ isOpen: true, feature: "prediction2026" });
-                    }
-                  }}
-                  className="bg-[#1A2235] rounded-2xl border border-primary/20 p-3 cursor-pointer hover:border-primary/40 transition-colors relative"
+                <div
+                  onClick={() =>
+                    openReportOrUpsell({
+                      reportKey: "prediction_2026",
+                      feature: "prediction2026",
+                      reportName: "Prediction 2026 Report",
+                      destination: "/prediction-2026",
+                      unlocked: unlockedFeatures.prediction2026,
+                    })
+                  }
+                  className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.prediction2026 && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-white/60" />
+                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
+                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
                     </div>
                   )}
                   <div className="flex items-center gap-3">
-                    <div className="w-16 h-16 rounded-xl bg-gradient-to-br from-indigo-500/30 to-purple-600/30 flex items-center justify-center flex-shrink-0 overflow-hidden border border-white/10">
+                    <div className="w-16 h-16 rounded-lg bg-[#082035] flex items-center justify-center flex-shrink-0 overflow-hidden border border-[#173653]">
                       <span className="text-3xl">🔮</span>
                     </div>
                     <div className="flex-1 min-w-0">
                       <h3 className="text-white font-semibold">Prediction 2026 Report</h3>
-                      <p className="text-white/50 text-xs mt-0.5">What the stars hold for your future</p>
+                      <p className="text-[#8fa3b8] text-xs mt-0.5">What the stars hold for your future</p>
                       {!unlockedFeatures.prediction2026 && (
-                        <button className="mt-1 px-3 py-1 bg-primary/20 text-primary text-xs rounded-full">
+                        <button className="mt-1 px-3 py-1 bg-[#38bdf8]/12 text-[#38bdf8] text-xs rounded-full">
                           Get Report
                         </button>
                       )}
                     </div>
-                    <ChevronRight className="w-6 h-6 text-white/40" />
+                    <ChevronRight className="w-6 h-6 text-[#8fa3b8]" />
                   </div>
                 </div>
-                
+
               </div>
             </motion.div>
           </div>
@@ -641,8 +942,35 @@ export default function DashboardPage() {
         {upsellPopup.feature && (
           <UpsellPopup
             isOpen={upsellPopup.isOpen}
-            onClose={() => setUpsellPopup({ isOpen: false, feature: null })}
+            onClose={() => {
+              if (upsellPopup.feature) {
+                trackAnalyticsEvent("ReportsDashboardAction", {
+                  action: "upsell_modal_closed",
+                  route: "/reports",
+                  feature: upsellPopup.feature,
+                });
+              }
+              setUpsellPopup({ isOpen: false, feature: null });
+            }}
             feature={upsellPopup.feature}
+            onPurchase={() => {
+              trackAnalyticsEvent("ReportsDashboardAction", {
+                action: "upsell_purchase_completed",
+                route: "/reports",
+                feature: upsellPopup.feature,
+              });
+              if (upsellPopup.feature === "soulmateSketch") {
+                unlockFeature("soulmateSketch");
+                router.push("/soulmate-sketch");
+                return;
+              }
+              if (upsellPopup.feature === "futurePartnerReport") {
+                unlockFeature("futurePartnerReport");
+                router.push("/future-partner");
+                return;
+              }
+              window.location.reload();
+            }}
           />
         )}
       </div>

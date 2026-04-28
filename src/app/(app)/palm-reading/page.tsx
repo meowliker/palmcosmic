@@ -3,11 +3,12 @@
 import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Loader2, Share2, Trash2, ChevronDown, ChevronUp, Camera, RefreshCw } from "lucide-react";
+import { ArrowLeft, Loader2, ChevronDown, ChevronUp, Camera, Flashlight, FlashlightOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { supabase } from "@/lib/supabase";
 import { calculateZodiacSign, generateUserId } from "@/lib/user-profile";
+import ReportDisclaimer from "@/components/ReportDisclaimer";
 
 type TabKey = "ageTimeline" | "wealth" | "mounts" | "love";
 
@@ -22,13 +23,15 @@ export default function PalmReadingPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState(0);
   const [reading, setReading] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("ageTimeline");
   const [expandedCosmic, setExpandedCosmic] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [showCamera, setShowCamera] = useState(false);
-  const [isFlowB, setIsFlowB] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchEnabled, setTorchEnabled] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -39,11 +42,6 @@ export default function PalmReadingPage() {
   const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
 
   useEffect(() => {
-    // Check if user is Flow B
-    const flow = localStorage.getItem("astrorekha_onboarding_flow");
-    const purchaseType = localStorage.getItem("astrorekha_purchase_type");
-    setIsFlowB(flow === "flow-b" || purchaseType === "one-time");
-    
     loadExistingReading();
     return () => {
       // Cleanup camera stream
@@ -52,6 +50,25 @@ export default function PalmReadingPage() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!analyzing) {
+      setAnalysisProgress(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      setAnalysisProgress((prev) => {
+        const elapsedMs = Date.now() - startedAt;
+        const elapsedTarget = Math.min(100, Math.floor((elapsedMs / 16000) * 100));
+        const next = Math.max(prev + 1, elapsedTarget);
+        return Math.min(100, next);
+      });
+    }, 250);
+
+    return () => clearInterval(timer);
+  }, [analyzing]);
 
   const loadExistingReading = async () => {
     try {
@@ -101,6 +118,10 @@ export default function PalmReadingPage() {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
       }
+      const [track] = stream.getVideoTracks();
+      const capabilities = (track?.getCapabilities?.() || {}) as { torch?: boolean };
+      setTorchSupported(!!capabilities.torch);
+      setTorchEnabled(false);
     } catch (err) {
       console.error("Camera error:", err);
       setError("Could not access camera. Please allow camera permissions.");
@@ -126,6 +147,8 @@ export default function PalmReadingPage() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      setTorchEnabled(false);
+      setTorchSupported(false);
       setShowCamera(false);
       
       // Analyze the palm
@@ -135,6 +158,7 @@ export default function PalmReadingPage() {
 
   const analyzePalm = async (imageData: string) => {
     setAnalyzing(true);
+    setAnalysisProgress(2);
     setError(null);
 
     try {
@@ -166,6 +190,8 @@ export default function PalmReadingPage() {
       }
 
       setReading(palmReading);
+      setAnalysisProgress(100);
+      await new Promise((resolve) => setTimeout(resolve, 250));
 
       // Save to Firestore
       const userId = generateUserId();
@@ -186,6 +212,22 @@ export default function PalmReadingPage() {
     }
   };
 
+  const toggleTorch = async () => {
+    const [track] = streamRef.current?.getVideoTracks?.() || [];
+    if (!track) return;
+
+    try {
+      await track.applyConstraints({
+        advanced: [{ torch: !torchEnabled } as MediaTrackConstraintSet],
+      });
+      setTorchEnabled((prev) => !prev);
+      setError(null);
+    } catch (err) {
+      console.error("Torch toggle failed:", err);
+      setError("Flashlight is not supported on this device/browser.");
+    }
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -199,48 +241,14 @@ export default function PalmReadingPage() {
     reader.readAsDataURL(file);
   };
 
-  const handleDeleteReading = async () => {
-    if (!confirm("Are you sure you want to delete this reading?")) return;
-    
-    try {
-      const userId = generateUserId();
-      await supabase.from("palm_readings").update({
-        reading: null,
-        palm_image_url: null,
-        deleted_at: new Date().toISOString(),
-      }).eq("id", userId);
-      setReading(null);
-      setCapturedImage(null);
-    } catch (err) {
-      console.error("Failed to delete:", err);
-    }
-  };
-
-  const handleShare = async () => {
-    const shareText = reading?.cosmicInsight 
-      ? `✨ My Palm Reading\n\n${reading.cosmicInsight}\n\nGet your reading at PalmCosmic!`
-      : "Check out my palm reading on PalmCosmic!";
-    
-    if (navigator.share) {
-      try {
-        await navigator.share({ text: shareText });
-      } catch (err) {
-        // User cancelled
-      }
-    } else {
-      await navigator.clipboard.writeText(shareText);
-      alert("Reading copied to clipboard!");
-    }
-  };
-
   const renderTabButton = (key: TabKey) => (
     <button
       key={key}
       onClick={() => setActiveTab(key)}
       className={`flex-1 py-2.5 px-2 rounded-xl text-xs font-semibold transition-all ${
         activeTab === key
-          ? "bg-gradient-to-r from-primary to-purple-600 text-white shadow-lg"
-          : "text-white/60 hover:text-white"
+          ? "bg-[#38bdf8] text-[#03111f] shadow-lg shadow-[#38bdf8]/15"
+          : "text-[#8fa3b8] hover:text-white"
       }`}
     >
       {TAB_LABELS[key]}
@@ -253,7 +261,7 @@ export default function PalmReadingPage() {
     
     return (
       <div className="space-y-4">
-        <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+        <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
           <h3 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
             📅 {t.title || "Life Timeline Predictions"}
           </h3>
@@ -261,7 +269,7 @@ export default function PalmReadingPage() {
           {t.stages?.map((stage: any, idx: number) => (
             <div key={idx} className="mb-4 last:mb-0">
               <div className="flex items-center gap-3 mb-2">
-                <span className="px-3 py-1 bg-black/30 rounded-full text-xs font-bold text-white border border-white/10">
+                <span className="px-3 py-1 bg-[#061525] rounded-full text-xs font-bold text-white border border-[#173653]">
                   {stage.range}
                 </span>
                 <span className="text-white font-bold">{stage.label}</span>
@@ -272,12 +280,12 @@ export default function PalmReadingPage() {
         </div>
 
         {t.milestones && (
-          <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+          <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
             <h4 className="text-white font-bold mb-3">🕒 Key Life Milestones</h4>
             <div className="space-y-3">
               {Object.entries(t.milestones).map(([key, value]) => (
                 <div key={key} className="flex gap-2">
-                  <span className="text-primary">◉</span>
+                  <span className="text-[#38bdf8]">◉</span>
                   <div>
                     <span className="text-white font-semibold text-sm capitalize">
                       {key.replace(/([A-Z])/g, " $1").trim()}:
@@ -298,7 +306,7 @@ export default function PalmReadingPage() {
     if (!t) return null;
     
     return (
-      <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10 space-y-4">
+      <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653] space-y-4">
         <h3 className="text-white font-bold text-lg flex items-center gap-2">
           💰 {t.title || "Wealth & Financial Analysis"}
         </h3>
@@ -306,7 +314,7 @@ export default function PalmReadingPage() {
         <div>
           <h4 className="text-white font-semibold text-sm mb-1">💵 Financial Potential</h4>
           <p className="text-white/70 text-sm">
-            {t.financialPotential?.level && <span className="text-primary font-bold">{t.financialPotential.level}: </span>}
+            {t.financialPotential?.level && <span className="text-red-300 font-bold">{t.financialPotential.level}: </span>}
             {t.financialPotential?.details}
           </p>
         </div>
@@ -316,7 +324,7 @@ export default function PalmReadingPage() {
           <p className="text-white/70 text-sm">{t.businessAptitude}</p>
         </div>
 
-        <div className="border-t border-white/10 pt-4">
+        <div className="border-t border-[#173653] pt-4">
           <h4 className="text-white font-semibold text-sm mb-1">Wealth Timeline</h4>
           <p className="text-white/70 text-sm">{t.wealthTimeline}</p>
         </div>
@@ -340,7 +348,7 @@ export default function PalmReadingPage() {
     
     return (
       <div className="space-y-4">
-        <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+        <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
           <h3 className="text-white font-bold text-lg mb-4 flex items-center gap-2">
             👑 {t.title || "Palm Mounts Analysis"}
           </h3>
@@ -354,7 +362,7 @@ export default function PalmReadingPage() {
         </div>
 
         {t.specialMarkings && (
-          <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+          <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]">
             <h4 className="text-white font-bold mb-3">📍 Special Markings</h4>
             <div className="space-y-3">
               {Object.entries(t.specialMarkings).map(([key, value]) => (
@@ -377,7 +385,7 @@ export default function PalmReadingPage() {
     if (!t) return null;
     
     return (
-      <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10 space-y-4">
+      <div className="bg-[#0b2338] rounded-lg p-4 border border-[#173653] space-y-4">
         <h3 className="text-white font-bold text-lg flex items-center gap-2">
           ❤️ {t.title || "Love & Partnership Predictions"}
         </h3>
@@ -392,7 +400,7 @@ export default function PalmReadingPage() {
           <p className="text-white/70 text-sm">{t.marriageTiming}</p>
         </div>
 
-        <div className="border-t border-white/10 pt-4">
+        <div className="border-t border-[#173653] pt-4">
           <h4 className="text-white font-semibold text-sm mb-1">Partner&apos;s Financial Status</h4>
           <p className="text-white/70 text-sm">{t.partnersFinancialStatus}</p>
         </div>
@@ -423,10 +431,10 @@ export default function PalmReadingPage() {
   // Loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A] flex items-center justify-center">
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] flex items-center justify-center">
           <div className="text-center">
-            <Loader2 className="w-12 h-12 text-primary animate-spin mx-auto mb-4" />
+            <Loader2 className="w-12 h-12 text-[#38bdf8] animate-spin mx-auto mb-4" />
             <p className="text-white/60">Loading your reading...</p>
           </div>
         </div>
@@ -437,8 +445,8 @@ export default function PalmReadingPage() {
   // Camera view - matches onboarding step-13 UI
   if (showCamera) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] flex flex-col">
           <div className="relative flex-1 bg-black">
             <video
               ref={videoRef}
@@ -466,6 +474,8 @@ export default function PalmReadingPage() {
                 if (streamRef.current) {
                   streamRef.current.getTracks().forEach(track => track.stop());
                 }
+                setTorchEnabled(false);
+                setTorchSupported(false);
                 setShowCamera(false);
               }}
               className="absolute top-4 left-4 w-10 h-10 rounded-full bg-black/30 flex items-center justify-center"
@@ -473,19 +483,30 @@ export default function PalmReadingPage() {
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
 
+            {showCamera && (torchSupported || !!streamRef.current) && (
+              <button
+                onClick={toggleTorch}
+                aria-label={torchEnabled ? "Turn torch off" : "Turn torch on"}
+                title={torchEnabled ? "Torch off" : "Torch on"}
+                className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/45 text-white border border-[#173653] flex items-center justify-center"
+              >
+                {torchEnabled ? <FlashlightOff className="w-4 h-4" /> : <Flashlight className="w-4 h-4" />}
+              </button>
+            )}
+
             <canvas ref={canvasRef} className="hidden" />
           </div>
 
-          <div className="bg-background p-6 flex flex-col items-center gap-4">
-            <p className="text-muted-foreground text-center text-sm">
+          <div className="bg-[#061525] px-6 pt-4 pb-[calc(env(safe-area-inset-bottom)+5.25rem)] flex flex-col items-center gap-4">
+            <p className="text-[#8fa3b8] text-center text-sm">
               Place left palm inside outline and take a photo
             </p>
 
             <button
               onClick={capturePhoto}
-              className="w-16 h-16 rounded-full bg-primary border-4 border-primary/30 flex items-center justify-center"
+              className="w-16 h-16 rounded-full bg-[#38bdf8] border-4 border-[#38bdf8]/30 shadow-lg shadow-[#38bdf8]/20 flex items-center justify-center"
             >
-              <div className="w-12 h-12 rounded-full bg-primary" />
+              <div className="w-12 h-12 rounded-full bg-[#38bdf8]" />
             </button>
           </div>
         </div>
@@ -496,14 +517,24 @@ export default function PalmReadingPage() {
   // Analyzing state
   if (analyzing) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A] flex items-center justify-center">
-          <div className="text-center px-8">
-            <Loader2 className="w-16 h-16 text-primary animate-spin mx-auto mb-6" />
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] flex items-center justify-center">
+          <div className="text-center px-8 w-full max-w-sm">
+            <Loader2 className="w-10 h-10 text-[#38bdf8] animate-spin mx-auto mb-5" />
             <h2 className="text-white text-xl font-bold mb-2">Analyzing Your Palm...</h2>
-            <p className="text-white/60 text-sm">
+            <p className="text-white/60 text-sm mb-4">
               Our cosmic AI is reading the lines of your destiny
             </p>
+
+            <div className="w-full h-3 rounded-full bg-[#0b2338] overflow-hidden border border-[#173653]">
+              <motion.div
+                className="h-full bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc]"
+                initial={{ width: 0 }}
+                animate={{ width: `${analysisProgress}%` }}
+                transition={{ ease: "linear", duration: 0.2 }}
+              />
+            </div>
+            <p className="text-white/70 text-sm mt-3">{analysisProgress}%</p>
           </div>
         </div>
       </div>
@@ -513,9 +544,9 @@ export default function PalmReadingPage() {
   // No reading yet - show capture UI
   if (!reading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden flex flex-col">
-          <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm border-b border-white/10">
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden flex flex-col">
+          <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
             <div className="flex items-center gap-4 px-4 py-3">
               <button onClick={() => router.push("/reports")} className="w-10 h-10 flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
@@ -531,7 +562,7 @@ export default function PalmReadingPage() {
               </div>
             )}
 
-            <div className="w-32 h-32 rounded-full bg-gradient-to-br from-primary/20 to-purple-600/20 flex items-center justify-center mb-6">
+            <div className="w-32 h-32 rounded-full bg-gradient-to-br from-[#0b2338] to-[#061525] flex items-center justify-center mb-6">
               <span className="text-6xl">🖐️</span>
             </div>
 
@@ -545,9 +576,9 @@ export default function PalmReadingPage() {
             <div className="w-full space-y-3">
               <Button
                 onClick={startCamera}
-                className="w-full bg-gradient-to-r from-primary to-purple-600 py-6 text-lg"
+                className="w-full bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc] py-6 text-lg !text-black hover:from-[#7dd3fc] hover:to-[#38bdf8] [&_svg]:text-black"
               >
-                <Camera className="w-5 h-5 mr-2" />
+                <Camera className="w-5 h-5 mr-2 text-black" />
                 Take Photo
               </Button>
 
@@ -558,14 +589,14 @@ export default function PalmReadingPage() {
                   onChange={handleFileUpload}
                   className="hidden"
                 />
-                <div className="w-full py-4 border border-white/20 rounded-xl text-white text-center cursor-pointer hover:bg-white/5 transition-colors">
+                <div className="w-full py-4 border border-[#173653] rounded-xl text-white text-center cursor-pointer hover:bg-[#0b2338] transition-colors">
                   Upload from Gallery
                 </div>
               </label>
             </div>
 
-            <div className="mt-8 bg-gradient-to-br from-purple-500/10 to-pink-500/10 rounded-2xl p-4 border border-purple-500/20">
-              <p className="text-white/60 text-sm text-center">
+            <div className="mt-8 bg-[#0b2338] rounded-2xl p-4 border border-[#173653]">
+              <p className="text-[#8fa3b8] text-sm text-center">
                 💡 For best results, use good lighting and spread your fingers slightly
               </p>
             </div>
@@ -577,30 +608,16 @@ export default function PalmReadingPage() {
 
   // Reading result view
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden flex flex-col">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm border-b border-white/10">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center justify-between px-4 py-3">
-            <button onClick={() => router.back()} className="px-4 py-2 bg-white/10 rounded-full border border-white/20">
-              <span className="text-white text-sm">← Back</span>
+            <button onClick={() => router.back()} className="w-10 h-10 rounded-lg bg-[#0b2338] border border-[#173653] flex items-center justify-center">
+              <ArrowLeft className="w-5 h-5 text-white" />
             </button>
             <h1 className="text-white text-lg font-bold">Results</h1>
-            {/* Only show New Scan button for Flow A (subscription) users */}
-            {!isFlowB ? (
-              <button 
-                onClick={() => {
-                  setReading(null);
-                  setCapturedImage(null);
-                }} 
-                className="px-4 py-2 bg-white/10 rounded-full border border-white/20 flex items-center gap-1"
-              >
-                <Camera className="w-4 h-4 text-white" />
-                <span className="text-white text-sm">New Scan</span>
-              </button>
-            ) : (
-              <div className="w-24" /> // Placeholder for layout balance
-            )}
+            <div className="w-10" />
           </div>
         </div>
 
@@ -611,7 +628,7 @@ export default function PalmReadingPage() {
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10"
+                className="bg-[#0b2338] rounded-lg p-4 border border-[#173653]"
               >
                 <h3 className="text-white font-semibold text-sm mb-3 flex items-center gap-2">
                   🖐️ Your Palm
@@ -635,13 +652,13 @@ export default function PalmReadingPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: capturedImage ? 0.1 : 0 }}
-              className="bg-gradient-to-br from-primary/20 to-purple-600/20 rounded-2xl p-5 border border-primary/30"
+              className="bg-gradient-to-br from-[#0b2338] to-[#061525] rounded-2xl p-5 border border-[#38bdf8]/30"
             >
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-white font-bold text-xl">✦ Cosmic Insight</h2>
                 <button
                   onClick={() => setExpandedCosmic(!expandedCosmic)}
-                  className="text-primary text-sm font-semibold"
+                  className="text-[#38bdf8] text-sm font-semibold"
                 >
                   {expandedCosmic ? "Show less" : "Show more"}
                 </button>
@@ -652,7 +669,7 @@ export default function PalmReadingPage() {
             </motion.div>
 
             {/* Tab Navigation */}
-            <div className="flex gap-1 p-1 bg-white/5 rounded-xl border border-white/10">
+            <div className="flex gap-1 p-1 bg-[#0b2338] rounded-xl border border-[#173653]">
               {(["ageTimeline", "wealth", "mounts", "love"] as TabKey[]).map(renderTabButton)}
             </div>
 
@@ -668,30 +685,7 @@ export default function PalmReadingPage() {
               </motion.div>
             </AnimatePresence>
 
-            {/* Actions - Only show for Flow A users */}
-            {!isFlowB && (
-              <div className="pt-4 space-y-3">
-                <Button
-                  onClick={() => {
-                    setReading(null);
-                    setCapturedImage(null);
-                  }}
-                  variant="outline"
-                  className="w-full border-white/20 text-white hover:bg-white/10"
-                >
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  New Reading
-                </Button>
-
-                <button
-                  onClick={handleDeleteReading}
-                  className="w-full py-3 bg-red-500/20 border border-red-500/30 rounded-xl text-red-400 font-semibold flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  Delete This Reading
-                </button>
-              </div>
-            )}
+            <ReportDisclaimer />
           </div>
         </div>
       </div>

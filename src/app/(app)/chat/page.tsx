@@ -11,7 +11,10 @@ import { useUserStore } from "@/lib/user-store";
 import { supabase } from "@/lib/supabase";
 import { generateUserId } from "@/lib/user-profile";
 import { usePricing } from "@/hooks/usePricing";
+import { DEFAULT_PRICING } from "@/lib/pricing";
 import { startStripeCheckout } from "@/lib/stripe-checkout";
+import { trackAnalyticsEvent } from "@/lib/analytics-events";
+import { pixelEvents, trackPixelEvent } from "@/lib/pixel-events";
 
 interface Message {
   role: "user" | "assistant";
@@ -35,14 +38,6 @@ const suggestedQuestions = [
   "How can I improve my relationships?",
 ];
 
-// Fallback coin packages (used while loading from API)
-const defaultCoinPackages = [
-  { id: 1, coins: 50, price: 299, discount: 50, popular: false },
-  { id: 2, coins: 150, price: 799, discount: 50, popular: true },
-  { id: 3, coins: 300, price: 1299, discount: 50, popular: false },
-  { id: 4, coins: 500, price: 1799, discount: 50, popular: false },
-];
-
 function formatMessage(text: string): React.ReactNode[] {
   const parts = text.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, i) => {
@@ -53,6 +48,13 @@ function formatMessage(text: string): React.ReactNode[] {
   });
 }
 
+function formatUsdFromCents(cents: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format((cents || 0) / 100);
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -60,6 +62,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showWallet, setShowWallet] = useState(false);
   const [showPricing, setShowPricing] = useState(false);
+  const [showChatInfo, setShowChatInfo] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isClient, setIsClient] = useState(false);
   const [palmImage, setPalmImage] = useState<string | null>(null);
@@ -85,26 +88,94 @@ export default function ChatPage() {
     discount: p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : null,
     popular: i === 1, // Second package is popular
     packageId: p.id,
-  })) || defaultCoinPackages.map(p => ({ ...p, packageId: `coins-${p.coins}` }));
+  })) || DEFAULT_PRICING.coinPackages.filter(p => p.active).map((p, i) => ({
+    id: i + 1,
+    coins: p.coins,
+    price: p.displayPrice || p.price,
+    discount: p.originalPrice > p.price ? Math.round((1 - p.price / p.originalPrice) * 100) : null,
+    popular: i === 1,
+    packageId: p.id,
+  }));
+
+  useEffect(() => {
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+    pixelEvents.viewContent("Elysia Chat", "chat");
+    trackAnalyticsEvent("ElysiaChatViewed", {
+      route: "/chat",
+      user_id: userId,
+      email,
+      coins,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const openCoinPricing = (source: string) => {
+    setShowPricing(true);
+    trackAnalyticsEvent("ElysiaCoinPricingOpened", {
+      route: "/chat",
+      source,
+      coins,
+      package_count: coinPackages.length,
+    });
+    trackPixelEvent("ViewContent", {
+      content_name: "Elysia Coin Packages",
+      content_type: "coin_packages",
+      currency: "USD",
+    });
+  };
 
   const handlePurchaseCoins = async (pkg: typeof coinPackages[0]) => {
     setPurchaseError("");
     setPurchasingPackage(pkg.id);
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || generateUserId();
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+    const firstName = localStorage.getItem("palmcosmic_name") || localStorage.getItem("astrorekha_name") || "Customer";
+    const value = pkg.price / 100;
+
+    trackAnalyticsEvent("ElysiaCoinCheckoutStarted", {
+      route: "/chat",
+      payment_provider: "stripe",
+      package_id: pkg.packageId,
+      coins: pkg.coins,
+      value,
+      currency: "USD",
+      user_id: userId,
+      email,
+    });
+    trackPixelEvent("InitiateCheckout", {
+      value,
+      currency: "USD",
+      content_ids: [pkg.packageId],
+      content_name: `${pkg.coins} Coins`,
+      content_type: "product",
+      num_items: 1,
+    });
 
     try {
       await startStripeCheckout({
         type: "coins",
         packageId: pkg.packageId,
-        userId: generateUserId(),
-        email: localStorage.getItem("astrorekha_email") || "",
-        firstName: localStorage.getItem("astrorekha_name") || "Customer",
-        successPath: window.location.pathname,
-        cancelPath: window.location.pathname,
+        userId,
+        email,
+        firstName,
+        successPath: "/chat",
+        cancelPath: "/chat",
       });
-    } catch (error: any) {
+    } catch (error) {
       console.error("Coin purchase error:", error);
-      setPurchaseError(error?.message || "Something went wrong. Please try again.");
+      const message = error instanceof Error ? error.message : "Unable to start Stripe checkout. Please try again.";
+      setPurchaseError(message);
       setPurchasingPackage(null);
+      trackAnalyticsEvent("ElysiaCoinCheckoutFailed", {
+        route: "/chat",
+        payment_provider: "stripe",
+        package_id: pkg.packageId,
+        coins: pkg.coins,
+        value,
+        currency: "USD",
+        error: message,
+      });
     }
   };
 
@@ -136,7 +207,7 @@ export default function ChatPage() {
     }
 
     const loadData = async () => {
-      const userId = generateUserId();
+      const userId = localStorage.getItem("astrorekha_user_id") || generateUserId();
       setCurrentUserId(userId);
 
       // Load palm reading from Supabase
@@ -191,17 +262,50 @@ export default function ChatPage() {
 
       // Load chat history from Supabase
       try {
-        const { data: chatDoc } = await supabase.from("chat_messages").select("*").eq("id", userId).single();
-        if (chatDoc) {
-          if (chatDoc.messages && chatDoc.messages.length > 0) {
-            const loadedMessages: Message[] = chatDoc.messages.map((m: StoredMessage) => ({
-              ...m,
-              timestamp: new Date(m.timestamp),
-            }));
-            setMessages(loadedMessages);
-            setChatLoaded(true);
-            return;
+        let { data: chatDoc } = await supabase
+          .from("chat_messages")
+          .select("*")
+          .eq("id", userId)
+          .maybeSingle();
+
+        // Fallback: if user upgraded from anon to registered ID and old chat row still exists on anon ID,
+        // load that history and migrate it to current user ID.
+        if (!chatDoc) {
+          const anonId = localStorage.getItem("astrorekha_anon_id");
+          if (anonId && anonId !== userId) {
+            const { data: anonChatDoc } = await supabase
+              .from("chat_messages")
+              .select("*")
+              .eq("id", anonId)
+              .maybeSingle();
+
+            if (anonChatDoc?.messages?.length) {
+              chatDoc = anonChatDoc;
+
+              // Best-effort migration to current ID.
+              await supabase.from("chat_messages").upsert(
+                {
+                  id: userId,
+                  messages: anonChatDoc.messages,
+                  updated_at: new Date().toISOString(),
+                },
+                { onConflict: "id" }
+              );
+
+              // Best-effort cleanup of old anon row.
+              await supabase.from("chat_messages").delete().eq("id", anonId);
+            }
           }
+        }
+
+        if (chatDoc?.messages && chatDoc.messages.length > 0) {
+          const loadedMessages: Message[] = chatDoc.messages.map((m: StoredMessage) => ({
+            ...m,
+            timestamp: new Date(m.timestamp),
+          }));
+          setMessages(loadedMessages);
+          setChatLoaded(true);
+          return;
         }
       } catch (err) {
         console.error("[Chat] Failed to load chat history:", err);
@@ -223,7 +327,7 @@ export default function ChatPage() {
     };
 
     loadData();
-  }, [gender, ascendantSign]);
+  }, []);
 
   // Show low balance bubble when coins < 3
   useEffect(() => {
@@ -255,12 +359,14 @@ export default function ChatPage() {
           return msg;
         });
         
-        await supabase.from("chat_messages").upsert({
-          id: currentUserId,
-          messages: storedMessages,
-          updated_at: new Date().toISOString(),
-          user_id: currentUserId,
-        }, { onConflict: "id" });
+        await supabase.from("chat_messages").upsert(
+          {
+            id: currentUserId,
+            messages: storedMessages,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "id" }
+        );
       } catch (err: any) {
         console.error("[Chat] Failed to save chat:", err);
         console.error("[Chat] Error code:", err?.code);
@@ -287,7 +393,7 @@ export default function ChatPage() {
 
     // Check if user has enough coins (3 coins per message)
     if (coins < 3) {
-      setShowPricing(true);
+      openCoinPricing("insufficient_coins_message_send");
       return;
     }
 
@@ -300,6 +406,12 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMessage]);
     setInput("");
     setIsLoading(true);
+    trackAnalyticsEvent("ElysiaMessageSent", {
+      route: "/chat",
+      source: messageText ? "suggested_question" : "typed_message",
+      coins_before: coins,
+      cost_coins: 3,
+    });
 
     try {
       // Build user profile for personalized responses
@@ -376,19 +488,19 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col">
         {/* Header */}
-        <div className="bg-[#1A1F2E] px-4 py-3 flex items-center justify-between border-b border-white/10">
+        <div className="bg-[#061525]/95 px-4 py-3 flex items-center justify-between border-b border-[#173653] backdrop-blur-sm">
         <div className="flex items-center gap-3">
           <button
             onClick={() => router.push("/reports")}
-            className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+            className="w-10 h-10 rounded-lg bg-[#0b2338] border border-[#173653] flex items-center justify-center hover:border-[#38bdf8]/60 transition-colors"
           >
             <ArrowLeft className="w-5 h-5 text-white" />
           </button>
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center overflow-hidden shadow-lg shadow-purple-500/30">
+            <div className="w-12 h-12 rounded-lg bg-[#082035] border border-[#38bdf8]/30 flex items-center justify-center overflow-hidden shadow-lg shadow-[#38bdf8]/15">
               <Image
                 src="/elysia.png"
                 alt="Elysia"
@@ -400,20 +512,85 @@ export default function ChatPage() {
             </div>
             <div>
               <h1 className="text-white font-semibold">Elysia</h1>
-              <p className="text-rose-400 text-xs">online</p>
+              <p className="text-[#38bdf8] text-xs">online</p>
             </div>
           </div>
         </div>
 
-        {/* Coin Balance */}
-        <div className="relative">
+        {/* Header actions */}
+        <div className="relative flex items-center gap-2">
           <button
-            onClick={() => setShowWallet(!showWallet)}
-            className="flex items-center gap-2 px-3 py-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors"
+            onClick={() => {
+              const next = !showChatInfo;
+              setShowChatInfo(next);
+              setShowWallet(false);
+              if (next) {
+                trackAnalyticsEvent("ElysiaChatInfoOpened", {
+                  route: "/chat",
+                });
+              }
+            }}
+            className="w-10 h-10 rounded-lg bg-[#0b2338] border border-[#173653] flex items-center justify-center hover:border-[#38bdf8]/60 transition-colors"
+            aria-label="Chat disclaimer"
+            title="Chat disclaimer"
+          >
+            <HelpCircle className="w-5 h-5 text-[#b8c7da]" />
+          </button>
+
+          <AnimatePresence>
+            {showChatInfo && (
+              <>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-40"
+                  onClick={() => setShowChatInfo(false)}
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: -10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -10, scale: 0.95 }}
+                  className="absolute right-0 top-full mt-2 w-72 rounded-lg bg-[#061525] shadow-2xl shadow-black/40 border border-[#38bdf8]/25 p-4 z-50"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-white text-sm font-semibold">About Elysia Chat</p>
+                      <p className="mt-2 text-xs leading-5 text-[#b8c7da]">
+                        Elysia&apos;s chat replies are AI-generated for spiritual entertainment only, not professional advice.
+                        PalmCosmic assumes no liability for decisions or outcomes based on chat responses.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowChatInfo(false)}
+                      className="w-6 h-6 rounded-md bg-[#0b2338] border border-[#173653] flex items-center justify-center hover:border-[#38bdf8]/60 transition-colors shrink-0"
+                      aria-label="Close chat disclaimer"
+                    >
+                      <X className="w-4 h-4 text-white" />
+                    </button>
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+
+          <button
+            onClick={() => {
+              const next = !showWallet;
+              setShowWallet(next);
+              setShowChatInfo(false);
+              if (next) {
+                trackAnalyticsEvent("ElysiaWalletOpened", {
+                  route: "/chat",
+                  coins,
+                });
+              }
+            }}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#0b2338] border border-[#173653] hover:border-[#38bdf8]/60 transition-colors"
           >
             <span className="text-white font-semibold">{coins}</span>
-            <div className="w-6 h-6 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
-              <Coins className="w-3.5 h-3.5 text-white" />
+            <div className="w-6 h-6 rounded-md bg-[#38bdf8]/15 border border-[#38bdf8]/30 flex items-center justify-center">
+              <Coins className="w-3.5 h-3.5 text-[#38bdf8]" />
             </div>
           </button>
 
@@ -432,27 +609,27 @@ export default function ChatPage() {
                   initial={{ opacity: 0, y: -10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -10, scale: 0.95 }}
-                  className="absolute right-0 top-full mt-2 w-64 bg-[#1A1F2E] rounded-2xl shadow-2xl border border-white/10 p-4 z-50"
+                  className="absolute right-0 top-full mt-2 w-64 rounded-lg bg-[#061525] shadow-2xl shadow-black/40 border border-[#38bdf8]/25 p-4 z-50"
                 >
                   <button
                     onClick={() => setShowWallet(false)}
-                    className="absolute top-2 right-2 w-6 h-6 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+                    className="absolute top-2 right-2 w-6 h-6 rounded-md bg-[#0b2338] border border-[#173653] flex items-center justify-center hover:border-[#38bdf8]/60 transition-colors"
                   >
                     <X className="w-4 h-4 text-white" />
                   </button>
                   <div className="mb-4">
-                    <p className="text-white/60 text-sm mb-1">Wallet Balance</p>
+                    <p className="text-[#8fa3b8] text-sm mb-1">Wallet Balance</p>
                     <div className="flex items-center gap-2">
-                      <Coins className="w-6 h-6 text-yellow-400" />
+                      <Coins className="w-6 h-6 text-[#38bdf8]" />
                       <span className="text-white text-2xl font-bold">{coins}</span>
                     </div>
                   </div>
                   <Button
                     onClick={() => {
                       setShowWallet(false);
-                      setShowPricing(true);
+                      openCoinPricing("wallet_dropdown");
                     }}
-                    className="w-full bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-600/90"
+                    className="w-full rounded-lg bg-[#38bdf8] text-[#04111f] hover:bg-[#7dd3fc]"
                   >
                     Get More Coins
                   </Button>
@@ -472,28 +649,28 @@ export default function ChatPage() {
             exit={{ opacity: 0, y: -20 }}
             className="mx-4 mt-2"
           >
-            <div className="bg-[#1A2332] rounded-2xl p-4 flex items-center gap-3 border border-white/10 shadow-lg">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center flex-shrink-0">
-                <Coins className="w-5 h-5 text-white" />
+            <div className="bg-[#0b2338] rounded-lg p-4 flex items-center gap-3 border border-[#38bdf8]/25 shadow-lg shadow-black/20">
+              <div className="w-10 h-10 rounded-lg bg-[#38bdf8]/15 border border-[#38bdf8]/30 flex items-center justify-center flex-shrink-0">
+                <Coins className="w-5 h-5 text-[#38bdf8]" />
               </div>
               <div className="flex-1">
                 <p className="text-white font-medium text-sm">You're running out of balance</p>
-                <p className="text-white/60 text-xs">Refill to continue chatting.</p>
+                <p className="text-[#8fa3b8] text-xs">Refill to continue chatting.</p>
               </div>
               <button
                 onClick={() => {
                   setShowLowBalanceBubble(false);
-                  setShowPricing(true);
+                  openCoinPricing("low_balance_banner");
                 }}
-                className="px-4 py-2 bg-teal-500 hover:bg-teal-600 text-white text-sm font-medium rounded-full transition-colors"
+                className="px-4 py-2 bg-[#38bdf8] hover:bg-[#7dd3fc] text-[#04111f] text-sm font-semibold rounded-lg transition-colors"
               >
                 Refill
               </button>
               <button
                 onClick={() => setShowLowBalanceBubble(false)}
-                className="w-6 h-6 rounded-full flex items-center justify-center hover:bg-white/10 transition-colors"
+                className="w-6 h-6 rounded-md flex items-center justify-center hover:bg-[#061525] transition-colors"
               >
-                <X className="w-4 h-4 text-white/60" />
+                <X className="w-4 h-4 text-[#8fa3b8]" />
               </button>
             </div>
           </motion.div>
@@ -512,14 +689,14 @@ export default function ChatPage() {
             <div
               className={`max-w-[85%] ${
                 message.role === "user"
-                  ? "bg-gradient-to-r from-primary to-purple-600 text-white"
-                  : "bg-[#1A1F2E] text-white"
-              } rounded-3xl px-5 py-3`}
+                  ? "bg-[#38bdf8] text-[#04111f]"
+                  : "bg-[#0b2338] text-[#dce8f5] border border-[#173653]"
+              } rounded-lg px-5 py-3 shadow-sm`}
             >
               {/* Palm Image with Traits */}
               {message.palmImage && message.traits && (
-                <div className="mb-4 bg-[#0F1419] rounded-2xl p-4 flex gap-4">
-                  <div className="w-24 h-24 rounded-xl overflow-hidden flex-shrink-0">
+                <div className="mb-4 bg-[#061525] rounded-lg p-4 flex gap-4 border border-[#173653]">
+                  <div className="w-24 h-24 rounded-lg overflow-hidden flex-shrink-0">
                     <Image
                       src={message.palmImage}
                       alt="Palm"
@@ -537,11 +714,11 @@ export default function ChatPage() {
                               className="w-2 h-2 rounded-full"
                               style={{ backgroundColor: trait.color }}
                             />
-                            <span className="text-white/80 text-sm">{trait.name}</span>
+                            <span className="text-[#b8c7da] text-sm">{trait.name}</span>
                           </div>
                           <span className="text-white font-semibold text-sm">{trait.value}%</span>
                         </div>
-                        <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
+                        <div className="w-full h-1.5 bg-[#0b2338] rounded-full overflow-hidden">
                           <div
                             className="h-full rounded-full transition-all duration-500"
                             style={{
@@ -573,11 +750,11 @@ export default function ChatPage() {
             animate={{ opacity: 1 }}
             className="flex justify-start"
           >
-            <div className="bg-[#1A1F2E] rounded-3xl px-5 py-3">
+            <div className="bg-[#0b2338] border border-[#173653] rounded-lg px-5 py-3">
               <div className="flex gap-1">
-                <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <div className="w-2 h-2 bg-white/40 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                <div className="w-2 h-2 bg-[#38bdf8]/70 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                <div className="w-2 h-2 bg-[#38bdf8]/70 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                <div className="w-2 h-2 bg-[#38bdf8]/70 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
               </div>
             </div>
           </motion.div>
@@ -596,7 +773,7 @@ export default function ChatPage() {
             <button
               key={index}
               onClick={() => sendMessage(question)}
-              className="flex-shrink-0 px-4 py-2 bg-[#1A1F2E] text-white/80 text-sm rounded-full hover:bg-[#252A3A] transition-colors border border-white/10"
+              className="flex-shrink-0 px-4 py-2 bg-[#0b2338] text-[#b8c7da] text-sm rounded-lg hover:border-[#38bdf8]/60 hover:text-white transition-colors border border-[#173653]"
             >
               {question}
             </button>
@@ -614,15 +791,15 @@ export default function ChatPage() {
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder="Type to ask..."
-            className="flex-1 px-5 py-3 bg-[#1A1F2E] text-white rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-primary border border-white/10"
+            className="flex-1 px-5 py-3 bg-[#0b2338] text-white rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#38bdf8] border border-[#173653] placeholder:text-[#8fa3b8]"
             disabled={isLoading}
           />
           <button
             onClick={() => sendMessage()}
             disabled={!input.trim() || isLoading}
-            className="w-10 h-10 rounded-full bg-gradient-to-r from-primary to-purple-600 flex items-center justify-center hover:from-primary/90 hover:to-purple-600/90 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-10 h-10 rounded-lg bg-[#38bdf8] flex items-center justify-center hover:bg-[#7dd3fc] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Send className="w-5 h-5 text-white" />
+            <Send className="w-5 h-5 text-[#04111f]" />
           </button>
         </div>
       </div>
@@ -634,7 +811,7 @@ export default function ChatPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-[#020b15]/85 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={() => setShowPricing(false)}
           >
             <motion.div
@@ -642,20 +819,20 @@ export default function ChatPage() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-[#0A0E1A] rounded-3xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
+              className="bg-[#061525] rounded-lg border border-[#38bdf8]/25 shadow-2xl shadow-black/40 w-full max-w-2xl max-h-[90vh] overflow-y-auto p-4 sm:p-6"
             >
               {/* Header */}
               <div className="flex items-center justify-between mb-4 sm:mb-6 gap-2">
                 <div className="flex-1 min-w-0">
                   <h2 className="text-white text-lg sm:text-2xl font-bold mb-1 truncate">Get More Coins</h2>
-                  <p className="text-white/60 text-xs sm:text-sm">Choose a package to continue</p>
+                  <p className="text-[#8fa3b8] text-xs sm:text-sm">Choose a package to continue</p>
                 </div>
                 <button
                   onClick={() => {
                     setShowPricing(false);
                     setPurchaseError("");
                   }}
-                  className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0 rounded-full bg-white/10 flex items-center justify-center hover:bg-white/20 transition-colors"
+                  className="w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0 rounded-lg bg-[#0b2338] border border-[#173653] flex items-center justify-center hover:border-[#38bdf8]/60 transition-colors"
                 >
                   <X className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </button>
@@ -668,7 +845,7 @@ export default function ChatPage() {
                     initial={{ opacity: 0, y: -10 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -10 }}
-                    className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl"
+                    className="mb-4 p-3 bg-red-500/10 border border-red-400/30 rounded-lg"
                   >
                     <p className="text-red-400 text-sm text-center">{purchaseError}</p>
                   </motion.div>
@@ -684,49 +861,49 @@ export default function ChatPage() {
                     whileTap={{ scale: 0.98 }}
                     onClick={() => handlePurchaseCoins(pkg)}
                     disabled={purchasingPackage !== null}
-                    className={`relative bg-gradient-to-br from-[#1A1F2E] to-[#0F1419] rounded-xl sm:rounded-2xl p-3 sm:p-6 border-2 transition-all ${
+                    className={`relative rounded-lg p-3 sm:p-6 border transition-all bg-[#0b2338] ${
                       pkg.popular
-                        ? "border-primary shadow-lg shadow-primary/20"
-                        : "border-white/10 hover:border-white/20"
+                        ? "border-[#38bdf8] shadow-lg shadow-[#38bdf8]/15"
+                        : "border-[#173653] hover:border-[#38bdf8]/60"
                     }`}
                   >
                     {/* Discount Badge */}
                     {pkg.discount && (
-                      <div className="absolute -top-1.5 -right-1.5 sm:-top-2 sm:-right-2 bg-gradient-to-r from-primary to-purple-600 text-white text-[10px] sm:text-xs font-bold px-2 py-0.5 sm:px-3 sm:py-1 rounded-full shadow-lg">
+                      <div className="absolute -top-1.5 -right-1.5 sm:-top-2 sm:-right-2 bg-[#38bdf8] text-[#04111f] text-[10px] sm:text-xs font-bold px-2 py-0.5 sm:px-3 sm:py-1 rounded-md shadow-lg shadow-[#38bdf8]/20">
                         {pkg.discount}% OFF
                       </div>
                     )}
 
                     {/* Popular Badge */}
                     {pkg.popular && (
-                      <div className="absolute -top-1.5 left-2 sm:-top-2 sm:left-4 bg-gradient-to-r from-yellow-400 to-orange-500 text-black text-[10px] sm:text-xs font-bold px-2 py-0.5 sm:px-3 sm:py-1 rounded-full shadow-lg">
+                      <div className="absolute -top-1.5 left-2 sm:-top-2 sm:left-4 bg-[#7dd3fc] text-[#04111f] text-[10px] sm:text-xs font-bold px-2 py-0.5 sm:px-3 sm:py-1 rounded-md shadow-lg shadow-[#38bdf8]/20">
                         POPULAR
                       </div>
                     )}
 
                     {/* Coin Icon */}
                     <div className="flex justify-center mb-2 sm:mb-4 mt-2 sm:mt-0">
-                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gradient-to-br from-yellow-400 to-orange-500 flex items-center justify-center">
-                        <Coins className="w-6 h-6 sm:w-8 sm:h-8 text-white" />
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-lg bg-[#38bdf8]/15 border border-[#38bdf8]/30 flex items-center justify-center shadow-inner shadow-[#38bdf8]/10">
+                        <Coins className="w-6 h-6 sm:w-8 sm:h-8 text-[#38bdf8]" />
                       </div>
                     </div>
 
                     {/* Coin Amount */}
                     <div className="text-center mb-1 sm:mb-2">
-                      <p className="text-white text-xl sm:text-3xl font-bold">{pkg.coins}</p>
-                      <p className="text-white/60 text-[10px] sm:text-sm">Coins</p>
+                      <p className="bg-gradient-to-b from-[#e0f7ff] to-[#38bdf8] bg-clip-text text-xl sm:text-3xl font-extrabold text-transparent drop-shadow-[0_0_12px_rgba(56,189,248,0.25)]">{pkg.coins}</p>
+                      <p className="text-[#8fa3b8] text-[10px] sm:text-sm">Coins</p>
                     </div>
 
                     {/* Price */}
                     <div className="text-center mb-2 sm:mb-4">
-                      <p className="text-white text-lg sm:text-2xl font-bold">${(pkg.price / 100).toFixed(2)}</p>
+                      <p className="text-white text-lg sm:text-2xl font-bold">{formatUsdFromCents(pkg.price)}</p>
                     </div>
 
                     {/* Buy Button */}
-                    <div className={`w-full py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-semibold transition-all flex items-center justify-center ${
+                    <div className={`w-full py-1.5 sm:py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all flex items-center justify-center ${
                       pkg.popular
-                        ? "bg-gradient-to-r from-primary to-purple-600 text-white"
-                        : "bg-white/10 text-white hover:bg-white/20"
+                        ? "bg-[#38bdf8] text-[#04111f]"
+                        : "bg-[#061525] border border-[#173653] text-[#b8c7da] hover:border-[#38bdf8]/60 hover:text-white"
                     }`}>
                       {purchasingPackage === pkg.id ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -741,9 +918,9 @@ export default function ChatPage() {
               {/* Pricing Info */}
               <div className="mt-4 sm:mt-6 text-center">
                 <p className="text-white/60 text-xs sm:text-sm mb-2 flex items-center justify-center gap-1">
-                  💬 1 question = 3
+                  1 question = 3
                   <span className="inline-flex items-center">
-                    <Coins className="w-3 h-3 sm:w-4 sm:h-4 text-yellow-400" />
+                    <Coins className="w-3 h-3 sm:w-4 sm:h-4 text-[#38bdf8]" />
                   </span>
                 </p>
               </div>
@@ -751,7 +928,7 @@ export default function ChatPage() {
               {/* Footer */}
               <div className="mt-2 sm:mt-3 text-center">
                 <p className="text-white/40 text-[10px] sm:text-xs">
-                  Secure payment processing
+                  Powered by Stripe
                 </p>
               </div>
             </motion.div>

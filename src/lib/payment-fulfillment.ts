@@ -1,6 +1,16 @@
 import Stripe from "stripe";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { getStripeClient } from "@/lib/stripe";
 import { randomUUID } from "crypto";
+import { sendMetaConversionEvent } from "@/lib/meta-conversions";
+import {
+  activateExtraReportPurchase,
+  activateTrialPrimaryEntitlements,
+  getPrimaryReportsForFlow,
+  type ReportKey,
+  type FlowKey,
+} from "@/lib/report-entitlements";
+import { ensureAndLinkReportsForUser } from "@/lib/user-report-links";
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -17,8 +27,40 @@ const BUNDLE_FEATURES: Record<string, string[]> = {
 const BUNDLE_COIN_BONUS: Record<string, number> = {
   "palm-reading": 15,
   "palm-birth": 15,
-  "palm-birth-compat": 30,
+  "palm-birth-compat": 15,
 };
+
+const SUBSCRIPTION_TRIAL_TYPES = new Set(["subscription_trial", "future_prediction_subscription"]);
+const VALID_FLOW_KEYS = new Set<FlowKey>([
+  "palm_reading",
+  "future_prediction",
+  "soulmate_sketch",
+  "future_partner",
+  "compatibility",
+]);
+
+const FEATURE_TO_REPORT_KEY: Record<string, string> = {
+  palmReading: "palm_reading",
+  birthChart: "birth_chart",
+  soulmateSketch: "soulmate_sketch",
+  futurePartnerReport: "future_partner",
+  prediction2026: "prediction_2026",
+  compatibilityTest: "compatibility",
+};
+
+const VALID_REPORT_KEYS = new Set<ReportKey>([
+  "palm_reading",
+  "birth_chart",
+  "soulmate_sketch",
+  "future_partner",
+  "prediction_2026",
+  "compatibility",
+]);
+
+function reportKeyFromFeature(feature: string): ReportKey | null {
+  const reportKey = FEATURE_TO_REPORT_KEY[feature];
+  return VALID_REPORT_KEYS.has(reportKey as ReportKey) ? (reportKey as ReportKey) : null;
+}
 
 type PaymentStatus = "created" | "paid" | "failed";
 
@@ -211,7 +253,14 @@ async function resolveSafeUserId(candidateUserId: string | null | undefined): Pr
   return data?.id || null;
 }
 
-async function applyUserEntitlements(userId: string | null, source: EntitlementSource, stripeCustomerId: string | null, nowIso: string) {
+async function applyUserEntitlements(
+  userId: string | null,
+  source: EntitlementSource,
+  stripeCustomerId: string | null,
+  nowIso: string,
+  customerEmail?: string | null,
+  stripeSessionId?: string | null
+) {
   if (!userId) return;
 
   const supabase = getSupabaseAdmin();
@@ -262,6 +311,17 @@ async function applyUserEntitlements(userId: string | null, source: EntitlementS
     for (const feature of explicitFeatures) {
       updatedFeatures[feature] = true;
     }
+
+    const reportKey = reportKeyFromFeature(explicitFeatures[0] || source.feature);
+    if (reportKey && userId) {
+      await activateExtraReportPurchase({
+        userId,
+        email: customerEmail,
+        reportKey,
+        stripeCustomerId,
+        stripeSessionId,
+      });
+    }
   }
 
   if (source.type === "coins") {
@@ -289,17 +349,180 @@ async function applyUserEntitlements(userId: string | null, source: EntitlementS
 
   let { error } = await supabase.from("users").upsert(userUpdate, { onConflict: "id" });
 
-  if (!error) return;
+  if (!error) {
+    const reportKeys = Object.entries(FEATURE_TO_REPORT_KEY)
+      .filter(([feature]) => updatedFeatures[feature] === true)
+      .map(([, reportKey]) => reportKey);
+
+    if (reportKeys.length > 0) {
+      await ensureAndLinkReportsForUser({
+        supabase,
+        userId,
+        email: customerEmail,
+        reportKeys,
+      });
+    }
+
+    return;
+  }
 
   // Fallback for older schema without stripe_customer_id.
   if (error.message?.toLowerCase().includes("stripe_customer_id")) {
     delete userUpdate.stripe_customer_id;
     const retry = await supabase.from("users").upsert(userUpdate, { onConflict: "id" });
-    if (!retry.error) return;
+    if (!retry.error) {
+      const reportKeys = Object.entries(FEATURE_TO_REPORT_KEY)
+        .filter(([feature]) => updatedFeatures[feature] === true)
+        .map(([, reportKey]) => reportKey);
+
+      if (reportKeys.length > 0) {
+        await ensureAndLinkReportsForUser({
+          supabase,
+          userId,
+          email: customerEmail,
+          reportKeys,
+        });
+      }
+
+      return;
+    }
     error = retry.error;
   }
 
   throw error;
+}
+
+function isSubscriptionTrialSession(session: Stripe.Checkout.Session, metadata: Record<string, string>) {
+  return session.mode === "subscription" || SUBSCRIPTION_TRIAL_TYPES.has(metadata.type || "");
+}
+
+function resolveSubscriptionFlow(metadata: Record<string, string>): FlowKey {
+  const flow = metadata.flow as FlowKey;
+  if (VALID_FLOW_KEYS.has(flow)) return flow;
+  throw new Error(`Unsupported subscription flow: ${metadata.flow || "missing"}`);
+}
+
+function assertSubscriptionReportMatchesFlow(flow: FlowKey, reportKey: string) {
+  const allowedReports = getPrimaryReportsForFlow(flow);
+  if (!allowedReports.some((allowedReport) => allowedReport === reportKey)) {
+    throw new Error(`Report ${reportKey || "missing"} is not valid for subscription flow ${flow}`);
+  }
+}
+
+function subscriptionUnix(subscription: Stripe.Subscription, key: string): number | null {
+  const direct = (subscription as any)[key];
+  if (typeof direct === "number") return direct;
+
+  const firstItem = (subscription as any).items?.data?.[0];
+  const fromItem = firstItem?.[key];
+  return typeof fromItem === "number" ? fromItem : null;
+}
+
+async function fulfillSubscriptionTrialSession(session: Stripe.Checkout.Session, metadata: Record<string, string>) {
+  const supabase = getSupabaseAdmin();
+  const stripeSubscriptionId =
+    typeof session.subscription === "string"
+      ? session.subscription
+      : session.subscription?.id || null;
+
+  const userId = metadata.userId || "";
+  if (!userId) {
+    throw new Error("Subscription checkout missing userId metadata");
+  }
+
+  let trialStartedAt = new Date();
+  let trialEndsAt = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+  let stripeCustomerId =
+    typeof session.customer === "string" ? session.customer : session.customer?.id || null;
+
+  if (stripeSubscriptionId) {
+    const stripe = getStripeClient();
+    const subscription = await stripe.subscriptions.retrieve(stripeSubscriptionId);
+    stripeCustomerId =
+      typeof subscription.customer === "string"
+        ? subscription.customer
+        : subscription.customer?.id || stripeCustomerId;
+
+    const trialStart = subscriptionUnix(subscription, "trial_start");
+    const trialEnd = subscriptionUnix(subscription, "trial_end");
+    if (trialStart) {
+      trialStartedAt = new Date(trialStart * 1000);
+    }
+    if (trialEnd) {
+      trialEndsAt = new Date(trialEnd * 1000);
+    }
+  }
+
+  const customerEmail = normalizeEmail(
+    session.customer_details?.email || session.customer_email || metadata.email || null
+  );
+  const amount = typeof session.amount_total === "number" ? session.amount_total : 99;
+  const currency = (session.currency || "USD").toUpperCase();
+  const nowIso = new Date().toISOString();
+  const flow = resolveSubscriptionFlow(metadata);
+  const reportKey = metadata.reportKey || metadata.primaryReport || "prediction_2026";
+  assertSubscriptionReportMatchesFlow(flow, reportKey);
+  const productName = metadata.productName || "2026 Prediction Report";
+
+  await markStripePaymentStatus({
+    stripeSessionId: session.id,
+    paymentIntentId:
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id || null,
+    stripeCustomerId,
+    customerEmail,
+    metadata,
+    amount,
+    currency,
+    paymentStatus: "paid",
+  });
+
+  const { error: paymentUpdateError } = await supabase
+    .from("payments")
+    .update({
+      flow,
+      report_key: reportKey,
+      billing_kind: metadata.billingKind || metadata.type || "subscription_trial",
+      stripe_subscription_id: stripeSubscriptionId,
+      metadata,
+      updated_at: nowIso,
+    })
+    .eq("stripe_session_id", session.id);
+
+  if (paymentUpdateError) throw paymentUpdateError;
+
+  await activateTrialPrimaryEntitlements({
+    userId,
+    email: customerEmail,
+    flow,
+    stripeCustomerId,
+    stripeSubscriptionId,
+    stripeSessionId: session.id,
+    trialStartedAt,
+    trialEndsAt,
+  });
+
+  await sendMetaConversionEvent({
+    eventName: "Purchase",
+    eventId: `purchase_${session.id}`,
+    email: customerEmail,
+    userId,
+    value: amount / 100,
+    currency,
+    contentName: `${productName} Trial`,
+    contentIds: [reportKey],
+    contentType: "subscription",
+    customData: {
+      payment_provider: "stripe",
+      purchase_type: metadata.type || "subscription_trial",
+      flow,
+      report_key: reportKey,
+      stripe_session_id: session.id,
+      stripe_subscription_id: stripeSubscriptionId,
+      trial_end: trialEndsAt.toISOString(),
+    },
+  });
 }
 
 async function upsertPaidPaymentRecord(input: StripeFulfillmentInput, nowIso: string) {
@@ -434,7 +657,14 @@ export async function fulfillStripePayment(input: StripeFulfillmentInput): Promi
   const metadata = (input.metadata || {}) as Record<string, string>;
   const source = getEntitlementSource(metadata, row);
   const userId = metadata.userId || row.user_id || null;
-  await applyUserEntitlements(userId, source, input.stripeCustomerId || row.stripe_customer_id || null, nowIso);
+  await applyUserEntitlements(
+    userId,
+    source,
+    input.stripeCustomerId || row.stripe_customer_id || null,
+    nowIso,
+    input.customerEmail || row.customer_email || null,
+    input.stripeSessionId || row.stripe_session_id || null
+  );
 }
 
 function sourceFromPaymentRow(row: PaymentRow): EntitlementSource {
@@ -494,7 +724,13 @@ export async function reconcilePaidPaymentsForRegistration(params: {
       row.user_id === null || (!params.skipAnonEntitlementReplay && wasAnonLinked);
 
     if (shouldReplayEntitlements) {
-      await applyUserEntitlements(params.userId, sourceFromPaymentRow(row), row.stripe_customer_id, nowIso);
+      await applyUserEntitlements(
+        params.userId,
+        sourceFromPaymentRow(row),
+        row.stripe_customer_id,
+        nowIso,
+        normalizedEmail
+      );
       fulfilledRows += 1;
     }
   }
@@ -504,6 +740,11 @@ export async function reconcilePaidPaymentsForRegistration(params: {
 
 export async function fulfillStripeSession(session: Stripe.Checkout.Session): Promise<void> {
   const metadata = (session.metadata || {}) as Record<string, string>;
+  if (isSubscriptionTrialSession(session, metadata)) {
+    await fulfillSubscriptionTrialSession(session, metadata);
+    return;
+  }
+
   const sessionStatus: PaymentStatus = session.payment_status === "paid" ? "paid" : "created";
 
   await fulfillStripePayment({
@@ -521,4 +762,23 @@ export async function fulfillStripeSession(session: Stripe.Checkout.Session): Pr
     createdAtIso: session.created ? new Date(session.created * 1000).toISOString() : null,
     paymentStatus: sessionStatus,
   });
+
+  if (sessionStatus === "paid") {
+    await sendMetaConversionEvent({
+      eventName: "Purchase",
+      eventId: `purchase_${session.id}`,
+      email: session.customer_details?.email || session.customer_email || null,
+      userId: metadata.userId || null,
+      value: typeof session.amount_total === "number" ? session.amount_total / 100 : null,
+      currency: (session.currency || "USD").toUpperCase(),
+      contentName: metadata.bundleId || metadata.packageId || metadata.feature || "Stripe Purchase",
+      contentIds: [metadata.bundleId || metadata.packageId || metadata.feature || metadata.type || "stripe_purchase"],
+      contentType: "product",
+      customData: {
+        payment_provider: "stripe",
+        purchase_type: metadata.type || "unknown",
+        stripe_session_id: session.id,
+      },
+    });
+  }
 }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { DEFAULT_PRICING } from "@/lib/pricing";
+import { DEFAULT_PRICING, normalizePricing } from "@/lib/pricing";
 
 // GET - Fetch current pricing
 export async function GET() {
@@ -14,12 +14,14 @@ export async function GET() {
       .single();
 
     if (error || !data) {
+      // Return default pricing if not set
       return NextResponse.json({ success: true, pricing: DEFAULT_PRICING });
     }
 
-    return NextResponse.json({ success: true, pricing: data.value });
+    return NextResponse.json({ success: true, pricing: normalizePricing(data.value) });
   } catch (error: any) {
     console.error("Error fetching pricing:", error);
+    // Return default pricing on error
     return NextResponse.json({ success: true, pricing: DEFAULT_PRICING });
   }
 }
@@ -30,28 +32,40 @@ export async function POST(request: NextRequest) {
     const { pricing } = await request.json();
 
     if (!pricing) {
-      return NextResponse.json({ success: false, error: "Pricing data required" }, { status: 400 });
+      return NextResponse.json(
+        { success: false, error: "Pricing data required" },
+        { status: 400 }
+      );
     }
 
     const supabase = getSupabaseAdmin();
+    const normalizedPricing = normalizePricing(pricing);
 
-    const { error } = await supabase.from("settings").upsert(
-      {
-        key: "pricing",
-        value: pricing,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "key" }
-    );
+    const { error } = await supabase
+      .from("settings")
+      .upsert(
+        {
+          key: "pricing",
+          value: normalizedPricing,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "key" }
+      );
 
     if (error) {
       console.error("Error saving pricing:", error);
-      return NextResponse.json({ success: false, error: "Failed to save pricing" }, { status: 500 });
+      return NextResponse.json(
+        { success: false, error: "Failed to save pricing" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
     console.error("Error updating pricing:", error);
-    return NextResponse.json({ success: false, error: error.message || "Failed to update pricing" }, { status: 500 });
+    return NextResponse.json(
+      { success: false, error: error.message || "Failed to update pricing" },
+      { status: 500 }
+    );
   }
 }

@@ -7,6 +7,8 @@ import { ArrowLeft, Loader2, ChevronDown, ChevronUp, Lightbulb } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { getZodiacSign } from "@/lib/astrology-api";
 import { getInstantCompatibility, getCompatibilityResult, saveCompatibilityResult } from "@/lib/compatibility-data";
+import { supabase } from "@/lib/supabase";
+import ReportDisclaimer from "@/components/ReportDisclaimer";
 
 const ZODIAC_SIGNS = [
   { name: "Aries", symbol: "♈", dates: "21 Mar - 19 Apr", element: "Fire", elementIcon: "≋", birthDate: "1990-04-01" },
@@ -322,6 +324,7 @@ export default function CompatibilityPage() {
   const [result, setResult] = useState<FullResult | null>(null);
   const [userSign, setUserSign] = useState<string>("Sagittarius");
   const [userSignFromBirthDate, setUserSignFromBirthDate] = useState<string | null>(null);
+  const [partnerSignFromBirthDate, setPartnerSignFromBirthDate] = useState<string | null>(null);
   const [selectedSign, setSelectedSign] = useState<string | null>(null);
   const [selectingFor, setSelectingFor] = useState<"user" | "partner">("partner");
   const [expandedAspect, setExpandedAspect] = useState<string | null>(null);
@@ -331,13 +334,152 @@ export default function CompatibilityPage() {
   const [loadingInsights, setLoadingInsights] = useState(false);
 
   useEffect(() => {
-    const storedBirthDate = localStorage.getItem("birthDate");
-    if (storedBirthDate) {
+    const getStoredUserId = () =>
+      localStorage.getItem("astrorekha_user_id")?.trim() ||
+      localStorage.getItem("palmcosmic_user_id")?.trim() ||
+      localStorage.getItem("astrorekha_anon_id")?.trim() ||
+      localStorage.getItem("palmcosmic_anon_id")?.trim() ||
+      "";
+
+    const getMonthNumber = (value: string | null | undefined): number | null => {
+      const monthText = String(value || "").trim();
+      if (!monthText) return null;
+      const monthNumeric = Number(monthText);
+      if (Number.isFinite(monthNumeric) && monthNumeric >= 1 && monthNumeric <= 12) {
+        return monthNumeric;
+      }
+      const parsed = new Date(`${monthText} 1, 2000`).getMonth() + 1;
+      return Number.isFinite(parsed) && parsed >= 1 && parsed <= 12 ? parsed : null;
+    };
+
+    const resolvePartnerSignFromAnswers = (answers: Record<string, any> | null | undefined): string | null => {
+      if (!answers) return null;
+      if (answers["compatibility-partner-birth-date-known"] === "no") return null;
+
+      const day = Number(answers["compatibility-partner-birth-day"]);
+      const month = getMonthNumber(answers["compatibility-partner-birth-month"]);
+      if (!month || !Number.isFinite(day) || day < 1 || day > 31) return null;
+
+      return getZodiacSign(month, day);
+    };
+
+    const resolvePartnerSignFromLocalStorage = (): string | null => {
+      return resolvePartnerSignFromAnswers({
+        "compatibility-partner-birth-date-known":
+          localStorage.getItem("palmcosmic_compatibility-partner-birth-date-known") ||
+          localStorage.getItem("astrorekha_compatibility-partner-birth-date-known"),
+        "compatibility-partner-birth-day":
+          localStorage.getItem("palmcosmic_compatibility-partner-birth-day") ||
+          localStorage.getItem("astrorekha_compatibility-partner-birth-day"),
+        "compatibility-partner-birth-month":
+          localStorage.getItem("palmcosmic_compatibility-partner-birth-month") ||
+          localStorage.getItem("astrorekha_compatibility-partner-birth-month"),
+      });
+    };
+
+    const applyPartnerSign = (signName: string | null) => {
+      if (!signName) return;
+      setPartnerSignFromBirthDate(signName);
+      setSelectedSign((current) => current || signName);
+    };
+
+    const resolveSignName = (value: any): string | null => {
+      if (!value) return null;
+
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) return null;
+        if (ZODIAC_SIGNS.some((s) => s.name === trimmed)) return trimmed;
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed?.name && ZODIAC_SIGNS.some((s) => s.name === parsed.name)) {
+            return parsed.name;
+          }
+        } catch {
+          // Keep null fallback
+        }
+        return null;
+      }
+
+      if (typeof value === "object" && typeof value.name === "string") {
+        const name = value.name.trim();
+        if (ZODIAC_SIGNS.some((s) => s.name === name)) return name;
+      }
+
+      return null;
+    };
+
+    const fallbackFromLocalBirthDate = () => {
+      const storedBirthDate = localStorage.getItem("birthDate");
+      if (!storedBirthDate) return;
       const date = new Date(storedBirthDate);
       const sign = getZodiacSign(date.getMonth() + 1, date.getDate());
       setUserSign(sign);
       setUserSignFromBirthDate(sign);
-    }
+    };
+
+    const loadUserSunSign = async () => {
+      try {
+        applyPartnerSign(resolvePartnerSignFromLocalStorage());
+
+        const userId = getStoredUserId();
+        if (!userId) {
+          fallbackFromLocalBirthDate();
+          return;
+        }
+
+        const { data: userData } = await supabase
+          .from("users")
+          .select("sun_sign, birth_month, birth_day")
+          .eq("id", userId)
+          .maybeSingle();
+
+        let signName = resolveSignName(userData?.sun_sign);
+        if (!signName && userData?.birth_month && userData?.birth_day) {
+          signName = getZodiacSign(Number(userData.birth_month), Number(userData.birth_day));
+        }
+
+        if (!signName) {
+          const { data: profileData } = await supabase
+            .from("user_profiles")
+            .select("sun_sign, birth_month, birth_day")
+            .eq("id", userId)
+            .maybeSingle();
+
+          signName = resolveSignName(profileData?.sun_sign);
+
+          if (!signName && profileData?.birth_month && profileData?.birth_day) {
+            const monthText = String(profileData.birth_month).trim();
+            const monthNumeric = Number(monthText);
+            const month = Number.isFinite(monthNumeric) && monthNumeric > 0
+              ? monthNumeric
+              : (new Date(`${monthText} 1, 2000`).getMonth() + 1 || 1);
+            signName = getZodiacSign(month, Number(profileData.birth_day));
+          }
+        }
+
+        if (signName) {
+          setUserSign(signName);
+          setUserSignFromBirthDate(signName);
+        }
+
+        if (!signName) fallbackFromLocalBirthDate();
+
+        const { data: sessionData } = await supabase
+          .from("onboarding_sessions")
+          .select("answers")
+          .eq("id", `session_${userId}`)
+          .maybeSingle();
+
+        applyPartnerSign(resolvePartnerSignFromAnswers(sessionData?.answers as Record<string, any> | undefined));
+      } catch (error) {
+        console.error("Failed to load user sun sign:", error);
+        fallbackFromLocalBirthDate();
+        applyPartnerSign(resolvePartnerSignFromLocalStorage());
+      }
+    };
+
+    loadUserSunSign();
   }, []);
 
   const handleCheckCompatibility = async () => {
@@ -543,25 +685,26 @@ export default function CompatibilityPage() {
   };
 
   const getAspectColor = (value: number) => {
-    if (value >= 70) return "bg-gradient-to-r from-yellow-400 to-orange-400";
+    if (value >= 70) return "bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc]";
     if (value >= 50) return "bg-gradient-to-r from-cyan-400 to-blue-400";
-    if (value >= 30) return "bg-gradient-to-r from-pink-400 to-rose-400";
-    return "bg-gradient-to-r from-green-400 to-rose-400";
+    if (value >= 30) return "bg-gradient-to-r from-amber-300 to-orange-300";
+    return "bg-gradient-to-r from-red-300 to-red-400";
   };
 
   const handleSignSelect = (signName: string) => {
     if (selectingFor === "user") {
       setUserSign(signName);
+      setSelectingFor("partner");
     } else {
       setSelectedSign(signName);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center gap-4 px-4 py-3">
             <button
               onClick={() => result ? setResult(null) : router.push("/reports")}
@@ -569,7 +712,7 @@ export default function CompatibilityPage() {
             >
               <ArrowLeft className="w-5 h-5 text-white" />
             </button>
-            <h1 className="text-white text-xl font-semibold italic flex-1 text-center pr-10">Compatibility Report</h1>
+            <h1 className="text-white text-xl font-semibold flex-1 text-center pr-10">Compatibility Report</h1>
           </div>
         </div>
 
@@ -588,16 +731,16 @@ export default function CompatibilityPage() {
                     onClick={() => setSelectingFor("user")}
                     className="flex flex-col items-center"
                   >
-                    <div className={`w-20 h-20 rounded-full bg-gradient-to-br from-[#D4B896]/30 to-[#C4A676]/20 border-2 flex items-center justify-center relative transition-all ${
-                      selectingFor === "user" ? "border-rose-400 ring-2 ring-rose-400/30" : "border-[#D4B896]/50"
+                    <div className={`w-20 h-20 rounded-full bg-gradient-to-br from-[#0b2338] to-[#061525] border-2 flex items-center justify-center relative transition-all ${
+                      selectingFor === "user" ? "border-[#38bdf8] ring-2 ring-[#38bdf8]/25" : "border-[#173653]"
                     }`}>
-                      <span className="text-[#D4B896] text-3xl">{getSignSymbol(userSign)}</span>
+                      <span className="text-[#7dd3fc] text-3xl">{getSignSymbol(userSign)}</span>
                     </div>
-                    <span className="text-[#D4B896] text-sm mt-2">{userSign}</span>
+                    <span className="text-white text-sm mt-2">{userSign}</span>
                   </button>
 
                   <div className="flex flex-col items-center">
-                    <span className="text-[#D4B896]/60 text-2xl">+</span>
+                    <span className="text-[#8fa3b8] text-2xl">+</span>
                   </div>
 
                   {/* Selected Sign - Clickable */}
@@ -605,22 +748,26 @@ export default function CompatibilityPage() {
                     onClick={() => setSelectingFor("partner")}
                     className="flex flex-col items-center"
                   >
-                    <div className={`w-20 h-20 rounded-full bg-gradient-to-br from-[#D4B896]/20 to-[#C4A676]/10 border-2 flex items-center justify-center transition-all ${
-                      selectingFor === "partner" ? "border-rose-400 ring-2 ring-rose-400/30" : "border-[#D4B896]/30"
+                    <div className={`w-20 h-20 rounded-full bg-gradient-to-br from-[#0b2338] to-[#061525] border-2 flex items-center justify-center transition-all ${
+                      selectingFor === "partner" ? "border-[#38bdf8] ring-2 ring-[#38bdf8]/25" : "border-[#173653]"
                     }`}>
                       {selectedSign ? (
-                        <span className="text-[#D4B896] text-3xl">{getSignSymbol(selectedSign)}</span>
+                        <span className="text-[#7dd3fc] text-3xl">{getSignSymbol(selectedSign)}</span>
                       ) : (
-                        <span className="text-[#D4B896]/50 text-3xl">?</span>
+                        <span className="text-[#8fa3b8] text-3xl">?</span>
                       )}
                     </div>
-                    <span className="text-[#D4B896]/70 text-sm mt-2">{selectedSign || "Select sign"}</span>
+                    <span className="text-white/80 text-sm mt-2">{selectedSign || "Select sign"}</span>
                   </button>
                 </div>
 
                 {/* Selection indicator */}
-                <p className="text-center text-[#D4B896]/60 text-sm">
-                  {selectingFor === "user" ? "Select your sign" : "Select partner's sign"}
+                <p className="text-center text-[#8fa3b8] text-sm">
+                  {selectingFor === "user"
+                    ? "Select your sign"
+                    : partnerSignFromBirthDate
+                      ? "Partner sign preselected from onboarding. You can change it."
+                      : "Select partner's sign"}
                 </p>
 
                 {/* Zodiac Grid */}
@@ -632,29 +779,34 @@ export default function CompatibilityPage() {
                       onClick={() => handleSignSelect(sign.name)}
                       className={`relative flex flex-col items-center p-2 rounded-xl border transition-all ${
                         (selectingFor === "user" && sign.name === userSign) || (selectingFor === "partner" && sign.name === selectedSign)
-                          ? "bg-[#D4B896]/20 border-[#D4B896]"
-                          : "bg-[#1A1F2E]/50 border-[#D4B896]/20 hover:border-[#D4B896]/40"
+                          ? "bg-[#38bdf8]/12 border-[#38bdf8]"
+                          : "bg-[#0b2338] border-[#173653] hover:border-[#38bdf8]/45"
                       }`}
                     >
                       {/* You badge - only show on user's birth date sign */}
                       {sign.name === userSignFromBirthDate && (
-                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full z-10">
+                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#38bdf8] text-black text-[10px] font-bold px-2 py-0.5 rounded-full z-10">
                           You
+                        </div>
+                      )}
+                      {sign.name === partnerSignFromBirthDate && selectingFor === "partner" && (
+                        <div className="absolute -top-2 left-1/2 -translate-x-1/2 bg-[#7dd3fc] text-black text-[10px] font-bold px-2 py-0.5 rounded-full z-10">
+                          Partner
                         </div>
                       )}
                       
                       {/* Decorative border frame */}
-                      <div className="w-12 h-12 rounded-lg border border-[#D4B896]/30 flex items-center justify-center relative">
-                        <div className="absolute -top-0.5 -left-0.5 w-2 h-2 border-t border-l border-[#D4B896]/50" />
-                        <div className="absolute -top-0.5 -right-0.5 w-2 h-2 border-t border-r border-[#D4B896]/50" />
-                        <div className="absolute -bottom-0.5 -left-0.5 w-2 h-2 border-b border-l border-[#D4B896]/50" />
-                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 border-b border-r border-[#D4B896]/50" />
+                      <div className="w-12 h-12 rounded-lg border border-[#38bdf8]/30 bg-[#061525] flex items-center justify-center relative">
+                        <div className="absolute -top-0.5 -left-0.5 w-2 h-2 border-t border-l border-[#38bdf8]/50" />
+                        <div className="absolute -top-0.5 -right-0.5 w-2 h-2 border-t border-r border-[#38bdf8]/50" />
+                        <div className="absolute -bottom-0.5 -left-0.5 w-2 h-2 border-b border-l border-[#38bdf8]/50" />
+                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 border-b border-r border-[#38bdf8]/50" />
                         
-                        <span className="text-[#D4B896] text-xl">{sign.symbol}</span>
+                        <span className="text-[#7dd3fc] text-xl">{sign.symbol}</span>
                       </div>
                       
-                      <span className="text-[#D4B896] text-[10px] mt-1 font-medium">{sign.name}</span>
-                      <span className="text-[#D4B896]/50 text-[8px]">{sign.dates}</span>
+                      <span className="text-white text-[10px] mt-1 font-medium">{sign.name}</span>
+                      <span className="text-[#8fa3b8] text-[8px]">{sign.dates}</span>
                     </motion.button>
                   ))}
                 </div>
@@ -663,7 +815,7 @@ export default function CompatibilityPage() {
                 <Button
                   onClick={handleCheckCompatibility}
                   disabled={loading || !selectedSign}
-                  className="w-full bg-rose-600 hover:bg-rose-700 text-white py-6 rounded-full text-lg font-medium"
+                  className="w-full bg-[#38bdf8] hover:bg-[#7dd3fc] text-black py-6 rounded-xl text-lg font-semibold [&_svg]:text-black disabled:bg-[#15314d] disabled:text-[#7f91a8]"
                 >
                   {loading ? (
                     <div className="flex flex-col items-center">
@@ -688,26 +840,26 @@ export default function CompatibilityPage() {
                 {/* Signs Display with Score */}
                 <div className="flex items-center justify-center gap-3">
                   <div className="flex flex-col items-center">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#D4B896]/30 to-[#C4A676]/20 border-2 border-[#D4B896]/50 flex items-center justify-center">
-                      <span className="text-[#D4B896] text-3xl">{getSignSymbol(result.sign1)}</span>
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#0b2338] to-[#061525] border-2 border-[#173653] flex items-center justify-center">
+                      <span className="text-[#7dd3fc] text-3xl">{getSignSymbol(result.sign1)}</span>
                     </div>
-                    <span className="text-[#D4B896] text-sm mt-2">{result.sign1}</span>
-                    <span className="text-[#D4B896]/50 text-xs flex items-center gap-1">
+                    <span className="text-white text-sm mt-2">{result.sign1}</span>
+                    <span className="text-[#8fa3b8] text-xs flex items-center gap-1">
                       <span className="text-xs">≋</span> {getSignElement(result.sign1)}
                     </span>
                   </div>
 
                   <div className="flex flex-col items-center">
                     <span className="text-white text-2xl font-bold">{result.score}%</span>
-                    <div className="w-16 h-1 bg-gradient-to-r from-purple-500 via-pink-500 to-purple-500 rounded-full mt-1" />
+                    <div className="w-16 h-1 bg-gradient-to-r from-[#38bdf8] via-[#7dd3fc] to-[#38bdf8] rounded-full mt-1" />
                   </div>
 
                   <div className="flex flex-col items-center">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#D4B896]/30 to-[#C4A676]/20 border-2 border-[#D4B896]/50 flex items-center justify-center">
-                      <span className="text-[#D4B896] text-3xl">{getSignSymbol(result.sign2)}</span>
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#0b2338] to-[#061525] border-2 border-[#173653] flex items-center justify-center">
+                      <span className="text-[#7dd3fc] text-3xl">{getSignSymbol(result.sign2)}</span>
                     </div>
-                    <span className="text-[#D4B896] text-sm mt-2">{result.sign2}</span>
-                    <span className="text-[#D4B896]/50 text-xs flex items-center gap-1">
+                    <span className="text-white text-sm mt-2">{result.sign2}</span>
+                    <span className="text-[#8fa3b8] text-xs flex items-center gap-1">
                       <span className="text-xs">≡</span> {getSignElement(result.sign2)}
                     </span>
                   </div>
@@ -720,8 +872,8 @@ export default function CompatibilityPage() {
                 </div>
 
                 {/* Relationship at a glance */}
-                <div className="bg-[#1A2535] rounded-2xl p-5 border border-[#2A3545]">
-                  <h3 className="text-[#D4B896] text-lg font-semibold mb-3">Relationship at a glance</h3>
+                <div className="bg-[#0b2338] rounded-2xl p-5 border border-[#173653]">
+                  <h3 className="text-[#7dd3fc] text-lg font-semibold mb-3">Relationship at a glance</h3>
                   <p className="text-white/70 text-sm leading-relaxed">
                     {result.relationshipGlance.length > 200 
                       ? (showReadMore ? result.relationshipGlance : result.relationshipGlance.slice(0, 150) + "...")
@@ -731,7 +883,7 @@ export default function CompatibilityPage() {
                   {result.relationshipGlance.length > 200 && (
                     <button 
                       onClick={() => setShowReadMore(!showReadMore)}
-                      className="text-rose-400 text-sm mt-2 flex items-center gap-1"
+                      className="text-[#7dd3fc] text-sm mt-2 flex items-center gap-1"
                     >
                       {showReadMore ? "Show less" : "Read more"} 
                       {showReadMore ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -761,7 +913,7 @@ export default function CompatibilityPage() {
                     <div className="relative flex justify-center my-4">
                       <svg viewBox="0 0 200 200" className="w-56 h-56">
                         {/* Background circle */}
-                        <circle cx="100" cy="100" r="90" fill="#1A2535" />
+                        <circle cx="100" cy="100" r="90" fill="#0b2338" />
                         
                         {/* Emotional - Top Left (teal) */}
                         <path
@@ -796,8 +948,8 @@ export default function CompatibilityPage() {
                         />
                         
                         {/* Divider lines */}
-                        <line x1="100" y1="10" x2="100" y2="190" stroke="#0A0E1A" strokeWidth="2" />
-                        <line x1="10" y1="100" x2="190" y2="100" stroke="#0A0E1A" strokeWidth="2" />
+                        <line x1="100" y1="10" x2="100" y2="190" stroke="#061525" strokeWidth="2" />
+                        <line x1="10" y1="100" x2="190" y2="100" stroke="#061525" strokeWidth="2" />
                         
                       </svg>
                     </div>
@@ -841,7 +993,7 @@ export default function CompatibilityPage() {
                       </div>
                       <div className="flex items-center gap-2 mb-3">
                         <span className="text-white text-3xl font-bold">{value}%</span>
-                        <span className="px-2 py-1 bg-white/10 text-white/60 text-xs rounded-full">
+                        <span className="px-2 py-1 bg-[#061525] border border-[#173653] text-[#8fa3b8] text-xs rounded-full">
                           {value >= 60 ? "High" : value >= 40 ? "Medium" : "Low"}
                         </span>
                       </div>
@@ -863,12 +1015,12 @@ export default function CompatibilityPage() {
                           <stop offset="100%" stopColor="#EF4444" />
                         </linearGradient>
                       </defs>
-                      <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#1A2535" strokeWidth="8" strokeLinecap="round" />
+                      <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="#0b2338" strokeWidth="8" strokeLinecap="round" />
                       <path d="M 10 50 A 40 40 0 0 1 90 50" fill="none" stroke="url(#toxicGradient)" strokeWidth="8" strokeLinecap="round" />
                     </svg>
                     <div className="absolute bottom-0 text-center">
                       <span className="text-white text-3xl font-bold">{result.toxicityScore}%</span>
-                      <div className="px-3 py-1 bg-white/10 rounded-full mt-1">
+                      <div className="px-3 py-1 bg-[#061525] border border-[#173653] rounded-full mt-1">
                         <span className="text-white/80 text-sm">
                           {result.toxicityScore >= 60 ? "High" : result.toxicityScore >= 40 ? "Medium" : "Low"}
                         </span>
@@ -899,7 +1051,7 @@ export default function CompatibilityPage() {
                               <ChevronDown className={`w-4 h-4 text-white/50 transition-transform ${expandedAspect === key ? "rotate-180" : ""}`} />
                             </div>
                           </div>
-                          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                          <div className="h-2 bg-[#173653] rounded-full overflow-hidden">
                             <motion.div
                               initial={{ width: 0 }}
                               animate={{ width: `${value}%` }}
@@ -916,7 +1068,7 @@ export default function CompatibilityPage() {
                               exit={{ height: 0, opacity: 0 }}
                               className="overflow-hidden"
                             >
-                              <p className="text-white/60 text-sm mt-2 pl-2 border-l-2 border-rose-500/50">
+                              <p className="text-white/60 text-sm mt-2 pl-2 border-l-2 border-[#38bdf8]/50">
                                 {result.aspectDescriptions[key as keyof typeof result.aspectDescriptions] !== "Loading..." 
                                   ? result.aspectDescriptions[key as keyof typeof result.aspectDescriptions]
                                   : (value >= 70 ? `Strong ${key} compatibility indicates a harmonious connection in this area.` :
@@ -932,9 +1084,9 @@ export default function CompatibilityPage() {
                 </div>
 
                 {/* Advisor CTA */}
-                <div className="bg-gradient-to-br from-[#1A3040] to-[#1A2535] rounded-2xl p-5 border border-[#2A4555]">
+                <div className="bg-gradient-to-br from-[#0b2338] to-[#061525] rounded-2xl p-5 border border-[#173653]">
                   <div className="flex items-start gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-rose-400 to-cyan-500 flex items-center justify-center text-2xl">
+                    <div className="w-12 h-12 rounded-full bg-[#38bdf8]/15 border border-[#38bdf8]/30 flex items-center justify-center text-2xl">
                       👩‍🔮
                     </div>
                     <div className="flex-1">
@@ -944,7 +1096,7 @@ export default function CompatibilityPage() {
                   </div>
                   <Button 
                     onClick={() => router.push("/chat")}
-                    className="w-full mt-4 bg-rose-500 hover:bg-rose-600 text-white py-3 rounded-full"
+                    className="w-full mt-4 bg-[#38bdf8] hover:bg-[#7dd3fc] text-black py-3 rounded-xl font-semibold"
                   >
                     Ask 🔮
                   </Button>
@@ -955,12 +1107,12 @@ export default function CompatibilityPage() {
                   <h3 className="text-white text-xl font-bold mb-4">Biggest challenges in a relationship</h3>
                   <div className="space-y-4">
                     {result.challenges.map((challenge, index) => (
-                      <div key={index} className="bg-[#1A2535] rounded-2xl p-5 border border-[#2A3545]">
-                        <h4 className="text-[#D4B896] text-lg font-semibold mb-2">{challenge.title}</h4>
+                      <div key={index} className="bg-[#0b2338] rounded-2xl p-5 border border-[#173653]">
+                        <h4 className="text-[#7dd3fc] text-lg font-semibold mb-2">{challenge.title}</h4>
                         <p className="text-white/70 text-sm leading-relaxed mb-3">{challenge.description}</p>
                         <button
                           onClick={() => setExpandedChallenge(expandedChallenge === index ? null : index)}
-                          className="flex items-center gap-2 text-rose-400 text-sm"
+                          className="flex items-center gap-2 text-[#7dd3fc] text-sm"
                         >
                           <Lightbulb className="w-4 h-4" />
                           How you can solve it
@@ -974,7 +1126,7 @@ export default function CompatibilityPage() {
                               exit={{ height: 0, opacity: 0 }}
                               className="overflow-hidden"
                             >
-                              <p className="text-rose-300/80 text-sm mt-3 pl-4 border-l-2 border-rose-500">
+                              <p className="text-[#b8c7da] text-sm mt-3 pl-4 border-l-2 border-[#38bdf8]">
                                 {challenge.solution}
                               </p>
                             </motion.div>
@@ -991,12 +1143,14 @@ export default function CompatibilityPage() {
                     setResult(null);
                     setSelectedSign(null);
                   }}
-                  className="w-full bg-rose-600 hover:bg-rose-700 text-white py-6 rounded-full text-lg font-medium"
+                  className="w-full bg-[#38bdf8] hover:bg-[#7dd3fc] text-black py-6 rounded-xl text-lg font-semibold"
                 >
                   Check Another Match
                 </Button>
               </motion.div>
             )}
+
+            <ReportDisclaimer className="mt-6" />
           </div>
         </div>
       </div>

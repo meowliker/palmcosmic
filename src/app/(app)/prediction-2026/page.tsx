@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Star, Heart, Briefcase, Activity, Sparkles } from "lucide-react";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { supabase } from "@/lib/supabase";
+import { extractStoredSignName } from "@/lib/zodiac-utils";
+import ReportDisclaimer from "@/components/ReportDisclaimer";
 import predictions2026Data from "../../../../data/predictions-2026.json";
 
 const MONTHS = [
@@ -28,6 +30,26 @@ const MONTH_ICONS: Record<string, string> = {
   december: "🎄",
 };
 
+const VALID_SIGN_KEYS = new Set(Object.keys(predictions2026Data));
+
+function normalizeSignKey(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (!normalized || normalized === "prediction_2026") return null;
+    return VALID_SIGN_KEYS.has(normalized) ? normalized : null;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return normalizeSignKey(record.name || record.sign || record.id);
+  }
+  return null;
+}
+
+function displaySignName(signKey: string) {
+  return signKey.slice(0, 1).toUpperCase() + signKey.slice(1);
+}
+
 export default function Prediction2026Page() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -35,23 +57,76 @@ export default function Prediction2026Page() {
   const [error, setError] = useState<string | null>(null);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
   const [zodiacSign, setZodiacSign] = useState<string>("Aries");
+  const [checkingAccess, setCheckingAccess] = useState(true);
 
   // Get sun sign from onboarding store as fallback
   const { sunSign: storeSunSign } = useOnboardingStore();
 
   useEffect(() => {
+    checkReportAccess();
     loadUserSunSign();
   }, []);
+
+  const checkReportAccess = async () => {
+    try {
+      const userId = localStorage.getItem("astrorekha_user_id") || "";
+      const email =
+        localStorage.getItem("palmcosmic_email") ||
+        localStorage.getItem("astrorekha_email") ||
+        "";
+
+      if (!userId && !email) {
+        router.replace("/onboarding/future-prediction/paywall");
+        return;
+      }
+
+      const params = new URLSearchParams({ reportKey: "prediction_2026" });
+      if (userId) params.set("userId", userId);
+      if (email) params.set("email", email);
+
+      const response = await fetch(`/api/user/report-access?${params.toString()}`, {
+        cache: "no-store",
+      });
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok || !data?.canAccess) {
+        router.replace("/onboarding/future-prediction/paywall");
+        return;
+      }
+    } catch (error) {
+      console.error("Failed to check 2026 prediction access:", error);
+      router.replace("/onboarding/future-prediction/paywall");
+      return;
+    } finally {
+      setCheckingAccess(false);
+    }
+  };
 
   const loadUserSunSign = async () => {
     try {
       const userId = localStorage.getItem("astrorekha_user_id");
       if (userId) {
-        const { data: dbUser } = await supabase.from("users").select("sun_sign").eq("id", userId).single();
+        const { data: dbUser } = await supabase
+          .from("users")
+          .select("prediction_2026_report_id,zodiac_sign,sun_sign")
+          .eq("id", userId)
+          .single();
+
+        const reportSignKey =
+          normalizeSignKey(dbUser?.prediction_2026_report_id) ||
+          normalizeSignKey(dbUser?.zodiac_sign) ||
+          normalizeSignKey(dbUser?.sun_sign);
+
+        if (reportSignKey) {
+          setZodiacSign(displaySignName(reportSignKey));
+          return;
+        }
+
         if (dbUser?.sun_sign) {
-          const signName = typeof dbUser.sun_sign === "string" ? dbUser.sun_sign : dbUser.sun_sign?.name;
-          if (signName) {
-            setZodiacSign(signName);
+          const signName = extractStoredSignName(dbUser.sun_sign);
+          const signKey = normalizeSignKey(signName);
+          if (signKey) {
+            setZodiacSign(displaySignName(signKey));
             return;
           }
         }
@@ -77,14 +152,26 @@ export default function Prediction2026Page() {
     setError(null);
 
     try {
-      // Load from pre-generated JSON data
       const signKey = zodiacSign.toLowerCase() as keyof typeof predictions2026Data;
-      const predictionData = predictions2026Data[signKey];
-      
-      if (predictionData) {
-        setPrediction(predictionData.prediction);
+      const { data: supabasePrediction, error: supabaseError } = await supabase
+        .from("predictions_2026_global")
+        .select("prediction")
+        .eq("id", signKey)
+        .maybeSingle();
+
+      if (supabaseError) {
+        console.error("Failed to load 2026 prediction from Supabase:", supabaseError);
+      }
+
+      if (supabasePrediction?.prediction) {
+        setPrediction(supabasePrediction.prediction);
       } else {
-        setError("Prediction not available for your zodiac sign.");
+        const predictionData = predictions2026Data[signKey];
+        if (predictionData) {
+          setPrediction(predictionData.prediction);
+        } else {
+          setError("Prediction not available for your zodiac sign.");
+        }
       }
     } catch (err) {
       console.error("Failed to load prediction:", err);
@@ -104,15 +191,19 @@ export default function Prediction2026Page() {
     return "text-orange-400";
   };
 
-  if (loading) {
+  if (checkingAccess || loading) {
     return (
       <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
         <div className="w-full max-w-md h-screen bg-[#0A0E1A] flex items-center justify-center">
           <div className="text-center px-8">
             <Loader2 className="w-16 h-16 text-primary animate-spin mx-auto mb-6" />
-            <h2 className="text-white text-xl font-bold mb-2">Consulting the Stars...</h2>
+            <h2 className="text-white text-xl font-bold mb-2">
+              {checkingAccess ? "Checking your access..." : "Consulting the Stars..."}
+            </h2>
             <p className="text-white/60 text-sm">
-              Generating your personalized 2026 predictions for {zodiacSign}
+              {checkingAccess
+                ? "Restoring your 2026 prediction unlock."
+                : `Generating your personalized 2026 predictions for ${zodiacSign}`}
             </p>
           </div>
         </div>
@@ -169,15 +260,15 @@ export default function Prediction2026Page() {
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="bg-gradient-to-br from-primary/20 to-purple-600/20 rounded-2xl p-5 border border-primary/30"
+                className="bg-gradient-to-br from-[#0b2338] to-[#061525] rounded-2xl p-5 border border-[#38bdf8]/30"
               >
                 <div className="flex items-center gap-3 mb-4">
-                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary to-purple-600 flex items-center justify-center">
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-[#38bdf8] to-[#0ea5e9] flex items-center justify-center">
                     <Sparkles className="w-7 h-7 text-white" />
                   </div>
                   <div>
                     <h2 className="text-white font-bold text-xl">{prediction.yearOverview.title}</h2>
-                    <p className="text-primary text-sm">{zodiacSign} • 2026</p>
+                    <p className="text-[#38bdf8] text-sm">{zodiacSign} • 2026</p>
                   </div>
                 </div>
 
@@ -332,7 +423,7 @@ export default function Prediction2026Page() {
                                     {monthData.luckyDays.map((day: number, i: number) => (
                                       <span
                                         key={i}
-                                        className="w-7 h-7 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center"
+                                        className="w-7 h-7 rounded-full bg-[#38bdf8]/15 text-[#38bdf8] text-xs font-bold flex items-center justify-center"
                                       >
                                         {day}
                                       </span>
@@ -349,6 +440,8 @@ export default function Prediction2026Page() {
                 })}
               </div>
             </div>
+
+            <ReportDisclaimer />
           </div>
         </div>
       </div>

@@ -171,7 +171,7 @@ export async function GET(request: NextRequest) {
         hour,
         minute,
         second: 0,
-        place: birthPlace || "New York, USA",
+        place: birthPlace || "New Delhi, India",
       });
     } catch (astroErr) {
       console.error("Astro engine error:", astroErr);

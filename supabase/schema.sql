@@ -1,4 +1,4 @@
--- PalmCosmic Supabase Database Schema (v2 — One-time purchase model)
+-- AstroRekha Supabase Database Schema (v2 — One-time purchase model with Razorpay)
 -- Run this in the Supabase SQL Editor to set up all tables
 
 -- ============================================================
@@ -13,12 +13,21 @@ CREATE TABLE IF NOT EXISTS public.users (
   purchase_type TEXT,                -- 'bundle_payment', 'coins', 'report', 'upsell'
   bundle_purchased TEXT,             -- 'palm-reading', 'palm-birth', 'palm-birth-compat'
   payment_status TEXT,               -- 'paid', 'pending', 'failed'
-  stripe_customer_id TEXT,
+  razorpay_payment_id TEXT,
+  razorpay_order_id TEXT,
+  payu_payment_id TEXT,
+  payu_txn_id TEXT,
   password_hash TEXT,
   
   -- Coins & Features
   coins INTEGER DEFAULT 0,
-  unlocked_features JSONB DEFAULT '{"palmReading": false, "prediction2026": false, "birthChart": false, "compatibilityTest": false}'::jsonb,
+  unlocked_features JSONB DEFAULT '{"palmReading": false, "prediction2026": false, "birthChart": false, "compatibilityTest": false, "soulmateSketch": false, "futurePartnerReport": false}'::jsonb,
+  palm_reading_report_id TEXT,
+  birth_chart_report_id TEXT,
+  soulmate_sketch_report_id TEXT,
+  future_partner_report_id TEXT,
+  prediction_2026_report_id TEXT,
+  compatibility_report_id TEXT,
   
   -- Onboarding
   onboarding_flow TEXT,
@@ -82,6 +91,12 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   palm_image TEXT,
   palm_reading_result JSONB,
   palm_reading_date TIMESTAMPTZ,
+  palm_reading_report_id TEXT,
+  birth_chart_report_id TEXT,
+  soulmate_sketch_report_id TEXT,
+  future_partner_report_id TEXT,
+  prediction_2026_report_id TEXT,
+  compatibility_report_id TEXT,
   
   -- Timestamps
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -102,30 +117,30 @@ CREATE TABLE IF NOT EXISTS public.otp_codes (
 );
 
 -- ============================================================
--- 4. PAYMENTS TABLE (one-time payments)
+-- 4. PAYMENTS TABLE (Razorpay one-time payments)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.payments (
-  id TEXT PRIMARY KEY,                    -- generated payment ID
-  stripe_session_id TEXT,
-  stripe_payment_intent_id TEXT,
-  stripe_customer_id TEXT,
+  id TEXT PRIMARY KEY,                    -- razorpay_payment_id or generated ID
+  razorpay_order_id TEXT,
+  razorpay_payment_id TEXT,
+  razorpay_signature TEXT,
+  payu_txn_id TEXT,
+  payu_payment_id TEXT,
   user_id TEXT REFERENCES public.users(id),
-  type TEXT NOT NULL,                     -- 'bundle', 'upsell', 'coins', 'report'
+  type TEXT NOT NULL,                     -- 'bundle_payment', 'upsell', 'coins', 'report'
   bundle_id TEXT,                         -- 'palm-reading', 'palm-birth', 'palm-birth-compat'
   feature TEXT,                           -- specific feature unlocked (e.g. 'prediction2026')
   coins INTEGER,                          -- coins purchased (for coin purchases)
   customer_email TEXT,
-  amount INTEGER NOT NULL,                -- amount in cents (USD smallest unit)
-  currency TEXT DEFAULT 'USD',
+  amount INTEGER NOT NULL,                -- amount in paise (INR smallest unit)
+  currency TEXT DEFAULT 'INR',
   payment_status TEXT DEFAULT 'created',  -- 'created', 'paid', 'failed'
   fulfilled_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
-CREATE INDEX IF NOT EXISTS idx_payments_stripe_session ON public.payments(stripe_session_id);
-CREATE INDEX IF NOT EXISTS idx_payments_stripe_intent ON public.payments(stripe_payment_intent_id);
-CREATE INDEX IF NOT EXISTS idx_payments_status_created_at ON public.payments(payment_status, created_at);
+CREATE INDEX IF NOT EXISTS idx_payments_razorpay_order ON public.payments(razorpay_order_id);
 
 -- ============================================================
 -- 5. LEADS TABLE (abandoned checkout leads)
@@ -208,6 +223,18 @@ CREATE TABLE IF NOT EXISTS public.daily_insights (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS public.daily_sign_insights (
+  id TEXT PRIMARY KEY,
+  sign TEXT NOT NULL,
+  date TEXT NOT NULL,
+  insights JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS daily_sign_insights_sign_date_idx
+  ON public.daily_sign_insights (sign, date);
+
 -- ============================================================
 -- 11. ASTROLOGY_SIGNS_CACHE TABLE
 -- ============================================================
@@ -222,9 +249,11 @@ CREATE TABLE IF NOT EXISTS public.astrology_signs_cache (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.predictions_2026_global (
   id TEXT PRIMARY KEY,
-  zodiac_sign TEXT,
-  prediction JSONB,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  zodiac_sign TEXT NOT NULL,
+  prediction JSONB NOT NULL,
+  version TEXT NOT NULL DEFAULT '1.0',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- ============================================================
@@ -339,10 +368,13 @@ CREATE TABLE IF NOT EXISTS public.predictions (
 CREATE TABLE IF NOT EXISTS public.promo_codes (
   code TEXT PRIMARY KEY,
   discount_percent INTEGER,
+  kind TEXT NOT NULL DEFAULT 'three_day',
   max_uses INTEGER,
   current_uses INTEGER DEFAULT 0,
+  used_count INTEGER NOT NULL DEFAULT 0,
   active BOOLEAN DEFAULT TRUE,
   expires_at TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -353,11 +385,17 @@ CREATE TABLE IF NOT EXISTS public.horoscope_cache (
   id TEXT PRIMARY KEY,
   sign TEXT NOT NULL,
   date TEXT NOT NULL,
-  data JSONB NOT NULL,
+  data JSONB,
+  horoscope JSONB,
+  period TEXT,
+  cache_key TEXT,
+  fetched_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_horoscope_sign_date ON public.horoscope_cache(sign, date);
+CREATE INDEX IF NOT EXISTS horoscope_cache_sign_period_date_idx ON public.horoscope_cache(sign, period, date);
+CREATE UNIQUE INDEX IF NOT EXISTS horoscope_cache_sign_date_unique_idx ON public.horoscope_cache(sign, date);
 
 -- ============================================================
 -- STORAGE: Create a bucket for palm images
@@ -380,6 +418,7 @@ ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.natal_charts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.birth_charts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.daily_insights ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.daily_sign_insights ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.astrology_signs_cache ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.predictions_2026_global ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.admins ENABLE ROW LEVEL SECURITY;
@@ -442,6 +481,7 @@ CREATE POLICY "anon_birth_charts_update" ON public.birth_charts FOR UPDATE USING
 
 -- DAILY_INSIGHTS: anon can read
 CREATE POLICY "anon_daily_insights_select" ON public.daily_insights FOR SELECT USING (true);
+CREATE POLICY "anon_daily_sign_insights_select" ON public.daily_sign_insights FOR SELECT USING (true);
 
 -- ASTROLOGY_SIGNS_CACHE: anon can read
 CREATE POLICY "anon_astrology_cache_select" ON public.astrology_signs_cache FOR SELECT USING (true);

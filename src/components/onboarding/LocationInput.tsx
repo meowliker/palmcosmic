@@ -105,9 +105,9 @@ export function LocationInput({ value, onChange, placeholder, className }: Locat
       />
 
       {showSuggestions && (suggestions.length > 0 || isLoading) && (
-        <div className="absolute z-50 w-full mt-2 bg-card border border-border rounded-lg shadow-lg overflow-hidden">
+        <div className="absolute z-50 w-full mt-2 overflow-hidden rounded-xl border border-[#38bdf8]/25 bg-[#0b2035] shadow-2xl shadow-black/30">
           {isLoading ? (
-            <div className="px-4 py-3 text-sm text-muted-foreground">
+            <div className="px-4 py-3 text-sm text-[#b8c7da]">
               Loading...
             </div>
           ) : (
@@ -115,10 +115,10 @@ export function LocationInput({ value, onChange, placeholder, className }: Locat
               <button
                 key={`${suggestion.name}-${suggestion.lat}-${index}`}
                 onClick={() => handleSelectSuggestion(suggestion)}
-                className="w-full px-4 py-3 text-left hover:bg-secondary transition-colors text-sm"
+                className="w-full px-4 py-3 text-left text-sm text-white transition-colors hover:bg-[#103554]"
               >
                 <div className="font-medium">{suggestion.name}</div>
-                <div className="text-muted-foreground text-xs">
+                <div className="text-[#b8c7da] text-xs">
                   {suggestion.state ? `${suggestion.state}, ` : ""}{suggestion.country}
                 </div>
               </button>

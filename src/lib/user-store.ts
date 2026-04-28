@@ -3,13 +3,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type PurchasedBundle = "palm-reading" | "palm-birth" | "palm-birth-compat" | null;
+export type PurchasedBundle = "palm-reading" | "palm-birth" | "palm-birth-compat" | "palm-birth-sketch" | null;
 
 export interface UnlockedFeatures {
   palmReading: boolean;
   prediction2026: boolean;
   birthChart: boolean;
   compatibilityTest: boolean;
+  soulmateSketch: boolean;
+  futurePartnerReport: boolean;
 }
 
 interface UserState {
@@ -51,6 +53,8 @@ interface UserState {
     birthChart?: boolean;
     compatibilityTest?: boolean;
     prediction2026?: boolean;
+    soulmateSketch?: boolean;
+    futurePartnerReport?: boolean;
     coins?: number;
     purchasedBundle?: PurchasedBundle;
   }) => void;
@@ -61,6 +65,8 @@ const initialUnlockedFeatures: UnlockedFeatures = {
   prediction2026: false,
   birthChart: false,
   compatibilityTest: false,
+  soulmateSketch: false,
+  futurePartnerReport: false,
 };
 
 const initialState = {
@@ -94,6 +100,8 @@ export const useUserStore = create<UserState>()(
             prediction2026: true,
             birthChart: true,
             compatibilityTest: true,
+            soulmateSketch: true,
+            futurePartnerReport: true,
           },
         }),
 
@@ -147,6 +155,8 @@ export const useUserStore = create<UserState>()(
             prediction2026: true,
             birthChart: true,
             compatibilityTest: true,
+            soulmateSketch: true,
+            futurePartnerReport: true,
           },
         }),
 
@@ -162,6 +172,9 @@ export const useUserStore = create<UserState>()(
           birthChart: data.unlockedFeatures?.birthChart ?? data.birthChart ?? false,
           compatibilityTest: data.unlockedFeatures?.compatibilityTest ?? data.compatibilityTest ?? false,
           prediction2026: data.unlockedFeatures?.prediction2026 ?? data.prediction2026 ?? false,
+          soulmateSketch: data.unlockedFeatures?.soulmateSketch ?? data.soulmateSketch ?? false,
+          futurePartnerReport:
+            data.unlockedFeatures?.futurePartnerReport ?? data.futurePartnerReport ?? false,
         };
         updates.unlockedFeatures = features;
         
@@ -196,12 +209,16 @@ export const featureNames: Record<keyof UnlockedFeatures, string> = {
   prediction2026: "2026 Predictions",
   birthChart: "Birth Chart",
   compatibilityTest: "Compatibility Test",
+  soulmateSketch: "Soulmate Sketch",
+  futurePartnerReport: "Future Partner Report",
 };
 
-// Feature prices (USD cents)
+// Feature prices (INR)
 export const featurePrices: Record<keyof UnlockedFeatures, number> = {
-  palmReading: 999,
-  prediction2026: 999,
-  birthChart: 999,
-  compatibilityTest: 999,
+  palmReading: 582,
+  prediction2026: 582,
+  birthChart: 582,
+  compatibilityTest: 582,
+  soulmateSketch: 199,
+  futurePartnerReport: 582,
 };

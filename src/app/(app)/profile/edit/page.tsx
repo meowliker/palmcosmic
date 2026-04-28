@@ -3,30 +3,25 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ChevronRight, Loader2, MapPin, Search, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, ChevronRight, Loader2, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOnboardingStore } from "@/lib/onboarding-store";
-import { useUserStore } from "@/lib/user-store";
 import { supabase } from "@/lib/supabase";
 import { getZodiacSign } from "@/lib/astrology-api";
+import { trackAnalyticsEvent } from "@/lib/analytics-events";
+import { pixelEvents } from "@/lib/pixel-events";
 
 const months = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ];
 
-const relationshipOptions = ["Single", "In a relationship", "Married", "Divorced", "Widowed", "Prefer not to say"];
 const genderOptions = ["Male", "Female", "Non-binary", "Prefer not to say"];
 
 export default function EditProfilePage() {
   const router = useRouter();
   const [isClient, setIsClient] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [deleteStep, setDeleteStep] = useState<0 | 1 | 2>(0); // 0=hidden, 1=first confirm, 2=password
-  const [deletePassword, setDeletePassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [deleteError, setDeleteError] = useState("");
-  const [isDeleting, setIsDeleting] = useState(false);
   
   // Edit modal states
   const [editingField, setEditingField] = useState<string | null>(null);
@@ -36,8 +31,6 @@ export default function EditProfilePage() {
   const [locationSuggestions, setLocationSuggestions] = useState<string[]>([]);
   const [isSearchingLocation, setIsSearchingLocation] = useState(false);
   
-  const { resetUserState } = useUserStore();
-
   const {
     gender, setGender,
     birthMonth, birthDay, birthYear,
@@ -45,7 +38,9 @@ export default function EditProfilePage() {
     birthPlace, setBirthPlace,
     birthHour, birthMinute, birthPeriod,
     setBirthTime,
-    relationshipStatus, setRelationshipStatus,
+    setSigns,
+    setModality,
+    setPolarity,
   } = useOnboardingStore();
 
   const [localName, setLocalName] = useState("You");
@@ -53,8 +48,26 @@ export default function EditProfilePage() {
 
   useEffect(() => {
     setIsClient(true);
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+    pixelEvents.viewContent("Edit Profile", "account");
+    trackAnalyticsEvent("EditProfileViewed", {
+      route: "/profile/edit",
+      user_id: userId,
+      email,
+    });
     loadUserProfile();
   }, []);
+
+  const openEditField = (field: string, value?: string) => {
+    setEditingField(field);
+    if (value !== undefined) setTempValue(value);
+    trackAnalyticsEvent("EditProfileAction", {
+      route: "/profile/edit",
+      action: "field_edit_opened",
+      field,
+    });
+  };
 
   const loadUserProfile = async () => {
     setIsLoading(true);
@@ -68,12 +81,11 @@ export default function EditProfilePage() {
       }
 
       // Load from Supabase
-      const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
+        const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
 
       if (userData) {
         if (userData.name) setLocalName(userData.name);
         if (userData.gender) setGender(userData.gender);
-        if (userData.relationship_status) setRelationshipStatus(userData.relationship_status);
         if (userData.birth_month && userData.birth_day && userData.birth_year) {
           setBirthDate(String(userData.birth_month), String(userData.birth_day), String(userData.birth_year));
         }
@@ -126,9 +138,6 @@ export default function EditProfilePage() {
         case "gender":
           setGender(value);
           break;
-        case "relationship":
-          setRelationshipStatus(value);
-          break;
         case "birthDate":
           // value is { month, day, year }
           setBirthDate(String(value.month), String(value.day), String(value.year));
@@ -164,7 +173,6 @@ export default function EditProfilePage() {
         const updateData: any = {
           name: field === "name" ? value : localName,
           gender: field === "gender" ? value : gender,
-          relationship_status: field === "relationship" ? value : relationshipStatus,
           birth_month: newBirthMonth,
           birth_day: newBirthDay,
           birth_year: newBirthYear,
@@ -198,6 +206,7 @@ export default function EditProfilePage() {
                 birthMinute: newBirthMinute,
                 birthPeriod: newBirthPeriod,
                 birthPlace: newBirthPlace,
+                forceRefresh: true,
               }),
             });
             const signsData = await response.json();
@@ -205,6 +214,9 @@ export default function EditProfilePage() {
               updateData.sun_sign = signsData.sunSign;
               updateData.moon_sign = signsData.moonSign;
               updateData.ascendant_sign = signsData.ascendant;
+              setSigns(signsData.sunSign, signsData.moonSign, signsData.ascendant, true);
+              if (signsData.modality) setModality(signsData.modality);
+              if (signsData.polarity) setPolarity(signsData.polarity);
             }
           } catch (signsError) {
             console.error("Error recalculating signs:", signsError);
@@ -213,9 +225,29 @@ export default function EditProfilePage() {
         }
         
         await supabase.from("users").update(updateData).eq("id", userId);
+        await supabase
+          .from("user_profiles")
+          .upsert(
+            {
+              id: userId,
+              ...updateData,
+            },
+            { onConflict: "id" }
+          );
       }
+      trackAnalyticsEvent("EditProfileAction", {
+        route: "/profile/edit",
+        action: "field_saved",
+        field,
+        signs_recalculated: field === "birthDate" || field === "birthTime" || field === "birthPlace",
+      });
     } catch (error) {
       console.error("Error saving:", error);
+      trackAnalyticsEvent("EditProfileAction", {
+        route: "/profile/edit",
+        action: "field_save_failed",
+        field,
+      });
     } finally {
       setIsSaving(false);
       setEditingField(null);
@@ -245,96 +277,53 @@ export default function EditProfilePage() {
     }
   };
 
-  const handleDeleteAccount = async () => {
-    // Verify password (simple check - in production, verify against Supabase Auth)
-    const storedPassword = localStorage.getItem("astrorekha_password");
-    if (storedPassword && deletePassword !== storedPassword) {
-      setDeleteError("Incorrect password. Please try again.");
-      return;
-    }
-    
-    setIsDeleting(true);
-    setDeleteError("");
-    
-    try {
-      const userId = localStorage.getItem("astrorekha_user_id");
-      const userEmail = localStorage.getItem("astrorekha_email");
-      
-      // Step 1: Delete from Supabase
-      if (userId) {
-        await supabase.from("users").delete().eq("id", userId);
-        await supabase.from("palm_readings").delete().eq("id", userId);
-      }
-      
-      // Step 3: Clear all local data
-      localStorage.clear();
-      
-      // Step 4: Reset stores
-      resetUserState();
-      
-      // Step 5: Redirect to welcome screen
-      router.push("/welcome");
-    } catch (error) {
-      console.error("Delete account error:", error);
-      setDeleteError("Failed to delete account. Please try again.");
-      setIsDeleting(false);
-    }
-  };
-
   if (!isClient) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A]" />
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525]" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col relative">
-        {/* Starry background */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {[...Array(30)].map((_, i) => (
-            <div
-              key={i}
-              className="absolute w-0.5 h-0.5 bg-white/20 rounded-full"
-              style={{
-                top: `${Math.random() * 100}%`,
-                left: `${Math.random() * 100}%`,
-              }}
-            />
-          ))}
-        </div>
-
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col relative">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center justify-center px-4 py-3">
             <button
-              onClick={() => router.push("/profile")}
-              className="absolute left-4 w-10 h-10 flex items-center justify-center"
+              onClick={() => {
+                trackAnalyticsEvent("EditProfileAction", {
+                  route: "/profile/edit",
+                  action: "back_clicked",
+                  destination: "/profile",
+                });
+                router.push("/profile");
+              }}
+              className="absolute left-4 w-10 h-10 flex items-center justify-center rounded-lg text-[#b8c7da] transition-colors hover:bg-[#0b2338] hover:text-white"
+              aria-label="Back to profile"
             >
-              <ArrowLeft className="w-5 h-5 text-white" />
+              <ArrowLeft className="w-5 h-5" />
             </button>
-            <h1 className="text-white text-xl font-semibold">Edit</h1>
+            <h1 className="text-white text-xl font-semibold">Edit Profile</h1>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto relative z-10">
-          <div className="px-4 py-6 space-y-4">
+          <div className="px-4 py-6 space-y-3 pb-10">
             {/* Name */}
             <motion.button
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               onClick={() => {
-                setEditingField("name");
-                setTempValue(localName);
+                openEditField("name", localName);
               }}
-              className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/20 text-left"
+              className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#173653] text-left transition-colors hover:border-[#38bdf8]/50"
             >
-              <p className="text-white/50 text-xs mb-1">Name</p>
+              <p className="text-[#8fa3b8] text-xs mb-1">Name</p>
               <div className="flex items-center justify-between">
-                <p className="text-primary text-lg font-medium">{localName}</p>
-                <ChevronRight className="w-5 h-5 text-primary" />
+                <p className="text-white text-lg font-medium">{localName}</p>
+                <ChevronRight className="w-5 h-5 text-[#38bdf8]" />
               </div>
             </motion.button>
 
@@ -344,33 +333,14 @@ export default function EditProfilePage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.05 }}
               onClick={() => {
-                setEditingField("gender");
-                setTempValue(gender || "Male");
+                openEditField("gender", gender || "Male");
               }}
-              className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/20 text-left"
+              className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#173653] text-left transition-colors hover:border-[#38bdf8]/50"
             >
-              <p className="text-white/50 text-xs mb-1">Gender</p>
+              <p className="text-[#8fa3b8] text-xs mb-1">Gender</p>
               <div className="flex items-center justify-between">
-                <p className="text-primary text-lg font-medium">{gender || "Not set"}</p>
-                <ChevronRight className="w-5 h-5 text-primary" />
-              </div>
-            </motion.button>
-
-            {/* Relationship */}
-            <motion.button
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              onClick={() => {
-                setEditingField("relationship");
-                setTempValue(relationshipStatus || "Single");
-              }}
-              className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/20 text-left"
-            >
-              <p className="text-white/50 text-xs mb-1">Relationship</p>
-              <div className="flex items-center justify-between">
-                <p className="text-primary text-lg font-medium">{relationshipStatus || "Not set"}</p>
-                <ChevronRight className="w-5 h-5 text-primary" />
+                <p className="text-white text-lg font-medium">{gender || "Not set"}</p>
+                <ChevronRight className="w-5 h-5 text-[#38bdf8]" />
               </div>
             </motion.button>
 
@@ -378,14 +348,14 @@ export default function EditProfilePage() {
             <motion.button
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.15 }}
-              onClick={() => setEditingField("birthDate")}
-              className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/20 text-left"
+              transition={{ delay: 0.1 }}
+              onClick={() => openEditField("birthDate")}
+              className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#173653] text-left transition-colors hover:border-[#38bdf8]/50"
             >
-              <p className="text-white/50 text-xs mb-1">Date of birth</p>
+              <p className="text-[#8fa3b8] text-xs mb-1">Date of birth</p>
               <div className="flex items-center justify-between">
-                <p className="text-primary text-lg font-medium">{formatBirthDate()}</p>
-                <ChevronRight className="w-5 h-5 text-primary" />
+                <p className="text-white text-lg font-medium">{formatBirthDate()}</p>
+                <ChevronRight className="w-5 h-5 text-[#38bdf8]" />
               </div>
             </motion.button>
 
@@ -393,17 +363,16 @@ export default function EditProfilePage() {
             <motion.button
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
+              transition={{ delay: 0.15 }}
               onClick={() => {
-                setEditingField("birthPlace");
-                setTempValue(birthPlace || "");
+                openEditField("birthPlace", birthPlace || "");
               }}
-              className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/20 text-left"
+              className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#173653] text-left transition-colors hover:border-[#38bdf8]/50"
             >
-              <p className="text-white/50 text-xs mb-1">Place of birth</p>
+              <p className="text-[#8fa3b8] text-xs mb-1">Place of birth</p>
               <div className="flex items-center justify-between">
-                <p className="text-primary text-lg font-medium">{birthPlace || "Not set"}</p>
-                <ChevronRight className="w-5 h-5 text-primary" />
+                <p className="text-white text-lg font-medium line-clamp-1">{birthPlace || "Not set"}</p>
+                <ChevronRight className="w-5 h-5 text-[#38bdf8] flex-shrink-0" />
               </div>
             </motion.button>
 
@@ -411,31 +380,16 @@ export default function EditProfilePage() {
             <motion.button
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.25 }}
-              onClick={() => setEditingField("birthTime")}
-              className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/20 text-left"
+              transition={{ delay: 0.2 }}
+              onClick={() => openEditField("birthTime")}
+              className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#173653] text-left transition-colors hover:border-[#38bdf8]/50"
             >
-              <p className="text-white/50 text-xs mb-1">Time of birth</p>
+              <p className="text-[#8fa3b8] text-xs mb-1">Time of birth</p>
               <div className="flex items-center justify-between">
-                <p className="text-primary text-lg font-medium">{formatBirthTime()}</p>
-                <ChevronRight className="w-5 h-5 text-primary" />
+                <p className="text-white text-lg font-medium">{formatBirthTime()}</p>
+                <ChevronRight className="w-5 h-5 text-[#38bdf8]" />
               </div>
             </motion.button>
-
-            {/* Delete Account */}
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="pt-8"
-            >
-              <button
-                onClick={() => setDeleteStep(1)}
-                className="w-full py-4 text-red-400 hover:text-red-300 transition-colors"
-              >
-                Delete Data & Account
-              </button>
-            </motion.div>
           </div>
         </div>
 
@@ -475,18 +429,6 @@ export default function EditProfilePage() {
               onClose={() => setEditingField(null)}
             />
           )}
-          {editingField === "relationship" && (
-            <SelectModal
-              title="Relationship"
-              options={relationshipOptions}
-              selected={tempValue}
-              onSelect={(val) => {
-                setTempValue(val);
-                handleSaveField("relationship", val);
-              }}
-              onClose={() => setEditingField(null)}
-            />
-          )}
           {editingField === "birthDate" && (
             <DatePickerModal
               month={birthMonth}
@@ -509,132 +451,6 @@ export default function EditProfilePage() {
           )}
         </AnimatePresence>
 
-        {/* Delete Confirmation Modal - Step 1 */}
-        <AnimatePresence>
-          {deleteStep === 1 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-              onClick={() => setDeleteStep(0)}
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
-              >
-                <h2 className="text-white text-xl font-bold text-center mb-2">
-                  Delete Account?
-                </h2>
-                <p className="text-white/60 text-center text-sm mb-6">
-                  Are you sure you want to delete your account? This will permanently remove all your data including readings, reports, and subscription.
-                </p>
-                <div className="space-y-3">
-                  <Button
-                    onClick={() => setDeleteStep(2)}
-                    className="w-full h-12 bg-red-500 hover:bg-red-600 text-white font-semibold"
-                  >
-                    Yes, I Want to Delete
-                  </Button>
-                  <Button
-                    onClick={() => setDeleteStep(0)}
-                    variant="outline"
-                    className="w-full h-12 border-white/20 text-white hover:bg-white/10"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Delete Confirmation Modal - Step 2 (Password) */}
-        <AnimatePresence>
-          {deleteStep === 2 && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
-              onClick={() => {
-                setDeleteStep(0);
-                setDeletePassword("");
-                setDeleteError("");
-              }}
-            >
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: 20 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                onClick={(e) => e.stopPropagation()}
-                className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
-              >
-                <h2 className="text-white text-xl font-bold text-center mb-2">
-                  Confirm Deletion
-                </h2>
-                <p className="text-white/60 text-center text-sm mb-4">
-                  Enter your password to permanently delete your account.
-                </p>
-                
-                {deleteError && (
-                  <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
-                    <p className="text-red-400 text-sm text-center">{deleteError}</p>
-                  </div>
-                )}
-                
-                <div className="relative mb-4">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    value={deletePassword}
-                    onChange={(e) => setDeletePassword(e.target.value)}
-                    placeholder="Enter your password"
-                    className="w-full bg-[#0A0E1A] border border-white/20 rounded-xl px-4 py-3 pr-12 text-white focus:outline-none focus:border-primary"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-                
-                <p className="text-white/40 text-xs text-center mb-4">
-                  Note: Your account will be scheduled for deletion after your current subscription cycle ends.
-                </p>
-                
-                <div className="space-y-3">
-                  <Button
-                    onClick={handleDeleteAccount}
-                    disabled={isDeleting || !deletePassword}
-                    className="w-full h-12 bg-red-500 hover:bg-red-600 text-white font-semibold disabled:opacity-50"
-                  >
-                    {isDeleting ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      "Delete My Account"
-                    )}
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      setDeleteStep(0);
-                      setDeletePassword("");
-                      setDeleteError("");
-                    }}
-                    variant="outline"
-                    className="w-full h-12 border-white/20 text-white hover:bg-white/10"
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     </div>
   );
@@ -662,28 +478,28 @@ function EditTextModal({ title, value, onChange, onSave, onClose, isSaving }: {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
+        className="bg-[#0b2338] rounded-lg w-full max-w-sm p-6 border border-[#173653]"
       >
         <h2 className="text-white text-xl font-bold mb-4">{title}</h2>
         <input
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className="w-full bg-[#0A0E1A] border border-white/20 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-primary"
+          className="w-full bg-[#061525] border border-[#173653] rounded-lg px-4 py-3 text-white focus:outline-none focus:border-[#38bdf8]"
           autoFocus
         />
         <div className="flex gap-3 mt-4">
           <Button
             onClick={onClose}
             variant="outline"
-            className="flex-1 border-white/20 text-white hover:bg-white/10"
+            className="flex-1 border-[#173653] text-white hover:bg-[#082035]"
           >
             Cancel
           </Button>
           <Button
             onClick={onSave}
             disabled={isSaving}
-            className="flex-1 bg-primary hover:bg-primary/90 text-white"
+            className="flex-1 bg-[#38bdf8] hover:bg-[#0284c7] text-black"
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
           </Button>
@@ -730,21 +546,21 @@ function LocationSearchModal({ value, onChange, onSave, onClose, isSaving, onSea
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
+        className="bg-[#0b2338] rounded-lg w-full max-w-sm p-6 border border-[#173653]"
       >
         <h2 className="text-white text-xl font-bold mb-4">Place of Birth</h2>
         <div className="relative">
-          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-white/50" />
+          <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#8fa3b8]" />
           <input
             type="text"
             value={value}
             onChange={(e) => handleInputChange(e.target.value)}
             placeholder="Search for a location..."
-            className="w-full bg-[#0A0E1A] border border-white/20 rounded-xl pl-10 pr-10 py-3 text-white focus:outline-none focus:border-primary"
+            className="w-full bg-[#061525] border border-[#173653] rounded-lg pl-10 pr-10 py-3 text-white focus:outline-none focus:border-[#38bdf8]"
             autoFocus
           />
           {isSearching && (
-            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-primary animate-spin" />
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 text-[#38bdf8] animate-spin" />
           )}
         </div>
         
@@ -758,10 +574,10 @@ function LocationSearchModal({ value, onChange, onSave, onClose, isSaving, onSea
                   onChange(suggestion);
                   onSearch(""); // Clear suggestions
                 }}
-                className="w-full p-3 bg-[#0A0E1A] rounded-xl text-left text-white/80 text-sm hover:bg-white/10 transition-colors"
+                className="w-full p-3 bg-[#061525] rounded-lg text-left text-white/80 text-sm hover:bg-[#082035] transition-colors"
               >
                 <div className="flex items-start gap-2">
-                  <MapPin className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                  <MapPin className="w-4 h-4 text-[#38bdf8] mt-0.5 flex-shrink-0" />
                   <span className="line-clamp-2">{suggestion}</span>
                 </div>
               </button>
@@ -773,14 +589,14 @@ function LocationSearchModal({ value, onChange, onSave, onClose, isSaving, onSea
           <Button
             onClick={onClose}
             variant="outline"
-            className="flex-1 border-white/20 text-white hover:bg-white/10"
+            className="flex-1 border-[#173653] text-white hover:bg-[#082035]"
           >
             Cancel
           </Button>
           <Button
             onClick={onSave}
             disabled={isSaving}
-            className="flex-1 bg-primary hover:bg-primary/90 text-white"
+            className="flex-1 bg-[#38bdf8] hover:bg-[#0284c7] text-black"
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
           </Button>
@@ -811,7 +627,7 @@ function SelectModal({ title, options, selected, onSelect, onClose }: {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
+        className="bg-[#0b2338] rounded-lg w-full max-w-sm p-6 border border-[#173653]"
       >
         <h2 className="text-white text-xl font-bold mb-4">{title}</h2>
         <div className="space-y-2">
@@ -819,10 +635,10 @@ function SelectModal({ title, options, selected, onSelect, onClose }: {
             <button
               key={option}
               onClick={() => onSelect(option)}
-              className={`w-full p-3 rounded-xl text-left transition-colors ${
+              className={`w-full p-3 rounded-lg text-left transition-colors ${
                 selected === option
-                  ? "bg-primary text-white"
-                  : "bg-[#0A0E1A] text-white hover:bg-white/10"
+                  ? "bg-[#38bdf8] text-black"
+                  : "bg-[#061525] text-white hover:bg-[#082035]"
               }`}
             >
               {option}
@@ -863,14 +679,14 @@ function DatePickerModal({ month, day, year, onSave, onClose, isSaving }: {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
+        className="bg-[#0b2338] rounded-lg w-full max-w-sm p-6 border border-[#173653]"
       >
         <h2 className="text-white text-xl font-bold mb-4">Date of Birth</h2>
         <div className="grid grid-cols-3 gap-2 mb-4">
           <select
             value={m}
             onChange={(e) => setM(Number(e.target.value))}
-            className="bg-[#0A0E1A] border border-white/20 rounded-xl px-2 py-3 text-white text-sm"
+            className="bg-[#061525] border border-[#173653] rounded-lg px-2 py-3 text-white text-sm"
           >
             {months.map((month, i) => (
               <option key={month} value={i + 1}>{month}</option>
@@ -879,7 +695,7 @@ function DatePickerModal({ month, day, year, onSave, onClose, isSaving }: {
           <select
             value={d}
             onChange={(e) => setD(Number(e.target.value))}
-            className="bg-[#0A0E1A] border border-white/20 rounded-xl px-2 py-3 text-white text-sm"
+            className="bg-[#061525] border border-[#173653] rounded-lg px-2 py-3 text-white text-sm"
           >
             {Array.from({ length: 31 }, (_, i) => (
               <option key={i + 1} value={i + 1}>{i + 1}</option>
@@ -888,7 +704,7 @@ function DatePickerModal({ month, day, year, onSave, onClose, isSaving }: {
           <select
             value={y}
             onChange={(e) => setY(Number(e.target.value))}
-            className="bg-[#0A0E1A] border border-white/20 rounded-xl px-2 py-3 text-white text-sm"
+            className="bg-[#061525] border border-[#173653] rounded-lg px-2 py-3 text-white text-sm"
           >
             {Array.from({ length: 100 }, (_, i) => (
               <option key={2024 - i} value={2024 - i}>{2024 - i}</option>
@@ -899,14 +715,14 @@ function DatePickerModal({ month, day, year, onSave, onClose, isSaving }: {
           <Button
             onClick={onClose}
             variant="outline"
-            className="flex-1 border-white/20 text-white hover:bg-white/10"
+            className="flex-1 border-[#173653] text-white hover:bg-[#082035]"
           >
             Cancel
           </Button>
           <Button
             onClick={() => onSave(m, d, y)}
             disabled={isSaving}
-            className="flex-1 bg-primary hover:bg-primary/90 text-white"
+            className="flex-1 bg-[#38bdf8] hover:bg-[#0284c7] text-black"
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
           </Button>
@@ -942,14 +758,14 @@ function TimePickerModal({ hour, minute, period, onSave, onClose, isSaving }: {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.9, y: 20 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
+        className="bg-[#0b2338] rounded-lg w-full max-w-sm p-6 border border-[#173653]"
       >
         <h2 className="text-white text-xl font-bold mb-4">Time of Birth</h2>
         <div className="grid grid-cols-3 gap-2 mb-4">
           <select
             value={h}
             onChange={(e) => setH(Number(e.target.value))}
-            className="bg-[#0A0E1A] border border-white/20 rounded-xl px-2 py-3 text-white text-sm"
+            className="bg-[#061525] border border-[#173653] rounded-lg px-2 py-3 text-white text-sm"
           >
             {Array.from({ length: 12 }, (_, i) => (
               <option key={i + 1} value={i + 1}>{i + 1}</option>
@@ -958,7 +774,7 @@ function TimePickerModal({ hour, minute, period, onSave, onClose, isSaving }: {
           <select
             value={m}
             onChange={(e) => setM(Number(e.target.value))}
-            className="bg-[#0A0E1A] border border-white/20 rounded-xl px-2 py-3 text-white text-sm"
+            className="bg-[#061525] border border-[#173653] rounded-lg px-2 py-3 text-white text-sm"
           >
             {Array.from({ length: 60 }, (_, i) => (
               <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
@@ -967,7 +783,7 @@ function TimePickerModal({ hour, minute, period, onSave, onClose, isSaving }: {
           <select
             value={p}
             onChange={(e) => setP(e.target.value)}
-            className="bg-[#0A0E1A] border border-white/20 rounded-xl px-2 py-3 text-white text-sm"
+            className="bg-[#061525] border border-[#173653] rounded-lg px-2 py-3 text-white text-sm"
           >
             <option value="AM">AM</option>
             <option value="PM">PM</option>
@@ -977,14 +793,14 @@ function TimePickerModal({ hour, minute, period, onSave, onClose, isSaving }: {
           <Button
             onClick={onClose}
             variant="outline"
-            className="flex-1 border-white/20 text-white hover:bg-white/10"
+            className="flex-1 border-[#173653] text-white hover:bg-[#082035]"
           >
             Cancel
           </Button>
           <Button
             onClick={() => onSave(h, m, p)}
             disabled={isSaving}
-            className="flex-1 bg-primary hover:bg-primary/90 text-white"
+            className="flex-1 bg-[#38bdf8] hover:bg-[#0284c7] text-black"
           >
             {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Save"}
           </Button>

@@ -2,10 +2,76 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getStripeClient } from "@/lib/stripe";
 import { fulfillStripePayment, fulfillStripeSession, markStripePaymentStatus } from "@/lib/payment-fulfillment";
+import {
+  activateSubscriptionAllReports,
+  markSubscriptionCanceledOrLocked,
+  markSubscriptionLocked,
+  updateTrialSubscriptionStatus,
+} from "@/lib/report-entitlements";
 
 function getIntentCustomerEmail(intent: Stripe.PaymentIntent): string | null {
   const fromMetadata = intent.metadata?.email || intent.metadata?.customer_email;
   return intent.receipt_email || fromMetadata || null;
+}
+
+function dateFromUnix(value: number | null | undefined): Date | null {
+  return value ? new Date(value * 1000) : null;
+}
+
+function subscriptionUnix(subscription: Stripe.Subscription, key: string): number | null {
+  const direct = (subscription as any)[key];
+  if (typeof direct === "number") return direct;
+
+  const firstItem = (subscription as any).items?.data?.[0];
+  const fromItem = firstItem?.[key];
+  return typeof fromItem === "number" ? fromItem : null;
+}
+
+function getSubscriptionId(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && "id" in value && typeof (value as { id?: unknown }).id === "string") {
+    return (value as { id: string }).id;
+  }
+  return null;
+}
+
+function getPreserveAccessUntil(subscription: Stripe.Subscription): Date | null {
+  const candidates = [
+    subscriptionUnix(subscription, "trial_end"),
+    subscriptionUnix(subscription, "current_period_end"),
+  ]
+    .filter((value): value is number => typeof value === "number" && value > 0)
+    .map((value) => new Date(value * 1000));
+
+  if (candidates.length === 0) return null;
+
+  return candidates.reduce((latest, candidate) => (candidate > latest ? candidate : latest));
+}
+
+async function handleSubscriptionInvoiceSucceeded(invoice: Stripe.Invoice) {
+  const stripe = getStripeClient();
+  const subscriptionId = getSubscriptionId((invoice as any).subscription);
+  if (!subscriptionId) return;
+
+  const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+  const metadata = subscription.metadata || {};
+  const userId = metadata.userId;
+  if (!userId) return;
+
+  const amountPaid = invoice.amount_paid || 0;
+  const isMonthlyRenewal = amountPaid >= 900 && subscription.status === "active";
+  if (!isMonthlyRenewal) return;
+
+  await activateSubscriptionAllReports({
+    userId,
+    email: metadata.email || invoice.customer_email || null,
+    stripeCustomerId: typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id || null,
+    stripeSubscriptionId: subscription.id,
+    currentPeriodStart: dateFromUnix(subscriptionUnix(subscription, "current_period_start")),
+    currentPeriodEnd: dateFromUnix(subscriptionUnix(subscription, "current_period_end")),
+    cancelAtPeriodEnd: subscription.cancel_at_period_end,
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -85,6 +151,73 @@ export async function POST(request: NextRequest) {
           amount: intent.amount || 0,
           currency: (intent.currency || "USD").toUpperCase(),
           paymentStatus: "failed",
+        });
+        break;
+      }
+
+      case "invoice.payment_succeeded": {
+        const invoice = event.data.object as Stripe.Invoice;
+        await handleSubscriptionInvoiceSucceeded(invoice);
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        const invoice = event.data.object as Stripe.Invoice;
+        const subscriptionId = getSubscriptionId((invoice as any).subscription);
+        if (subscriptionId) {
+          await markSubscriptionLocked({
+            stripeSubscriptionId: subscriptionId,
+            reason: "monthly_payment_failed",
+          });
+        }
+        break;
+      }
+
+      case "customer.subscription.updated": {
+        const subscription = event.data.object as Stripe.Subscription;
+
+        if (subscription.status === "trialing") {
+          await updateTrialSubscriptionStatus({
+            stripeSubscriptionId: subscription.id,
+            status: "trialing",
+            trialEndsAt: dateFromUnix(subscriptionUnix(subscription, "trial_end")),
+            currentPeriodEnd: dateFromUnix(subscriptionUnix(subscription, "current_period_end")),
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+          });
+        } else if (subscription.status === "active" && subscription.metadata?.userId) {
+          await activateSubscriptionAllReports({
+            userId: subscription.metadata.userId,
+            email: subscription.metadata.email || null,
+            stripeCustomerId:
+              typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id || null,
+            stripeSubscriptionId: subscription.id,
+            currentPeriodStart: dateFromUnix(subscriptionUnix(subscription, "current_period_start")),
+            currentPeriodEnd: dateFromUnix(subscriptionUnix(subscription, "current_period_end")),
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+          });
+        } else if (subscription.status === "canceled") {
+          await markSubscriptionCanceledOrLocked({
+            stripeSubscriptionId: subscription.id,
+            reason: "subscription_canceled",
+            preserveAccessUntil: getPreserveAccessUntil(subscription),
+            cancelAtPeriodEnd: subscription.cancel_at_period_end,
+          });
+        } else if ([ "past_due", "unpaid", "incomplete_expired" ].includes(subscription.status)) {
+          await markSubscriptionLocked({
+            stripeSubscriptionId: subscription.id,
+            reason: `subscription_${subscription.status}`,
+          });
+        }
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object as Stripe.Subscription;
+        await markSubscriptionCanceledOrLocked({
+          stripeSubscriptionId: subscription.id,
+          reason: "subscription_deleted",
+          preserveAccessUntil: getPreserveAccessUntil(subscription),
+          cancelAtPeriodEnd: subscription.cancel_at_period_end,
         });
         break;
       }

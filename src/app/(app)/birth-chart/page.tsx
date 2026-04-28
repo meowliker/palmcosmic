@@ -5,6 +5,8 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, Sun, Moon, RefreshCw, Star, AlertTriangle, Heart } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import ReportCTA from "@/components/ReportCTA";
+import { LocationInput } from "@/components/onboarding/LocationInput";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { supabase } from "@/lib/supabase";
 
@@ -12,6 +14,48 @@ const MONTH_MAP: Record<string, number> = {
   January: 1, February: 2, March: 3, April: 4, May: 5, June: 6,
   July: 7, August: 8, September: 9, October: 10, November: 11, December: 12,
 };
+const MONTH_NAMES = Object.keys(MONTH_MAP);
+
+function getMonthNumber(month: string): number {
+  const trimmed = String(month || "").trim();
+  const direct = MONTH_MAP[trimmed];
+  if (direct) return direct;
+
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric) && numeric >= 1 && numeric <= 12) {
+    return numeric;
+  }
+
+  return 1;
+}
+
+function getDisplayMonth(month: string): string {
+  const monthNumber = getMonthNumber(month);
+  return MONTH_NAMES[monthNumber - 1] || String(month || "January");
+}
+
+function hasRenderableChartData(data: any): boolean {
+  if (!data) return false;
+
+  const hasMainChart = typeof data.chart?.output === "string" && data.chart.output.trim().length > 0;
+  const hasNavamsa = typeof data.navamsaChart?.output === "string" && data.navamsaChart.output.trim().length > 0;
+  const hasKundli = !!data.kundli;
+
+  return hasMainChart || hasNavamsa || hasKundli;
+}
+
+function getAscendantLagna(data: any): string {
+  if (!data) return "";
+  const fromPlanetPosition = Array.isArray(data?.planet_positions)
+    ? data.planet_positions.find((p: any) => String(p?.name || "").toLowerCase() === "ascendant")?.rasi?.name
+    : "";
+  return (
+    fromPlanetPosition ||
+    data?.planets?.Ascendant?.zodiac_sign ||
+    data?.kundli?.nakshatra_details?.zodiac?.name ||
+    ""
+  );
+}
 
 export default function BirthChartPage() {
   const router = useRouter();
@@ -36,13 +80,15 @@ export default function BirthChartPage() {
     birthMonth: storeBirthMonth, birthDay: storeBirthDay, birthYear: storeBirthYear, 
     birthHour: storeBirthHour, birthMinute: storeBirthMinute, birthPeriod: storeBirthPeriod, 
     birthPlace: storeBirthPlace, knowsBirthTime: storeKnowsBirthTime,
-    setBirthDate, setBirthTime, setBirthPlace
+    setBirthDate, setBirthTime, setBirthPlace, setKnowsBirthTime
   } = useOnboardingStore();
   
   const isMissingRequiredData = !birthMonth || !birthDay || !birthYear;
+  const needsBirthTime = !knowsBirthTime;
+  const ascendantLagna = getAscendantLagna(chartData);
 
   const getBirthDate = () => {
-    const month = MONTH_MAP[birthMonth] || 1;
+    const month = getMonthNumber(birthMonth);
     const day = parseInt(birthDay) || 1;
     const year = parseInt(birthYear) || 2000;
     return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -63,6 +109,33 @@ export default function BirthChartPage() {
     return `chart_${birthDate}_${birthTime}_${birthPlace || 'unknown'}`.replace(/[^a-zA-Z0-9_]/g, '_');
   };
 
+  const getStoredUserId = () =>
+    localStorage.getItem("astrorekha_user_id")?.trim() ||
+    localStorage.getItem("palmcosmic_user_id")?.trim() ||
+    localStorage.getItem("astrorekha_anon_id")?.trim() ||
+    localStorage.getItem("palmcosmic_anon_id")?.trim() ||
+    "";
+
+  const linkBirthChartToCurrentUser = async (birthChartId: string) => {
+    const userId = getStoredUserId();
+    if (!userId || !birthChartId) return;
+
+    const nowIso = new Date().toISOString();
+    try {
+      await supabase.from("birth_chart_user_links").upsert(
+        {
+          user_id: userId,
+          birth_chart_id: birthChartId,
+          updated_at: nowIso,
+          last_accessed_at: nowIso,
+        },
+        { onConflict: "user_id,birth_chart_id" }
+      );
+    } catch (error) {
+      console.error("Failed to link birth chart to user:", error);
+    }
+  };
+
   // Load user data from Supabase first, then fallback to onboarding store
   useEffect(() => {
     loadUserBirthData();
@@ -70,9 +143,34 @@ export default function BirthChartPage() {
 
   const loadUserBirthData = async () => {
     try {
-      const userId = localStorage.getItem("astrorekha_user_id");
+      const userId = getStoredUserId();
       if (userId) {
-        const { data: dbUser } = await supabase.from("users").select("birth_month, birth_day, birth_year, birth_hour, birth_minute, birth_period, birth_place").eq("id", userId).single();
+        const { data: profileData } = await supabase
+          .from("user_profiles")
+          .select("birth_month, birth_day, birth_year, birth_hour, birth_minute, birth_period, birth_place, knows_birth_time")
+          .eq("id", userId)
+          .single();
+
+        if (profileData && profileData.birth_month && profileData.birth_day && profileData.birth_year) {
+          setBirthMonthState(String(profileData.birth_month));
+          setBirthDayState(String(profileData.birth_day));
+          setBirthYearState(String(profileData.birth_year));
+          setBirthHourState(profileData.birth_hour || "12");
+          setBirthMinuteState(profileData.birth_minute || "00");
+          setBirthPeriodState(profileData.birth_period || "PM");
+          setBirthPlaceState(profileData.birth_place || "");
+          setKnowsBirthTimeState(profileData.knows_birth_time ?? true);
+          setUserDataLoaded(true);
+          return;
+        }
+
+        // Legacy fallback for environments where birth fields still exist in users
+        const { data: dbUser } = await supabase
+          .from("users")
+          .select("birth_month, birth_day, birth_year, birth_hour, birth_minute, birth_period, birth_place")
+          .eq("id", userId)
+          .single();
+
         if (dbUser && dbUser.birth_month && dbUser.birth_day && dbUser.birth_year) {
           setBirthMonthState(String(dbUser.birth_month));
           setBirthDayState(String(dbUser.birth_day));
@@ -81,6 +179,7 @@ export default function BirthChartPage() {
           setBirthMinuteState(dbUser.birth_minute || "00");
           setBirthPeriodState(dbUser.birth_period || "PM");
           setBirthPlaceState(dbUser.birth_place || "");
+          setKnowsBirthTimeState(true);
           setUserDataLoaded(true);
           return;
         }
@@ -107,23 +206,94 @@ export default function BirthChartPage() {
 
   useEffect(() => {
     if (!userDataLoaded) return;
-    if (isMissingRequiredData) {
+    if (isMissingRequiredData || needsBirthTime) {
       setShowMissingDataForm(true);
       setLoading(false);
       return;
     }
     loadOrGenerateChart();
-  }, [userDataLoaded, isMissingRequiredData]);
+  }, [userDataLoaded, isMissingRequiredData, needsBirthTime]);
+
+  const saveBirthTimeAndContinue = async () => {
+    setBirthTime(birthHour, birthMinute, birthPeriod as "AM" | "PM");
+    setKnowsBirthTime(true);
+    setKnowsBirthTimeState(true);
+
+    const userId = getStoredUserId();
+    if (userId) {
+      const birthPayload = {
+        birth_month: birthMonth,
+        birth_day: birthDay,
+        birth_year: birthYear,
+        birth_hour: birthHour,
+        birth_minute: birthMinute,
+        birth_period: birthPeriod,
+        birth_place: birthPlace,
+        knows_birth_time: true,
+        updated_at: new Date().toISOString(),
+      };
+
+      await Promise.allSettled([
+        supabase.from("user_profiles").update(birthPayload).eq("id", userId),
+        supabase.from("users").update(birthPayload).eq("id", userId),
+      ]);
+    }
+
+    setShowMissingDataForm(false);
+    setLoading(true);
+  };
+
+  const handleBirthPlaceChange = (value: string) => {
+    setBirthPlaceState(value);
+    setBirthPlace(value);
+  };
 
   const loadOrGenerateChart = async () => {
     setLoading(true);
     setError(null);
     const cacheKey = `${getUserChartId()}_${chartType}`;
+    const userId = getStoredUserId();
 
     try {
+      if (userId) {
+        const { data: linkedBirthChart } = await supabase
+          .from("birth_chart_user_links")
+          .select("birth_chart_id")
+          .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (linkedBirthChart?.birth_chart_id) {
+          const { data: linkedCached } = await supabase
+            .from("birth_charts")
+            .select("id, data")
+            .eq("id", linkedBirthChart.birth_chart_id)
+            .maybeSingle();
+
+          const linkedData = linkedCached?.data;
+          const linkedHasAscendantPlanetSource =
+            Array.isArray(linkedData?.planet_positions) &&
+            linkedData.planet_positions.some((p: any) => String(p?.name || "").toLowerCase() === "ascendant");
+
+          if (linkedData && hasRenderableChartData(linkedData) && linkedHasAscendantPlanetSource) {
+            setChartData(linkedData);
+            await linkBirthChartToCurrentUser(linkedBirthChart.birth_chart_id);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
       const { data: cached } = await supabase.from("birth_charts").select("data").eq("id", cacheKey).single();
-      if (cached?.data) {
+      const cachedData = cached?.data;
+      const hasAscendantPlanetSource =
+        Array.isArray(cachedData?.planet_positions) &&
+        cachedData.planet_positions.some((p: any) => String(p?.name || "").toLowerCase() === "ascendant");
+
+      if (cachedData && hasRenderableChartData(cachedData) && hasAscendantPlanetSource) {
         setChartData(cached.data);
+        await linkBirthChartToCurrentUser(cacheKey);
         setLoading(false);
         return;
       }
@@ -175,6 +345,12 @@ export default function BirthChartPage() {
       }
       
       if (result.success && result.data) {
+        if (!hasRenderableChartData(result.data)) {
+          setError("Birth chart data is currently unavailable. Please try again in a few minutes.");
+          setLoading(false);
+          return;
+        }
+
         const chartDataWithDetails = {
           ...result.data,
           userBirthDetails: { date: birthDate, time: birthTime, place: birthPlace || "Unknown", knowsTime: knowsBirthTime },
@@ -182,7 +358,9 @@ export default function BirthChartPage() {
         };
         setChartData(chartDataWithDetails);
         try {
-          await supabase.from("birth_charts").upsert({ id: cacheKey, data: chartDataWithDetails, cached_at: new Date().toISOString() }, { onConflict: "id" });
+          const nowIso = new Date().toISOString();
+          await supabase.from("birth_charts").upsert({ id: cacheKey, data: chartDataWithDetails, cached_at: nowIso }, { onConflict: "id" });
+          await linkBirthChartToCurrentUser(cacheKey);
         } catch (cacheErr) {
           console.error("Failed to cache chart:", cacheErr);
         }
@@ -196,10 +374,10 @@ export default function BirthChartPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm border-b border-white/10">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center gap-4 px-4 py-3">
             <button onClick={() => router.push("/reports")} className="w-10 h-10 flex items-center justify-center">
               <ArrowLeft className="w-5 h-5 text-white" />
@@ -213,35 +391,90 @@ export default function BirthChartPage() {
             {/* Missing Data Form */}
             {showMissingDataForm && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                <div className="bg-primary/10 border border-primary/30 rounded-2xl p-6 text-center">
-                  <h2 className="text-white font-semibold text-lg mb-2">Birth Details Required</h2>
-                  <p className="text-white/60 text-sm">To generate your personalized birth chart, we need your birth details.</p>
+                <div className="bg-[#0b2338] border border-[#173653] rounded-2xl p-6 text-center">
+                  <h2 className="text-white font-semibold text-lg mb-2">
+                    {needsBirthTime ? "Birth Time Required" : "Birth Details Required"}
+                  </h2>
+                  <p className="text-white/60 text-sm">
+                    {needsBirthTime
+                      ? "A detailed birth chart needs your birth time. Enter it below to generate the report."
+                      : "To generate your personalized birth chart, we need your birth details."}
+                  </p>
                 </div>
-                <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10 space-y-4">
-                  <div>
-                    <label className="text-white/60 text-sm block mb-2">Birth Date</label>
-                    <div className="grid grid-cols-3 gap-2">
-                      <select value={birthMonth} onChange={(e) => setBirthDate(e.target.value, birthDay, birthYear)} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
-                        {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => <option key={m} value={m}>{m}</option>)}
-                      </select>
-                      <select value={birthDay} onChange={(e) => setBirthDate(birthMonth, e.target.value, birthYear)} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
-                        {Array.from({length: 31}, (_, i) => i + 1).map(d => <option key={d} value={String(d)}>{d}</option>)}
-                      </select>
-                      <select value={birthYear} onChange={(e) => setBirthDate(birthMonth, birthDay, e.target.value)} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
-                        {Array.from({length: 100}, (_, i) => 2024 - i).map(y => <option key={y} value={String(y)}>{y}</option>)}
-                      </select>
+                <div className="bg-[#0b2338] rounded-2xl p-4 border border-[#173653] space-y-4">
+                  {isMissingRequiredData ? (
+                    <div>
+                      <label className="text-white/60 text-sm block mb-2">Birth Date</label>
+                      <div className="grid grid-cols-3 gap-2">
+                        <select
+                          value={birthMonth}
+                          onChange={(e) => {
+                            setBirthMonthState(e.target.value);
+                            setBirthDate(e.target.value, birthDay, birthYear);
+                          }}
+                          className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
+                        >
+                          {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                        <select
+                          value={birthDay}
+                          onChange={(e) => {
+                            setBirthDayState(e.target.value);
+                            setBirthDate(birthMonth, e.target.value, birthYear);
+                          }}
+                          className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
+                        >
+                          {Array.from({length: 31}, (_, i) => i + 1).map(d => <option key={d} value={String(d)}>{d}</option>)}
+                        </select>
+                        <select
+                          value={birthYear}
+                          onChange={(e) => {
+                            setBirthYearState(e.target.value);
+                            setBirthDate(birthMonth, birthDay, e.target.value);
+                          }}
+                          className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
+                        >
+                          {Array.from({length: 100}, (_, i) => 2024 - i).map(y => <option key={y} value={String(y)}>{y}</option>)}
+                        </select>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="rounded-xl border border-[#173653] bg-[#061525] p-3">
+                      <p className="text-white/60 text-xs">Birth Date</p>
+                      <p className="text-white font-medium">{getDisplayMonth(birthMonth)} {birthDay}, {birthYear}</p>
+                    </div>
+                  )}
                   <div>
                     <label className="text-white/60 text-sm block mb-2">Birth Time</label>
                     <div className="grid grid-cols-3 gap-2">
-                      <select value={birthHour} onChange={(e) => setBirthTime(e.target.value, birthMinute, birthPeriod as "AM" | "PM")} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
+                      <select
+                        value={birthHour}
+                        onChange={(e) => {
+                          setBirthHourState(e.target.value);
+                          setBirthTime(e.target.value, birthMinute, birthPeriod as "AM" | "PM");
+                        }}
+                        className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
+                      >
                         {Array.from({length: 12}, (_, i) => i + 1).map(h => <option key={h} value={String(h)}>{h}</option>)}
                       </select>
-                      <select value={birthMinute} onChange={(e) => setBirthTime(birthHour, e.target.value, birthPeriod as "AM" | "PM")} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
+                      <select
+                        value={birthMinute}
+                        onChange={(e) => {
+                          setBirthMinuteState(e.target.value);
+                          setBirthTime(birthHour, e.target.value, birthPeriod as "AM" | "PM");
+                        }}
+                        className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
+                      >
                         {["00", "15", "30", "45"].map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
-                      <select value={birthPeriod} onChange={(e) => setBirthTime(birthHour, birthMinute, e.target.value as "AM" | "PM")} className="bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm">
+                      <select
+                        value={birthPeriod}
+                        onChange={(e) => {
+                          setBirthPeriodState(e.target.value);
+                          setBirthTime(birthHour, birthMinute, e.target.value as "AM" | "PM");
+                        }}
+                        className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
+                      >
                         <option value="AM">AM</option>
                         <option value="PM">PM</option>
                       </select>
@@ -249,10 +482,15 @@ export default function BirthChartPage() {
                   </div>
                   <div>
                     <label className="text-white/60 text-sm block mb-2">Birth Place</label>
-                    <input type="text" value={birthPlace} onChange={(e) => setBirthPlace(e.target.value)} placeholder="City, Country" className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white text-sm placeholder:text-white/40" />
+                    <LocationInput
+                      value={birthPlace}
+                      onChange={handleBirthPlaceChange}
+                      placeholder="City, Country"
+                      className="w-full bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm placeholder:text-[#6f8196]"
+                    />
                   </div>
-                  <Button onClick={() => { setShowMissingDataForm(false); setLoading(true); loadOrGenerateChart(); }} className="w-full bg-gradient-to-r from-primary to-purple-600">
-                    Generate My Birth Chart
+                  <Button onClick={() => void saveBirthTimeAndContinue()} className="w-full bg-[#38bdf8] hover:bg-[#7dd3fc] text-black [&_svg]:text-black">
+                    {needsBirthTime ? "Generate Chart" : "Generate My Birth Chart"}
                   </Button>
                 </div>
               </motion.div>
@@ -261,7 +499,7 @@ export default function BirthChartPage() {
             {/* Loading State */}
             {loading && !showMissingDataForm && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20">
-                <Loader2 className="w-12 h-12 text-primary animate-spin mb-4" />
+                <Loader2 className="w-12 h-12 text-[#38bdf8] animate-spin mb-4" />
                 <p className="text-white/60 text-center">Calculating your birth chart...</p>
               </motion.div>
             )}
@@ -272,7 +510,7 @@ export default function BirthChartPage() {
                 <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 text-center">
                   <AlertTriangle className="w-10 h-10 text-red-400 mx-auto mb-3" />
                   <p className="text-red-400 mb-4">{error}</p>
-                  <Button onClick={() => loadOrGenerateChart()} className="bg-gradient-to-r from-primary to-purple-600">
+                  <Button onClick={() => loadOrGenerateChart()} className="bg-[#38bdf8] hover:bg-[#7dd3fc] text-black [&_svg]:text-black">
                     <RefreshCw className="w-4 h-4 mr-2" /> Try Again
                   </Button>
                 </div>
@@ -283,14 +521,14 @@ export default function BirthChartPage() {
             {!loading && !error && !showMissingDataForm && chartData && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
                 {/* Birth Details */}
-                <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+                <div className="bg-[#0b2338] rounded-2xl p-4 border border-[#173653]">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-white/60">Birth Date:</span>
-                    <span className="text-white">{birthMonth} {birthDay}, {birthYear}</span>
+                    <span className="text-white">{getDisplayMonth(birthMonth)} {birthDay}, {birthYear}</span>
                   </div>
                   <div className="flex items-center justify-between text-sm mt-2">
                     <span className="text-white/60">Birth Time:</span>
-                    <span className="text-white">{knowsBirthTime ? `${birthHour}:${birthMinute} ${birthPeriod}` : "Unknown"}</span>
+                    <span className="text-white">{`${birthHour}:${birthMinute} ${birthPeriod}`}</span>
                   </div>
                   {birthPlace && (
                     <div className="flex items-center justify-between text-sm mt-2">
@@ -300,13 +538,24 @@ export default function BirthChartPage() {
                   )}
                 </div>
 
+                {!hasRenderableChartData(chartData) && (
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 text-center">
+                    <p className="text-amber-200 text-sm mb-3">
+                      Birth chart details are not available yet for these birth inputs.
+                    </p>
+                    <Button onClick={() => loadOrGenerateChart()} className="bg-[#38bdf8] hover:bg-[#7dd3fc] text-black [&_svg]:text-black">
+                      <RefreshCw className="w-4 h-4 mr-2" /> Regenerate Chart
+                    </Button>
+                  </div>
+                )}
+
                 {/* Rashi Chart (from API) */}
                 {chartData.chart?.output && (
-                  <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+                  <div className="bg-[#0b2338] rounded-2xl p-4 border border-[#173653]">
                     {chartData.chart?.output ? (
                       <div className="w-full aspect-square bg-white rounded-xl overflow-hidden flex items-center justify-center [&_svg]:w-full [&_svg]:h-full" dangerouslySetInnerHTML={{ __html: chartData.chart.output }} />
                     ) : (
-                      <div className="w-full aspect-square bg-white/5 rounded-xl flex items-center justify-center">
+                      <div className="w-full aspect-square bg-[#061525] rounded-xl flex items-center justify-center border border-[#173653]">
                         <p className="text-white/40 text-sm">Chart not available</p>
                       </div>
                     )}
@@ -315,9 +564,9 @@ export default function BirthChartPage() {
 
                 {/* Navamsa Chart (from API - Vedic only) */}
                 {chartData.chartType === "vedic" && chartData.navamsaChart?.output && (
-                  <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+                  <div className="bg-[#0b2338] rounded-2xl p-4 border border-[#173653]">
                     <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                      <Moon className="w-5 h-5 text-blue-300" />
+                      <Moon className="w-5 h-5 text-[#7dd3fc]" />
                       Navamsa Chart (D9)
                     </h3>
                     <div className="w-full aspect-square bg-white rounded-xl overflow-hidden flex items-center justify-center [&_svg]:w-full [&_svg]:h-full" dangerouslySetInnerHTML={{ __html: chartData.navamsaChart.output }} />
@@ -326,41 +575,41 @@ export default function BirthChartPage() {
 
                 {/* Nakshatra Details (from API) */}
                 {chartData.kundli?.nakshatra_details && (
-                  <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+                  <div className="bg-[#0b2338] rounded-2xl p-4 border border-[#173653]">
                     <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
                       <Star className="w-5 h-5 text-yellow-400" />
                       Nakshatra Details
                     </h3>
                     <div className="space-y-3">
                       {chartData.kundli.nakshatra_details.nakshatra && (
-                        <div className="bg-white/5 rounded-xl p-3">
+                        <div className="bg-[#061525] rounded-xl p-3 border border-[#173653]">
                           <p className="text-white/60 text-xs">Nakshatra</p>
                           <p className="text-white font-medium">{chartData.kundli.nakshatra_details.nakshatra.name}</p>
                           <p className="text-white/50 text-sm">Pada {chartData.kundli.nakshatra_details.nakshatra.pada} • Lord: {chartData.kundli.nakshatra_details.nakshatra.lord?.name}</p>
                         </div>
                       )}
                       {chartData.kundli.nakshatra_details.chandra_rasi && (
-                        <div className="bg-white/5 rounded-xl p-3">
+                        <div className="bg-[#061525] rounded-xl p-3 border border-[#173653]">
                           <p className="text-white/60 text-xs">Moon Sign (Chandra Rasi)</p>
                           <p className="text-white font-medium">{chartData.kundli.nakshatra_details.chandra_rasi.name}</p>
                           <p className="text-white/50 text-sm">Lord: {chartData.kundli.nakshatra_details.chandra_rasi.lord?.name}</p>
                         </div>
                       )}
                       {chartData.kundli.nakshatra_details.soorya_rasi && (
-                        <div className="bg-white/5 rounded-xl p-3">
+                        <div className="bg-[#061525] rounded-xl p-3 border border-[#173653]">
                           <p className="text-white/60 text-xs">Sun Sign (Soorya Rasi)</p>
                           <p className="text-white font-medium">{chartData.kundli.nakshatra_details.soorya_rasi.name}</p>
                           <p className="text-white/50 text-sm">Lord: {chartData.kundli.nakshatra_details.soorya_rasi.lord?.name}</p>
                         </div>
                       )}
-                      {chartData.kundli.nakshatra_details.zodiac && (
-                        <div className="bg-white/5 rounded-xl p-3">
+                      {ascendantLagna && (
+                        <div className="bg-[#061525] rounded-xl p-3 border border-[#173653]">
                           <p className="text-white/60 text-xs">Ascendant (Lagna)</p>
-                          <p className="text-white font-medium">{chartData.kundli.nakshatra_details.zodiac.name}</p>
+                          <p className="text-white font-medium">{ascendantLagna}</p>
                         </div>
                       )}
                       {chartData.kundli.nakshatra_details.additional_info && (
-                        <div className="bg-white/5 rounded-xl p-3">
+                        <div className="bg-[#061525] rounded-xl p-3 border border-[#173653]">
                           <p className="text-white/60 text-xs mb-2">Additional Info</p>
                           <div className="grid grid-cols-2 gap-2 text-sm">
                             <div><span className="text-white/50">Deity:</span> <span className="text-white">{chartData.kundli.nakshatra_details.additional_info.deity}</span></div>
@@ -394,14 +643,14 @@ export default function BirthChartPage() {
 
                 {/* Yoga Details (from API) */}
                 {chartData.kundli?.yoga_details && chartData.kundli.yoga_details.length > 0 && (
-                  <div className="bg-[#1A1F2E] rounded-2xl p-4 border border-white/10">
+                  <div className="bg-[#0b2338] rounded-2xl p-4 border border-[#173653]">
                     <h3 className="text-white font-semibold mb-3 flex items-center gap-2">
-                      <Star className="w-5 h-5 text-purple-400" />
+                      <Star className="w-5 h-5 text-[#38bdf8]" />
                       Yogas in Your Chart
                     </h3>
                     <div className="space-y-2">
                       {chartData.kundli.yoga_details.map((yoga: any, idx: number) => (
-                        <div key={idx} className="bg-white/5 rounded-xl p-3">
+                        <div key={idx} className="bg-[#061525] rounded-xl p-3 border border-[#173653]">
                           <p className="text-white font-medium">{yoga.name}</p>
                           <p className="text-white/50 text-sm">{yoga.description}</p>
                         </div>
@@ -409,6 +658,8 @@ export default function BirthChartPage() {
                     </div>
                   </div>
                 )}
+
+                <ReportCTA />
               </motion.div>
             )}
           </div>

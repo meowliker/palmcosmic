@@ -7,17 +7,32 @@ declare global {
   }
 }
 
+type PixelOptions = {
+  eventID?: string;
+};
+
 /**
  * Track a standard event with Meta Pixel.
  * Retries up to 10 times (500ms apart) if fbq isn't loaded yet,
- * which commonly happens after returning from Stripe checkout.
+ * which commonly happens after returning from Razorpay checkout.
  */
-export const trackPixelEvent = (eventName: string, params?: Record<string, any>) => {
+export const trackPixelEvent = (
+  eventName: string,
+  params?: Record<string, any>,
+  options?: PixelOptions
+) => {
   if (typeof window === "undefined") return;
 
   const fire = (attempt: number) => {
     if (window.fbq) {
-      window.fbq("track", eventName, params);
+      const eventId = options?.eventID || params?.event_id;
+      const cleanParams = { ...(params || {}) };
+      delete cleanParams.event_id;
+      if (eventId) {
+        window.fbq("track", eventName, cleanParams, { eventID: eventId });
+      } else {
+        window.fbq("track", eventName, cleanParams);
+      }
     } else if (attempt < 10) {
       setTimeout(() => fire(attempt + 1), 500);
     } else {
@@ -45,120 +60,112 @@ export const trackCustomEvent = (eventName: string, params?: Record<string, any>
   fire(0);
 };
 
-function normalizeUsdValue(value: number): number {
-  if (!Number.isFinite(value)) return 0;
-  if (Number.isInteger(value) && value >= 100) {
-    return Number((value / 100).toFixed(2));
-  }
-  return Number(value.toFixed(2));
-}
-
 // ============================================
 // Standard Meta Pixel Events for PalmCosmic
 // ============================================
 
 export const pixelEvents = {
   // --- Onboarding Funnel ---
-  
+
   /** User lands on the app/starts onboarding */
-  lead: () => trackPixelEvent("Lead"),
-  
+  lead: (eventId?: string) => trackPixelEvent("Lead", {}, eventId ? { eventID: eventId } : undefined),
+
   /** User shows interest (email submitted, "Get My Prediction" clicked) */
-  addToWishlist: (contentName: string = "Prediction Report") => 
-    trackPixelEvent("AddToWishlist", { 
+  addToWishlist: (contentName: string = "Prediction Report") =>
+    trackPixelEvent("AddToWishlist", {
       content_name: contentName,
       content_category: "Astrology Report"
     }),
-  
+
   /** User clicks "Start Trial" button (before payment) */
-  addToCart: (value: number, contentName: string) => 
-    trackPixelEvent("AddToCart", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+  addToCart: (value: number, contentName: string) =>
+    trackPixelEvent("AddToCart", {
+      value,
+      currency: "INR",
       content_name: contentName,
       content_type: "product"
     }),
-  
+
   /** User completes sign-up (creates account) */
-  completeRegistration: (email?: string) => 
-    trackPixelEvent("CompleteRegistration", { 
+  completeRegistration: (email?: string) =>
+    trackPixelEvent("CompleteRegistration", {
       content_name: "PalmCosmic Account",
       ...(email && { email })
     }),
-  
+
   // --- One-Time Purchases ---
-  
+
   /** User starts a purchase flow */
-  startTrial: (value: number = 0) => 
-    trackPixelEvent("StartTrial", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+  startTrial: (value: number = 0) =>
+    trackPixelEvent("StartTrial", {
+      value,
+      currency: "INR",
       content_name: "PalmCosmic Bundle"
     }),
-  
+
   /** User completes a bundle purchase */
-  subscribe: (value: number, plan: string) => 
-    trackPixelEvent("Subscribe", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+  subscribe: (value: number, plan: string) =>
+    trackPixelEvent("Subscribe", {
+      value,
+      currency: "INR",
       content_name: plan,
-      predicted_ltv: normalizeUsdValue(value)
+      predicted_ltv: value
     }),
-  
+
   // --- Purchases ---
-  
+
   /** User initiates checkout */
-  initiateCheckout: (value: number, items: string[]) => 
-    trackPixelEvent("InitiateCheckout", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+  initiateCheckout: (value: number, items: string[], eventId?: string) =>
+    trackPixelEvent("InitiateCheckout", {
+      value,
+      currency: "INR",
       content_ids: items,
       num_items: items.length
-    }),
-  
-  /** User adds payment info (redirected to checkout) */
-  addPaymentInfo: (value: number, contentName: string) => 
-    trackPixelEvent("AddPaymentInfo", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+    }, eventId ? { eventID: eventId } : undefined),
+
+  /** User adds payment info (redirected to Razorpay checkout) */
+  addPaymentInfo: (value: number, contentName: string) =>
+    trackPixelEvent("AddPaymentInfo", {
+      value,
+      currency: "INR",
       content_name: contentName,
       content_category: "Bundle"
     }),
-  
+
   /** User completes a purchase */
-  purchase: (value: number, productId: string, productName: string) => 
-    trackPixelEvent("Purchase", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+  purchase: (value: number, productId: string, productName: string, eventId?: string) =>
+    trackPixelEvent("Purchase", {
+      value,
+      currency: "INR",
       content_ids: [productId],
       content_name: productName,
       content_type: "product"
-    }),
-  
+    }, eventId ? { eventID: eventId } : undefined),
+
   /** User buys coins */
-  purchaseCoins: (value: number, coinAmount: number) => 
-    trackPixelEvent("Purchase", { 
-      value: normalizeUsdValue(value), 
-      currency: "USD",
+  purchaseCoins: (value: number, coinAmount: number) =>
+    trackPixelEvent("Purchase", {
+      value,
+      currency: "INR",
       content_ids: [`coins-${coinAmount}`],
       content_name: `${coinAmount} Coins`,
       content_type: "product"
     }),
-  
+
   // --- Engagement ---
-  
+
   /** User views a specific content/feature */
-  viewContent: (contentName: string, contentType: string) => 
-    trackPixelEvent("ViewContent", { 
+  viewContent: (contentName: string, contentType: string) =>
+    trackPixelEvent("ViewContent", {
       content_name: contentName,
       content_type: contentType
     }),
-  
+
   /** User uses chat (contact) */
   contact: () => trackPixelEvent("Contact"),
-  
+
   /** User searches */
-  search: (query: string) => 
+  search: (query: string) =>
     trackPixelEvent("Search", { search_string: query }),
 };
 
@@ -168,26 +175,26 @@ export const pixelEvents = {
 
 export const customEvents = {
   // Onboarding step tracking
-  onboardingStep: (step: number, stepName: string) => 
+  onboardingStep: (step: number, stepName: string) =>
     trackCustomEvent("OnboardingStep", { step, step_name: stepName }),
-  
+
   // Palm scan completed
-  palmScanComplete: () => 
+  palmScanComplete: () =>
     trackCustomEvent("PalmScanComplete"),
-  
+
   // Birth chart viewed
-  birthChartViewed: () => 
+  birthChartViewed: () =>
     trackCustomEvent("BirthChartViewed"),
-  
+
   // Horoscope viewed
-  horoscopeViewed: (sign: string, period: string) => 
+  horoscopeViewed: (sign: string, period: string) =>
     trackCustomEvent("HoroscopeViewed", { sign, period }),
-  
+
   // Chat message sent
-  chatMessageSent: () => 
+  chatMessageSent: () =>
     trackCustomEvent("ChatMessageSent"),
-  
+
   // Feature unlocked
-  featureUnlocked: (feature: string) => 
+  featureUnlocked: (feature: string) =>
     trackCustomEvent("FeatureUnlocked", { feature }),
 };

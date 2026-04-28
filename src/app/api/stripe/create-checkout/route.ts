@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getStripeClient } from "@/lib/stripe";
 import { getPricing, getBundleById, getCoinPackageById, getReportById, getUpsellById } from "@/lib/pricing";
 import { markStripePaymentStatus } from "@/lib/payment-fulfillment";
+import { sendMetaConversionEvent } from "@/lib/meta-conversions";
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -77,11 +78,12 @@ export async function POST(request: NextRequest) {
     if (type === "report") {
       const report = getReportById(pricing, packageId || "");
       if (!report) return NextResponse.json({ error: "Invalid report" }, { status: 400 });
-      amount = report.price;
+      amount = 197;
       productName = report.name;
       metadata.packageId = report.id;
       metadata.feature = report.feature;
       metadata.features = report.feature;
+      metadata.reportPriceCents = "197";
     }
 
     if (type === "coins") {
@@ -175,9 +177,28 @@ export async function POST(request: NextRequest) {
       paymentStatus: "created",
     });
 
+    await sendMetaConversionEvent({
+      eventName: "InitiateCheckout",
+      eventId: `initiate_checkout_${session.id}`,
+      request,
+      email: normalizedEmail || null,
+      userId: userId || null,
+      value: amount / 100,
+      currency: "USD",
+      contentName: productName,
+      contentIds: [metadata.bundleId || metadata.packageId || metadata.feature || type],
+      contentType: "product",
+      customData: {
+        payment_provider: "stripe",
+        purchase_type: type,
+        stripe_session_id: session.id,
+      },
+    });
+
     return NextResponse.json({
       success: true,
       sessionId: session.id,
+      metaEventId: `initiate_checkout_${session.id}`,
       url: session.url,
       amount,
       currency: "USD",

@@ -1,0 +1,32 @@
+name: Sync Soulmate Sketches
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-soulmate-sketches
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Call soulmate sketch sync endpoint
+        env:
+          SOULMATE_SKETCH_SYNC_URL: ${{ secrets.SOULMATE_SKETCH_SYNC_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$SOULMATE_SKETCH_SYNC_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Missing required secrets: SOULMATE_SKETCH_SYNC_URL and/or CRON_SECRET"
+            exit 1
+          fi
+
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --header "Authorization: Bearer ${CRON_SECRET}" \
+            --data '{"staleSeconds":60,"limit":20}' \
+            "$SOULMATE_SKETCH_SYNC_URL"

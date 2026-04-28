@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("email", normalizedEmail)
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (userRow) {
       userId = userRow.id;
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
       .select("*")
       .eq("email", normalizedEmail)
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (profileRow) {
       if (!userId) userId = profileRow.id;
@@ -61,9 +61,24 @@ export async function GET(request: NextRequest) {
         .from("user_profiles")
         .select("*")
         .eq("id", userId)
-        .single();
+        .maybeSingle();
       if (profileById) {
         profileData = profileById;
+      }
+    }
+
+    let sessionData: Record<string, any> | null = null;
+    if (userId) {
+      const { data: sessionRow } = await supabase
+        .from("onboarding_sessions")
+        .select("*")
+        .eq("user_id", userId)
+        .order("last_saved_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (sessionRow) {
+        sessionData = sessionRow;
       }
     }
 
@@ -80,23 +95,32 @@ export async function GET(request: NextRequest) {
       userId,
       email: normalizedEmail,
       onboarding: {
-        gender: profileData?.gender || null,
-        birthMonth: profileData?.birth_month || "January",
-        birthDay: profileData?.birth_day || "1",
-        birthYear: profileData?.birth_year || "2000",
-        birthHour: profileData?.birth_hour || "12",
-        birthMinute: profileData?.birth_minute || "00",
-        birthPeriod: profileData?.birth_period || "AM",
-        birthPlace: profileData?.birth_place || "",
-        knowsBirthTime: profileData?.knows_birth_time ?? true,
-        relationshipStatus: profileData?.relationship_status || null,
-        goals: profileData?.goals || [],
-        colorPreference: profileData?.color_preference || null,
-        elementPreference: profileData?.element_preference || null,
-        sunSign: profileData?.sun_sign || null,
-        moonSign: profileData?.moon_sign || null,
-        ascendantSign: profileData?.ascendant_sign || null,
+        gender: sessionData?.onboarding_data?.gender ?? profileData?.gender ?? null,
+        birthMonth: sessionData?.onboarding_data?.birthMonth ?? profileData?.birth_month ?? "January",
+        birthDay: sessionData?.onboarding_data?.birthDay ?? profileData?.birth_day ?? "1",
+        birthYear: sessionData?.onboarding_data?.birthYear ?? profileData?.birth_year ?? "2000",
+        birthHour: sessionData?.onboarding_data?.birthHour ?? profileData?.birth_hour ?? "12",
+        birthMinute: sessionData?.onboarding_data?.birthMinute ?? profileData?.birth_minute ?? "00",
+        birthPeriod: sessionData?.onboarding_data?.birthPeriod ?? profileData?.birth_period ?? "AM",
+        birthPlace: sessionData?.onboarding_data?.birthPlace ?? profileData?.birth_place ?? "",
+        knowsBirthTime: sessionData?.onboarding_data?.knowsBirthTime ?? profileData?.knows_birth_time ?? true,
+        relationshipStatus: sessionData?.onboarding_data?.relationshipStatus ?? profileData?.relationship_status ?? null,
+        goals: sessionData?.onboarding_data?.goals ?? profileData?.goals ?? [],
+        colorPreference: sessionData?.onboarding_data?.colorPreference ?? profileData?.color_preference ?? null,
+        elementPreference: sessionData?.onboarding_data?.elementPreference ?? profileData?.element_preference ?? null,
+        sunSign: sessionData?.onboarding_data?.sunSign ?? profileData?.sun_sign ?? null,
+        moonSign: sessionData?.onboarding_data?.moonSign ?? profileData?.moon_sign ?? null,
+        ascendantSign: sessionData?.onboarding_data?.ascendantSign ?? profileData?.ascendant_sign ?? null,
       },
+      session: sessionData
+        ? {
+            currentRoute: sessionData.current_route,
+            currentStep: sessionData.current_step,
+            priorityArea: sessionData.priority_area,
+            answers: sessionData.answers || {},
+            lastSavedAt: sessionData.last_saved_at,
+          }
+        : null,
       name: userData?.name || "",
     });
   } catch (error: any) {

@@ -305,20 +305,22 @@ export default function LoginPage() {
 
   return (
     <>
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col relative">
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/50 flex flex-col relative">
           {/* Starry background */}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute -top-24 left-1/2 h-64 w-64 -translate-x-1/2 rounded-full bg-[#38bdf8]/15 blur-3xl" />
+            <div className="absolute bottom-10 right-[-5rem] h-72 w-72 rounded-full bg-[#0284c7]/15 blur-3xl" />
             {[...Array(80)].map((_, i) => (
               <div
               key={i}
-              className="absolute rounded-full bg-white animate-pulse"
+              className="absolute rounded-full bg-[#d9f4ff] animate-pulse"
               style={{
                 width: `${Math.random() * 2 + 1}px`,
                 height: `${Math.random() * 2 + 1}px`,
                 top: `${Math.random() * 100}%`,
                 left: `${Math.random() * 100}%`,
-                opacity: Math.random() * 0.7 + 0.3,
+                opacity: Math.random() * 0.45 + 0.25,
                 animationDelay: `${Math.random() * 3}s`,
                 animationDuration: `${Math.random() * 2 + 2}s`,
               }}
@@ -354,8 +356,8 @@ export default function LoginPage() {
           className="flex flex-col items-center mb-10 pt-8"
         >
           <div className="relative mb-4">
-            <div className="absolute inset-0 blur-xl bg-primary/20 rounded-full scale-150" />
-            <div className="relative w-20 h-20 rounded-2xl overflow-hidden border border-primary/30">
+            <div className="absolute inset-0 blur-xl bg-[#38bdf8]/25 rounded-full scale-150" />
+            <div className="relative w-20 h-20">
               <Image
                 src="/logo.png"
                 alt="PalmCosmic"
@@ -366,7 +368,7 @@ export default function LoginPage() {
             </div>
           </div>
           <h1 className="text-2xl font-bold text-white">Welcome Back</h1>
-          <p className="text-white/50 text-sm mt-1">Sign in to continue your journey</p>
+          <p className="text-[#b8c7da] text-sm mt-1">Sign in to continue your journey</p>
         </motion.div>
 
         {/* Login Form */}
@@ -390,30 +392,30 @@ export default function LoginPage() {
 
           {/* Email Field */}
           <div className="relative">
-            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+            <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#7dd3fc]/60" />
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Email address"
-              className="w-full bg-[#1A1F2E] border border-white/10 rounded-xl pl-12 pr-4 py-4 text-white placeholder:text-white/40 focus:outline-none focus:border-primary transition-colors"
+              className="w-full bg-[#0b2033] border border-[#15314d] rounded-xl pl-12 pr-4 py-4 text-white placeholder:text-[#b8c7da]/55 focus:outline-none focus:border-[#38bdf8] transition-colors"
             />
           </div>
 
           {/* Password Field */}
           <div className="relative">
-            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#7dd3fc]/60" />
             <input
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="Password"
-              className="w-full bg-[#1A1F2E] border border-white/10 rounded-xl pl-12 pr-12 py-4 text-white placeholder:text-white/40 focus:outline-none focus:border-primary transition-colors"
+              className="w-full bg-[#0b2033] border border-[#15314d] rounded-xl pl-12 pr-12 py-4 text-white placeholder:text-[#b8c7da]/55 focus:outline-none focus:border-[#38bdf8] transition-colors"
             />
             <button
               type="button"
               onClick={() => setShowPassword(!showPassword)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-white/40 hover:text-white/60"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-[#b8c7da]/60 hover:text-[#7dd3fc]"
             >
               {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
             </button>
@@ -423,7 +425,7 @@ export default function LoginPage() {
           <Button
             type="submit"
             disabled={isLoading}
-            className="w-full h-14 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-white font-semibold text-lg rounded-xl"
+            className="w-full h-14 bg-[#38bdf8] hover:bg-[#0284c7] text-[#04111f] font-semibold text-lg rounded-xl shadow-lg shadow-[#38bdf8]/20"
           >
             {isLoading ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -437,7 +439,7 @@ export default function LoginPage() {
             <button
               type="button"
               onClick={() => setShowForgotPassword(true)}
-              className="text-white/50 hover:text-white/70 text-sm transition-colors"
+              className="text-[#b8c7da] hover:text-[#7dd3fc] text-sm transition-colors"
             >
               Forgot password?
             </button>
@@ -453,7 +455,7 @@ export default function LoginPage() {
         >
           <button
             onClick={() => setShowOtpModal(true)}
-            className="text-primary hover:text-primary/80 text-sm font-medium transition-colors"
+            className="text-[#38bdf8] hover:text-[#7dd3fc] text-sm font-medium transition-colors"
           >
             Sign in with a code
           </button>
@@ -466,11 +468,11 @@ export default function LoginPage() {
           transition={{ delay: 0.5 }}
           className="mt-8 text-center"
         >
-          <p className="text-white/50 text-sm">
+          <p className="text-[#b8c7da] text-sm">
             Don&apos;t have an account?{" "}
             <button
               onClick={() => router.push("/welcome")}
-              className="text-primary hover:text-primary/80 font-medium transition-colors"
+              className="text-[#38bdf8] hover:text-[#7dd3fc] font-medium transition-colors"
             >
               Sign up
             </button>
@@ -486,7 +488,7 @@ export default function LoginPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-[#020b14]/85 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={resetOtpModal}
           >
             <motion.div
@@ -494,25 +496,25 @@ export default function LoginPage() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10 relative"
+              className="bg-[#0b2033] rounded-2xl w-full max-w-sm p-6 border border-[#15314d] shadow-2xl shadow-black/40 relative"
             >
               {/* Close Button */}
               <button
                 onClick={resetOtpModal}
-                className="absolute top-4 right-4 text-white/50 hover:text-white"
+                className="absolute top-4 right-4 text-[#b8c7da] hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
 
               {!otpSent ? (
                 <>
-                  <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                    <KeyRound className="w-7 h-7 text-primary" />
+                  <div className="w-14 h-14 rounded-full bg-[#38bdf8]/15 flex items-center justify-center mx-auto mb-4">
+                    <KeyRound className="w-7 h-7 text-[#38bdf8]" />
                   </div>
                   <h2 className="text-white text-xl font-bold text-center mb-2">
                     Sign in with Code
                   </h2>
-                  <p className="text-white/60 text-center text-sm mb-6">
+                  <p className="text-[#b8c7da] text-center text-sm mb-6">
                     We&apos;ll send a 6-digit code to your email
                   </p>
 
@@ -523,20 +525,20 @@ export default function LoginPage() {
                   )}
 
                   <div className="relative mb-4">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#7dd3fc]/60" />
                     <input
                       type="email"
                       value={otpEmail}
                       onChange={(e) => setOtpEmail(e.target.value)}
                       placeholder="Enter your email"
-                      className="w-full bg-[#0A0E1A] border border-white/20 rounded-xl pl-12 pr-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-primary"
+                      className="w-full bg-[#061525] border border-[#15314d] rounded-xl pl-12 pr-4 py-3 text-white placeholder:text-[#b8c7da]/55 focus:outline-none focus:border-[#38bdf8]"
                     />
                   </div>
 
                   <Button
                     onClick={handleSendOtp}
                     disabled={otpLoading}
-                    className="w-full h-12 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-white font-semibold"
+                    className="w-full h-12 bg-[#38bdf8] hover:bg-[#0284c7] text-[#04111f] font-semibold"
                   >
                     {otpLoading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -548,16 +550,16 @@ export default function LoginPage() {
               ) : (
                 <>
                   <div className="text-center">
-                    <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                      <Mail className="w-7 h-7 text-primary" />
+                    <div className="w-14 h-14 rounded-full bg-[#38bdf8]/15 flex items-center justify-center mx-auto mb-4">
+                      <Mail className="w-7 h-7 text-[#38bdf8]" />
                     </div>
                     <h2 className="text-white text-xl font-bold mb-2">
                       Enter Verification Code
                     </h2>
-                    <p className="text-white/60 text-sm mb-2">
+                    <p className="text-[#b8c7da] text-sm mb-2">
                       We&apos;ve sent a 6-digit code to
                     </p>
-                    <p className="text-primary font-medium mb-6">{otpEmail}</p>
+                    <p className="text-[#38bdf8] font-medium mb-6">{otpEmail}</p>
 
                     {otpError && (
                       <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl">
@@ -578,19 +580,19 @@ export default function LoginPage() {
                           onChange={(e) => handleOtpChange(index, e.target.value.replace(/\D/g, ""))}
                           onKeyDown={(e) => handleOtpKeyDown(index, e)}
                           disabled={otpVerifying}
-                          className="w-11 h-14 bg-[#0A0E1A] border-2 border-white/20 rounded-xl text-white text-center text-xl font-bold focus:outline-none focus:border-primary transition-colors disabled:opacity-50"
+                          className="w-11 h-14 bg-[#061525] border-2 border-[#15314d] rounded-xl text-white text-center text-xl font-bold focus:outline-none focus:border-[#38bdf8] transition-colors disabled:opacity-50"
                         />
                       ))}
                     </div>
 
                     {otpVerifying && (
                       <div className="flex items-center justify-center gap-2 mb-4">
-                        <Loader2 className="w-4 h-4 text-primary animate-spin" />
-                        <span className="text-white/60 text-sm">Verifying...</span>
+                        <Loader2 className="w-4 h-4 text-[#38bdf8] animate-spin" />
+                        <span className="text-[#b8c7da] text-sm">Verifying...</span>
                       </div>
                     )}
 
-                    <p className="text-white/40 text-xs mb-4">
+                    <p className="text-[#b8c7da]/65 text-xs mb-4">
                       Code expires in 10 minutes
                     </p>
 
@@ -599,7 +601,7 @@ export default function LoginPage() {
                         setOtpSent(false);
                         setOtpCode(["", "", "", "", "", ""]);
                       }}
-                      className="text-primary hover:text-primary/80 text-sm font-medium"
+                      className="text-[#38bdf8] hover:text-[#7dd3fc] text-sm font-medium"
                     >
                       Didn&apos;t receive code? Send again
                     </button>
@@ -618,7 +620,7 @@ export default function LoginPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-[#020b14]/85 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={resetForgotModal}
           >
             <motion.div
@@ -626,25 +628,25 @@ export default function LoginPage() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10 relative"
+              className="bg-[#0b2033] rounded-2xl w-full max-w-sm p-6 border border-[#15314d] shadow-2xl shadow-black/40 relative"
             >
               {/* Close Button */}
               <button
                 onClick={resetForgotModal}
-                className="absolute top-4 right-4 text-white/50 hover:text-white"
+                className="absolute top-4 right-4 text-[#b8c7da] hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
 
               {!forgotSuccess ? (
                 <>
-                  <div className="w-14 h-14 rounded-full bg-primary/20 flex items-center justify-center mx-auto mb-4">
-                    <Lock className="w-7 h-7 text-primary" />
+                  <div className="w-14 h-14 rounded-full bg-[#38bdf8]/15 flex items-center justify-center mx-auto mb-4">
+                    <Lock className="w-7 h-7 text-[#38bdf8]" />
                   </div>
                   <h2 className="text-white text-xl font-bold text-center mb-2">
                     Forgot Password?
                   </h2>
-                  <p className="text-white/60 text-center text-sm mb-6">
+                  <p className="text-[#b8c7da] text-center text-sm mb-6">
                     Enter your email and we&apos;ll send you a reset link
                   </p>
 
@@ -655,20 +657,20 @@ export default function LoginPage() {
                   )}
 
                   <div className="relative mb-4">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-[#7dd3fc]/60" />
                     <input
                       type="email"
                       value={forgotEmail}
                       onChange={(e) => setForgotEmail(e.target.value)}
                       placeholder="Enter your email"
-                      className="w-full bg-[#0A0E1A] border border-white/20 rounded-xl pl-12 pr-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-primary"
+                      className="w-full bg-[#061525] border border-[#15314d] rounded-xl pl-12 pr-4 py-3 text-white placeholder:text-[#b8c7da]/55 focus:outline-none focus:border-[#38bdf8]"
                     />
                   </div>
 
                   <Button
                     onClick={handleForgotPassword}
                     disabled={forgotLoading}
-                    className="w-full h-12 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-white font-semibold"
+                    className="w-full h-12 bg-[#38bdf8] hover:bg-[#0284c7] text-[#04111f] font-semibold"
                   >
                     {forgotLoading ? (
                       <Loader2 className="w-5 h-5 animate-spin" />
@@ -686,11 +688,11 @@ export default function LoginPage() {
                     <h2 className="text-white text-xl font-bold mb-2">
                       Check Your Email
                     </h2>
-                    <p className="text-white/60 text-sm mb-2">
+                    <p className="text-[#b8c7da] text-sm mb-2">
                       We&apos;ve sent a password reset link to
                     </p>
-                    <p className="text-primary font-medium mb-6">{forgotEmail}</p>
-                    <p className="text-white/40 text-xs">
+                    <p className="text-[#38bdf8] font-medium mb-6">{forgotEmail}</p>
+                    <p className="text-[#b8c7da]/65 text-xs">
                       Click the link in the email to reset your password.
                     </p>
                   </div>
@@ -698,7 +700,7 @@ export default function LoginPage() {
                   <Button
                     onClick={resetForgotModal}
                     variant="outline"
-                    className="w-full h-12 mt-6 border-white/20 text-white hover:bg-white/10"
+                    className="w-full h-12 mt-6 border-[#15314d] text-white hover:bg-[#15314d]"
                   >
                     Close
                   </Button>
@@ -716,7 +718,7 @@ export default function LoginPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 bg-[#020b14]/85 backdrop-blur-sm z-50 flex items-center justify-center p-4"
             onClick={() => setShowUserNotFound(false)}
           >
             <motion.div
@@ -724,12 +726,12 @@ export default function LoginPage() {
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
               onClick={(e) => e.stopPropagation()}
-              className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10 relative"
+              className="bg-[#0b2033] rounded-2xl w-full max-w-sm p-6 border border-[#15314d] shadow-2xl shadow-black/40 relative"
             >
               {/* Close Button */}
               <button
                 onClick={() => setShowUserNotFound(false)}
-                className="absolute top-4 right-4 text-white/50 hover:text-white"
+                className="absolute top-4 right-4 text-[#b8c7da] hover:text-white"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -741,10 +743,10 @@ export default function LoginPage() {
                 <h2 className="text-white text-xl font-bold mb-2">
                   User Not Found
                 </h2>
-                <p className="text-white/60 text-sm mb-2">
+                <p className="text-[#b8c7da] text-sm mb-2">
                   No account exists with the email
                 </p>
-                <p className="text-primary font-medium mb-6">{notFoundEmail}</p>
+                <p className="text-[#38bdf8] font-medium mb-6">{notFoundEmail}</p>
               </div>
 
               <div className="space-y-3">
@@ -753,7 +755,7 @@ export default function LoginPage() {
                     setShowUserNotFound(false);
                     router.push("/welcome");
                   }}
-                  className="w-full h-12 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-white font-semibold"
+                  className="w-full h-12 bg-[#38bdf8] hover:bg-[#0284c7] text-[#04111f] font-semibold"
                 >
                   Create New Account
                 </Button>
@@ -763,7 +765,7 @@ export default function LoginPage() {
                     setNotFoundEmail("");
                   }}
                   variant="outline"
-                  className="w-full h-12 border-white/20 text-white hover:bg-white/10"
+                  className="w-full h-12 border-[#15314d] text-white hover:bg-[#15314d]"
                 >
                   Login with Other Account
                 </Button>

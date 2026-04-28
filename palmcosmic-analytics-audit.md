@@ -1,4 +1,4 @@
-# PalmCosmic Analytics Audit Report
+# AstroRekha Analytics Audit Report
 
 **Date:** February 1, 2026  
 **Prepared for:** Meow (Visionary Era)  

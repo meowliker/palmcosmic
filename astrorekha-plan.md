@@ -1,6 +1,6 @@
-# PalmCosmic India Launch Plan
+# AstroRekha India Launch Plan
 
-Rebrand "PalmCosmic" to "PalmCosmic" (astrorekha.com), replace Firebase with Supabase, replace Stripe with PayU, update all analytics/email config, and prepare for Vercel deployment targeting India.
+Rebrand "PalmCosmic" to "AstroRekha" (astrorekha.com), replace Firebase with Supabase, replace Stripe with Razorpay, update all analytics/email config, and prepare for Vercel deployment targeting India.
 
 ---
 
@@ -17,17 +17,17 @@ Rebrand "PalmCosmic" to "PalmCosmic" (astrorekha.com), replace Firebase with Sup
 
 ---
 
-## Phase 1: Rebranding (PalmCosmic → PalmCosmic)
+## Phase 1: Rebranding (PalmCosmic → AstroRekha)
 
 ### 1.1 Global text/string replacements
-- `PalmCosmic` → `PalmCosmic` across all `.ts`, `.tsx`, `.html` files (~49 source files + 5 HTML legal docs)
+- `PalmCosmic` → `AstroRekha` across all `.ts`, `.tsx`, `.html` files (~49 source files + 5 HTML legal docs)
 - `palmcosmic` → `astrorekha` in localStorage keys, cookie names, zustand persist key, CSS classes
 - Key files: `layout.tsx` (metadata), `welcome/page.tsx`, `welcome-b/page.tsx`, `login/page.tsx`, all onboarding steps, email templates in `send-otp/route.ts`, `send-password-reset/route.ts`
 
 ### 1.2 Email & domain references
-- `hello@palmcosmic.com` → `weatpalmcosmic@gmail.com` (in `src/lib/brevo.ts`)
+- `hello@palmcosmic.com` → `weatastrorekha@gmail.com` (in `src/lib/brevo.ts`)
 - `palmcosmic.com` → `astrorekha.com` (in cron jobs, checkout URLs, fallback URLs)
-- `weatpalmcosmic@gmail.com` → `weatpalmcosmic@gmail.com` (in `.env.local`)
+- `weatpalmcosmic@gmail.com` → `weatastrorekha@gmail.com` (in `.env.local`)
 
 ### 1.3 Package & project metadata
 - `package.json` name: `palmcosmic` → `astrorekha`
@@ -36,7 +36,7 @@ Rebrand "PalmCosmic" to "PalmCosmic" (astrorekha.com), replace Firebase with Sup
 - Update all 5 HTML files: `terms-of-service.html`, `privacy-policy.html`, `billing-terms.html`, `money-back-policy.html`, `contact-us.html`
 
 ### 1.5 Logo & assets
-- Replace `public/logo.png` with PalmCosmic logo (you'll need to provide the new logo file)
+- Replace `public/logo.png` with AstroRekha logo (you'll need to provide the new logo file)
 - Update `alt` text in Image components referencing "PalmCosmic"
 
 ---
@@ -82,7 +82,7 @@ Tables needed (mapping from Firestore collections):
 
 ### 2.5 Migrate all server-side Firestore usage
 ~53 files import Firebase. Key server routes to update:
-- `src/app/api/stripe/webhook/route.ts` (will become PayU webhook — Phase 3)
+- `src/app/api/stripe/webhook/route.ts` (will become Razorpay webhook — Phase 3)
 - `src/app/api/admin/revenue/route.ts`
 - `src/app/api/admin/sync-sheets/route.ts`
 - `src/app/api/admin/login/route.ts`
@@ -106,40 +106,40 @@ Tables needed (mapping from Firestore collections):
 
 ---
 
-## Phase 3: Stripe → PayU Migration
+## Phase 3: Stripe → Razorpay Migration
 
-### 3.1 Install PayU
+### 3.1 Install Razorpay
 - Remove: `stripe`
-- Add: `payu`
+- Add: `razorpay`
 
 ### 3.2 New env vars
 ```
-PAYU_KEY_ID=rzp_live_...
-PAYU_KEY_SECRET=...
-PAYU_WEBHOOK_SECRET=...
-NEXT_PUBLIC_PAYU_KEY_ID=rzp_live_...
+RAZORPAY_KEY_ID=rzp_live_...
+RAZORPAY_KEY_SECRET=...
+RAZORPAY_WEBHOOK_SECRET=...
+NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_live_...
 ```
 
-### 3.3 Create PayU server library
-- **`src/lib/payu.ts`** — replaces `src/lib/stripe.ts`
+### 3.3 Create Razorpay server library
+- **`src/lib/razorpay.ts`** — replaces `src/lib/stripe.ts`
 
 ### 3.4 Replace all Stripe API routes (10 routes)
 | Current Route | Action |
 |---|---|
-| `api/stripe/create-checkout/route.ts` | → `api/payu/create-order/route.ts` |
-| `api/stripe/webhook/route.ts` | → `api/payu/webhook/route.ts` |
-| `api/stripe/cancel-subscription/route.ts` | → `api/payu/cancel-subscription/route.ts` |
-| `api/stripe/resume-subscription/route.ts` | → `api/payu/resume-subscription/route.ts` |
-| `api/stripe/create-upgrade-checkout/route.ts` | → `api/payu/create-upgrade-order/route.ts` |
-| `api/stripe/create-upsell-checkout/route.ts` | → `api/payu/create-upsell-order/route.ts` |
-| `api/stripe/create-bundle-checkout/route.ts` | → `api/payu/create-bundle-order/route.ts` |
-| `api/stripe/create-coin-checkout/route.ts` | → `api/payu/create-coin-order/route.ts` |
-| `api/stripe/fulfill-checkout-session/route.ts` | → `api/payu/verify-payment/route.ts` |
-| `api/stripe/resolve-subscription-plan/route.ts` | → `api/payu/resolve-subscription-plan/route.ts` |
+| `api/stripe/create-checkout/route.ts` | → `api/razorpay/create-order/route.ts` |
+| `api/stripe/webhook/route.ts` | → `api/razorpay/webhook/route.ts` |
+| `api/stripe/cancel-subscription/route.ts` | → `api/razorpay/cancel-subscription/route.ts` |
+| `api/stripe/resume-subscription/route.ts` | → `api/razorpay/resume-subscription/route.ts` |
+| `api/stripe/create-upgrade-checkout/route.ts` | → `api/razorpay/create-upgrade-order/route.ts` |
+| `api/stripe/create-upsell-checkout/route.ts` | → `api/razorpay/create-upsell-order/route.ts` |
+| `api/stripe/create-bundle-checkout/route.ts` | → `api/razorpay/create-bundle-order/route.ts` |
+| `api/stripe/create-coin-checkout/route.ts` | → `api/razorpay/create-coin-order/route.ts` |
+| `api/stripe/fulfill-checkout-session/route.ts` | → `api/razorpay/verify-payment/route.ts` |
+| `api/stripe/resolve-subscription-plan/route.ts` | → `api/razorpay/resolve-subscription-plan/route.ts` |
 
-### 3.5 Key architectural differences (Stripe → PayU)
-- **Checkout flow**: Stripe redirects to hosted checkout → PayU uses an in-page modal (PayU.js)
-- **Subscriptions**: PayU has its own Subscriptions API; trial periods work differently
+### 3.5 Key architectural differences (Stripe → Razorpay)
+- **Checkout flow**: Stripe redirects to hosted checkout → Razorpay uses an in-page modal (Razorpay.js)
+- **Subscriptions**: Razorpay has its own Subscriptions API; trial periods work differently
 - **Webhooks**: Different event names (`payment.captured`, `subscription.activated`, etc.)
 - **Currency**: All `USD` references → `INR`; prices need India-appropriate values
 
@@ -164,8 +164,8 @@ NEXT_PUBLIC_PAYU_KEY_ID=rzp_live_...
 
 ### 4.1 Update `.env.local`
 - Remove: All `STRIPE_*`, `FIREBASE_*` vars
-- Add: `PAYU_*`, `SUPABASE_SERVICE_ROLE_KEY`
-- Update: `EMAIL_USER` → `weatpalmcosmic@gmail.com`, `NEXT_PUBLIC_APP_URL` → `https://astrorekha.com`
+- Add: `RAZORPAY_*`, `SUPABASE_SERVICE_ROLE_KEY`
+- Update: `EMAIL_USER` → `weatastrorekha@gmail.com`, `NEXT_PUBLIC_APP_URL` → `https://astrorekha.com`
 - Keep: `ANTHROPIC_API_KEY`, `BREVO_*`, `NEXT_PUBLIC_META_PIXEL_ID`, `NEXT_PUBLIC_CLARITY_ID`, `NEXT_PUBLIC_GA_ID`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `GOOGLE_*` (sheets)
 
 ### 4.2 Update `vercel.json`
@@ -175,7 +175,7 @@ NEXT_PUBLIC_PAYU_KEY_ID=rzp_live_...
 
 ## Phase 5: Analytics & Tracking (Already Integrated — Verify/Update)
 
-These are already wired up in `layout.tsx`. Just need new IDs for the PalmCosmic property:
+These are already wired up in `layout.tsx`. Just need new IDs for the AstroRekha property:
 - **Meta Pixel**: Update `NEXT_PUBLIC_META_PIXEL_ID` in env (or keep same if same ad account)
 - **Google Analytics**: Update `NEXT_PUBLIC_GA_ID` in env (new GA4 property for astrorekha.com)
 - **Microsoft Clarity**: Update `NEXT_PUBLIC_CLARITY_ID` in env (new project)
@@ -192,9 +192,9 @@ These are already wired up in `layout.tsx`. Just need new IDs for the PalmCosmic
 - Create Storage bucket for palm images
 - Configure Supabase Auth settings
 
-### 6.2 PayU setup
-- Create PayU account (India business)
-- Set up webhook endpoint: `https://astrorekha.com/api/payu/webhook`
+### 6.2 Razorpay setup
+- Create Razorpay account (India business)
+- Set up webhook endpoint: `https://astrorekha.com/api/razorpay/webhook`
 - Create subscription plans with INR pricing
 - Get API keys
 
@@ -205,8 +205,8 @@ These are already wired up in `layout.tsx`. Just need new IDs for the PalmCosmic
 - Deploy
 
 ### 6.4 Brevo setup
-- Update sender email to `weatpalmcosmic@gmail.com` (or custom domain sender)
-- Update email templates with PalmCosmic branding
+- Update sender email to `weatastrorekha@gmail.com` (or custom domain sender)
+- Update email templates with AstroRekha branding
 - Verify sender domain for astrorekha.com
 
 ---
@@ -215,7 +215,7 @@ These are already wired up in `layout.tsx`. Just need new IDs for the PalmCosmic
 
 1. **Rebranding** (Phase 1) — lowest risk, can be done first
 2. **Supabase migration** (Phase 2) — largest effort, core dependency
-3. **PayU migration** (Phase 3) — depends on Phase 2 (webhook writes to Supabase)
+3. **Razorpay migration** (Phase 3) — depends on Phase 2 (webhook writes to Supabase)
 4. **Env & config** (Phase 4) — done alongside Phases 2-3
 5. **Analytics verification** (Phase 5) — quick, done at end
 6. **Deployment** (Phase 6) — final step
@@ -225,9 +225,9 @@ These are already wired up in `layout.tsx`. Just need new IDs for the PalmCosmic
 ## Questions Before Starting
 
 1. **Pricing for India**: What INR prices do you want for the subscription plans? (e.g., weekly trial, monthly, yearly)
-2. **New logo**: Do you have an PalmCosmic logo file to replace `public/logo.png`?
+2. **New logo**: Do you have an AstroRekha logo file to replace `public/logo.png`?
 3. **Supabase project**: Use the existing Supabase project in `.env.local`, or create a new one?
-4. **PayU account**: Do you already have PayU API keys, or do we set up placeholder config?
+4. **Razorpay account**: Do you already have Razorpay API keys, or do we set up placeholder config?
 5. **New analytics IDs**: Do you have new Meta Pixel, GA4, and Clarity IDs for astrorekha.com, or reuse existing ones?
 6. **Astro Engine**: The Python FastAPI microservice — will it be deployed separately (e.g., Railway, Render), or as a Vercel serverless function?
 7. **Data migration**: Any existing PalmCosmic user data to migrate from Firebase to Supabase?

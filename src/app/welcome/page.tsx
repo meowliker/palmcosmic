@@ -6,30 +6,63 @@ import { useRouter } from "next/navigation";
 import { Menu } from "lucide-react";
 import { OnboardingSidebar } from "@/components/OnboardingSidebar";
 import Image from "next/image";
+import { trackFunnelAction, trackFunnelStepView } from "@/lib/analytics-events";
 
 export default function WelcomePage() {
   const router = useRouter();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  const seedDefaultFlow = () => {
+    try {
+      localStorage.setItem("astrorekha_onboarding_flow", "flow-a");
+      localStorage.setItem("astrorekha_layout_variant", "A");
+      localStorage.removeItem("astrorekha_ab_test_id");
+    } catch (error) {
+      console.error("Failed to seed default onboarding flow:", error);
+    }
+  };
+
   // Route protection: Check user status and redirect accordingly
   useEffect(() => {
-    // Mark user as Flow A (subscription flow)
-    localStorage.setItem("astrorekha_onboarding_flow", "flow-a");
-    
-    const hasCompletedPayment = localStorage.getItem("astrorekha_payment_completed") === "true";
-    const hasCompletedRegistration = localStorage.getItem("astrorekha_registration_completed") === "true";
-    
-    if (hasCompletedRegistration) {
-      // User has completed registration - redirect to app
-      router.replace("/home");
-      return;
-    } else if (hasCompletedPayment) {
-      // User has paid but not registered - redirect to upsell page
-      router.replace("/onboarding/step-18");
-      return;
-    }
-    // New user - allow access to welcome page
+    let cancelled = false;
+    trackFunnelStepView({
+      route: "/welcome",
+      stepId: "welcome",
+      stepName: "Welcome",
+      funnel: "welcome",
+      progress: 0,
+    });
+
+    const routeUser = () => {
+      seedDefaultFlow();
+
+      const hasCompletedPayment = localStorage.getItem("astrorekha_payment_completed") === "true";
+      const hasCompletedRegistration = localStorage.getItem("astrorekha_registration_completed") === "true";
+
+      if (cancelled) return;
+
+      if (hasCompletedRegistration) {
+        router.replace("/dashboard");
+        return;
+      }
+
+      if (hasCompletedPayment) {
+        const flow = localStorage.getItem("palmcosmic_active_flow") || "future_prediction";
+        router.replace(`/onboarding/create-password?flow=${encodeURIComponent(flow)}`);
+        return;
+      }
+
+      if (window.location.search) {
+        router.replace("/welcome");
+      }
+    };
+
+    routeUser();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   useEffect(() => {
@@ -134,7 +167,7 @@ export default function WelcomePage() {
     let time = 0;
 
     const animate = () => {
-      ctx.fillStyle = "#0A0E1A";
+      ctx.fillStyle = "#061525";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       time += 1;
@@ -168,7 +201,7 @@ export default function WelcomePage() {
         });
 
         // Draw connections
-        ctx.strokeStyle = "rgba(239, 68, 68, 0.3)"; // primary red with low opacity
+        ctx.strokeStyle = "rgba(56, 189, 248, 0.32)";
         ctx.lineWidth = 1;
         constellation.connections.forEach(([from, to]) => {
           ctx.beginPath();
@@ -181,9 +214,9 @@ export default function WelcomePage() {
         rotatedStars.forEach((star) => {
           // Glow effect
           const gradient = ctx.createRadialGradient(star.x, star.y, 0, star.x, star.y, 8);
-          gradient.addColorStop(0, "rgba(239, 68, 68, 0.8)");
-          gradient.addColorStop(0.5, "rgba(239, 68, 68, 0.2)");
-          gradient.addColorStop(1, "rgba(239, 68, 68, 0)");
+          gradient.addColorStop(0, "rgba(56, 189, 248, 0.82)");
+          gradient.addColorStop(0.5, "rgba(56, 189, 248, 0.22)");
+          gradient.addColorStop(1, "rgba(56, 189, 248, 0)");
           ctx.beginPath();
           ctx.arc(star.x, star.y, 8, 0, Math.PI * 2);
           ctx.fillStyle = gradient;
@@ -210,7 +243,7 @@ export default function WelcomePage() {
 
   return (
     <>
-    <div className="min-h-screen bg-[#0A0E1A] flex items-center justify-center relative overflow-hidden">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center relative overflow-hidden">
       {/* Animated starry background */}
       <canvas
         ref={canvasRef}
@@ -218,10 +251,10 @@ export default function WelcomePage() {
       />
 
       {/* Gradient overlay for depth */}
-      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#0A0E1A]/80 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-b from-[#061525]/20 via-transparent to-[#061525]/85 pointer-events-none" />
 
       {/* Content Container - matching other pages */}
-      <div className="relative z-10 w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
+      <div className="relative z-10 w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
         {/* Menu Button - inside app container */}
         <header className="flex items-center justify-end px-4 py-4">
           <button 
@@ -242,7 +275,7 @@ export default function WelcomePage() {
         >
           {/* Logo with glow effect */}
           <div className="relative mb-6">
-            <div className="absolute inset-0 blur-2xl bg-primary/30 rounded-full scale-150" />
+            <div className="absolute inset-0 blur-2xl bg-[#38bdf8]/25 rounded-full scale-150" />
             <div className="relative w-28 h-28 ">
               <Image
                 src="/logo.png"
@@ -267,7 +300,7 @@ export default function WelcomePage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.5, duration: 0.6 }}
-            className="text-white/60 text-sm mt-2 text-center"
+            className="text-[#b8c7da] text-sm mt-2 text-center"
           >
             Discover your cosmic destiny
           </motion.p>
@@ -282,19 +315,34 @@ export default function WelcomePage() {
         >
           {/* Begin Journey Button */}
           <button
-            onClick={() => router.push("/onboarding")}
-            className="w-full py-4 bg-gradient-to-r from-primary to-purple-600 hover:from-primary/90 hover:to-purple-500 text-white font-semibold text-lg rounded-2xl transition-all duration-300 shadow-lg shadow-primary/30 hover:shadow-xl hover:shadow-primary/40 hover:scale-[1.02] active:scale-[0.98]"
+            onClick={() => {
+              seedDefaultFlow();
+              trackFunnelAction("begin_journey_clicked", {
+                route: "/welcome",
+                next_route: "/onboarding",
+                funnel: "welcome",
+              });
+              router.push("/onboarding");
+            }}
+            className="w-full py-4 bg-[#38bdf8] hover:bg-[#0284c7] text-black font-semibold text-lg rounded-2xl transition-all duration-300 shadow-lg shadow-[rgba(56,189,248,0.24)] hover:shadow-xl hover:shadow-[rgba(56,189,248,0.32)] hover:scale-[1.02] active:scale-[0.98]"
           >
             Begin Your Journey
           </button>
 
           {/* Login Link */}
           <div className="text-center pt-4">
-            <p className="text-white/50 text-sm">
+            <p className="text-[#b8c7da] text-sm">
               Already have an account?{" "}
               <button
-                onClick={() => router.push("/login")}
-                className="text-primary hover:text-primary/80 font-medium transition-colors underline underline-offset-2"
+                onClick={() => {
+                  trackFunnelAction("login_clicked", {
+                    route: "/welcome",
+                    next_route: "/login",
+                    funnel: "welcome",
+                  });
+                  router.push("/login");
+                }}
+                className="text-[#38bdf8] hover:text-[#7dd3fc] font-medium transition-colors underline underline-offset-2"
               >
                 Login
               </button>

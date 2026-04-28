@@ -69,7 +69,7 @@ function to24Hour(hour: string, minute: string, period: string): { hour: number;
 
 export async function POST(request: NextRequest) {
   try {
-    const { birthMonth, birthDay, birthYear, birthHour, birthMinute, birthPeriod, birthPlace } = await request.json();
+    const { birthMonth, birthDay, birthYear, birthHour, birthMinute, birthPeriod, birthPlace, forceRefresh } = await request.json();
 
     if (!birthMonth || !birthDay || !birthYear) {
       return NextResponse.json(
@@ -80,16 +80,18 @@ export async function POST(request: NextRequest) {
 
     // Check cache first
     const cacheKey = generateCacheKey(birthMonth, birthDay, birthYear, birthHour, birthMinute, birthPeriod, birthPlace);
-    try {
-      const { data: cached } = await supabase.from("astrology_signs_cache").select("*").eq("id", cacheKey).single();
-      if (cached) {
-        return NextResponse.json({
-          success: true,
-          ...cached.data,
-        });
+    if (!forceRefresh) {
+      try {
+        const { data: cached } = await supabase.from("astrology_signs_cache").select("*").eq("id", cacheKey).single();
+        if (cached) {
+          return NextResponse.json({
+            success: true,
+            ...cached.data,
+          });
+        }
+      } catch (cacheError) {
+        console.error("Cache read error:", cacheError);
       }
-    } catch (cacheError) {
-      console.error("Cache read error:", cacheError);
     }
 
     // Convert birth data to astro-engine format
@@ -108,7 +110,7 @@ export async function POST(request: NextRequest) {
       hour: time.hour,
       minute: time.minute,
       second: 0,
-      place: birthPlace || "New York, USA",
+      place: birthPlace || "New Delhi, India",
     });
 
     const bigThree = astroResult.chart?.big_three || {};

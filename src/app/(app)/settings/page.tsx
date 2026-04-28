@@ -6,34 +6,132 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, FileText, Mail, LogOut, CreditCard, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUserStore } from "@/lib/user-store";
+import { supabase } from "@/lib/supabase";
+import { trackAnalyticsEvent } from "@/lib/analytics-events";
+import { pixelEvents } from "@/lib/pixel-events";
 
-const subscriptionBenefits = [
-  { icon: "🔮", text: "Personal Horoscopes" },
-  { icon: "💕", text: "Compatibility Report" },
-  { icon: "🚀", text: "Discounted Coin Prices" },
-  { icon: "🌙", text: "Your Birth Chart" },
-  { icon: "🖐️", text: "Palm Readings" },
+type FeatureFlags = {
+  palmReading?: boolean;
+  birthChart?: boolean;
+  compatibilityTest?: boolean;
+  prediction2026?: boolean;
+  soulmateSketch?: boolean;
+  futurePartnerReport?: boolean;
+};
+
+type SubscriptionState = {
+  primaryFlow: string | null;
+  primaryReport: string | null;
+  subscriptionStatus: string | null;
+  accessStatus: string | null;
+  bundlePurchased: string | null;
+  unlockedFeatures: FeatureFlags;
+};
+
+const FLOW_LABELS: Record<string, string> = {
+  future_prediction: "2026 Prediction",
+  soulmate_sketch: "Soulmate Sketch",
+  palm_reading: "Palm Reading",
+  future_partner: "Future Partner",
+  compatibility: "Compatibility",
+};
+
+const FLOW_BENEFITS: Record<string, { icon: string; text: string }[]> = {
+  future_prediction: [
+    { icon: "🪐", text: "2026 Future Prediction Report" },
+  ],
+  soulmate_sketch: [
+    { icon: "🎨", text: "Soulmate Sketch Report" },
+  ],
+  palm_reading: [
+    { icon: "🖐️", text: "Palm Reading Report" },
+    { icon: "📊", text: "Birth Chart Report" },
+  ],
+  future_partner: [
+    { icon: "💍", text: "Future Partner Report" },
+  ],
+  compatibility: [
+    { icon: "💕", text: "Compatibility Report" },
+  ],
+};
+
+const FEATURE_BENEFITS: { key: keyof FeatureFlags; icon: string; text: string }[] = [
+  { key: "palmReading", icon: "🖐️", text: "Palm Reading Report" },
+  { key: "birthChart", icon: "📊", text: "Birth Chart Report" },
+  { key: "prediction2026", icon: "🪐", text: "2026 Future Prediction Report" },
+  { key: "compatibilityTest", icon: "💕", text: "Compatibility Report" },
+  { key: "soulmateSketch", icon: "🎨", text: "Soulmate Sketch Report" },
+  { key: "futurePartnerReport", icon: "💍", text: "Future Partner Report" },
 ];
 
+const BASE_APP_BENEFITS = [
+  { icon: "🔮", text: "Daily Horoscope" },
+  { icon: "💡", text: "Daily Tips" },
+];
+
+const ALL_REPORT_BENEFITS = [
+  { icon: "🖐️", text: "Palm Reading Report" },
+  { icon: "📊", text: "Birth Chart Report" },
+  { icon: "🪐", text: "2026 Future Prediction Report" },
+  { icon: "💕", text: "Compatibility Report" },
+  { icon: "🎨", text: "Soulmate Sketch Report" },
+  { icon: "💍", text: "Future Partner Report" },
+];
+
+function dedupeBenefits(benefits: { icon: string; text: string }[]) {
+  const seen = new Set<string>();
+  return benefits.filter((benefit) => {
+    if (seen.has(benefit.text)) return false;
+    seen.add(benefit.text);
+    return true;
+  });
+}
+
+function getSubscriptionBenefits(subscription: SubscriptionState) {
+  const benefits: { icon: string; text: string }[] = [...BASE_APP_BENEFITS];
+
+  if (subscription.subscriptionStatus === "active" || subscription.accessStatus === "subscription_active") {
+    benefits.push(...ALL_REPORT_BENEFITS);
+    benefits.push({ icon: "💬", text: "15 AI Chat Coins" });
+    return dedupeBenefits(benefits);
+  }
+
+  if (subscription.primaryFlow && FLOW_BENEFITS[subscription.primaryFlow]) {
+    benefits.push(...FLOW_BENEFITS[subscription.primaryFlow]);
+  }
+
+  for (const feature of FEATURE_BENEFITS) {
+    if (subscription.unlockedFeatures?.[feature.key]) {
+      benefits.push({ icon: feature.icon, text: feature.text });
+    }
+  }
+
+  benefits.push({ icon: "💬", text: "15 AI Chat Coins for this flow" });
+
+  return dedupeBenefits(benefits);
+}
+
 // Bundle benefits based on what was purchased
-const getBundleBenefits = (bundleId: string | null, unlockedFeatures?: { birthChart?: boolean; compatibilityTest?: boolean; prediction2026?: boolean }) => {
-  const benefits = [];
-  
-  // Always included for all users
-  benefits.push({ icon: "🔮", text: "Daily Horoscope" });
+const getBundleBenefits = (bundleId: string | null, unlockedFeatures?: FeatureFlags) => {
+  const benefits = [...BASE_APP_BENEFITS];
+
   benefits.push({ icon: "🖐️", text: "Palm Reading Report" });
   
   // Show based on what was purchased (check both bundleId and unlockedFeatures)
-  if (bundleId === "palm-birth" || bundleId === "palm-birth-compat" || unlockedFeatures?.birthChart) {
+  if (bundleId === "palm-birth" || bundleId === "palm-birth-compat" || bundleId === "palm-birth-sketch" || unlockedFeatures?.birthChart) {
   benefits.push({ icon: "🌙", text: "Birth Chart Analysis" });
 }
 if (bundleId === "palm-birth-compat" || unlockedFeatures?.compatibilityTest) {
   benefits.push({ icon: "💕", text: "Compatibility Report" });
 }
+if (bundleId === "palm-birth-sketch" || unlockedFeatures?.soulmateSketch) {
+  benefits.push({ icon: "🎨", text: "Soulmate Sketch" });
+}
+if (bundleId === "palm-birth-compat" || bundleId === "palm-birth-sketch" || unlockedFeatures?.futurePartnerReport) {
+  benefits.push({ icon: "💍", text: "Future Partner Report" });
+}
 
-// Bundle 3 (palm-birth-compat) gives 30 coins, others give 15
-const coinCount = bundleId === "palm-birth-compat" ? 30 : 15;
-  benefits.push({ icon: "💬", text: `${coinCount} AI Chat Coins` });
+  benefits.push({ icon: "💬", text: "15 AI Chat Coins" });
   
   return benefits;
 };
@@ -43,6 +141,14 @@ export default function SettingsPage() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [isFlowB, setIsFlowB] = useState(false);
   const [bundleId, setBundleId] = useState<string | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionState>({
+    primaryFlow: null,
+    primaryReport: null,
+    subscriptionStatus: null,
+    accessStatus: null,
+    bundlePurchased: null,
+    unlockedFeatures: {},
+  });
   const { purchasedBundle, resetUserState, unlockedFeatures } = useUserStore();
 
   const userEmail = typeof window !== "undefined" 
@@ -50,6 +156,14 @@ export default function SettingsPage() {
     : "user@example.com";
 
   useEffect(() => {
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+    pixelEvents.viewContent("Settings", "account");
+    trackAnalyticsEvent("SettingsViewed", {
+      route: "/settings",
+      user_id: userId,
+      email,
+    });
     if (typeof window !== "undefined") {
       const flow = localStorage.getItem("astrorekha_onboarding_flow");
       const purchaseType = localStorage.getItem("astrorekha_purchase_type");
@@ -57,11 +171,72 @@ export default function SettingsPage() {
       setIsFlowB(flow === "flow-b" || purchaseType === "one-time");
       setBundleId(bundle);
     }
+    loadSubscriptionState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const displayBenefits = getBundleBenefits(bundleId || purchasedBundle, unlockedFeatures);
+  const loadSubscriptionState = async () => {
+    try {
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
+      const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email");
+
+      if (!userId && !email) return;
+
+      let query = supabase
+        .from("users")
+        .select("primary_flow,primary_report,subscription_status,access_status,bundle_purchased,unlocked_features,purchase_type")
+        .limit(1);
+
+      query = userId ? query.eq("id", userId) : query.eq("email", email);
+
+      const { data, error } = await query.maybeSingle();
+      if (error) throw error;
+      if (!data) return;
+
+      setSubscription({
+        primaryFlow: data.primary_flow || null,
+        primaryReport: data.primary_report || null,
+        subscriptionStatus: data.subscription_status || null,
+        accessStatus: data.access_status || null,
+        bundlePurchased: data.bundle_purchased || null,
+        unlockedFeatures: data.unlocked_features || {},
+      });
+      setBundleId(data.bundle_purchased || bundleId);
+      setIsFlowB(data.purchase_type === "one-time" || isFlowB);
+    } catch (error) {
+      console.error("Failed to load subscription state:", error);
+    }
+  };
+
+  const mergedUnlockedFeatures = {
+    ...unlockedFeatures,
+    ...subscription.unlockedFeatures,
+  };
+  const activeBundleId = subscription.bundlePurchased || bundleId || purchasedBundle;
+  const hasSubscriptionFlow = Boolean(subscription.primaryFlow);
+  const displayBenefits = hasSubscriptionFlow
+    ? getSubscriptionBenefits({ ...subscription, unlockedFeatures: mergedUnlockedFeatures })
+    : getBundleBenefits(activeBundleId, mergedUnlockedFeatures);
+  const planTitle = hasSubscriptionFlow
+    ? `Your ${FLOW_LABELS[subscription.primaryFlow || ""] || "PalmCosmic"} Access`
+    : isFlowB
+      ? "Your Purchase Benefits"
+      : "Your Subscription Benefits";
+  const planSubtitle = hasSubscriptionFlow
+    ? subscription.subscriptionStatus === "active"
+      ? "Monthly subscription active"
+      : subscription.subscriptionStatus === "trialing"
+        ? "Trial access active"
+        : subscription.accessStatus?.replace(/_/g, " ") || "Subscription access"
+    : activeBundleId
+      ? "Unlocked from your selected bundle"
+      : "Your current account benefits";
 
   const handleLogout = () => {
+    trackAnalyticsEvent("SettingsAction", {
+      route: "/settings",
+      action: "logout_confirmed",
+    });
     // Clear local storage
     if (typeof window !== "undefined") {
       localStorage.clear();
@@ -73,30 +248,24 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden shadow-2xl shadow-black/50 flex flex-col relative">
-        {/* Starry background effect */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          {[...Array(30)].map((_, i) => (
-            <div
-              key={i}
-              className="absolute w-0.5 h-0.5 bg-white/20 rounded-full"
-              style={{
-                top: `${Math.random() * 100}%`,
-                left: `${Math.random() * 100}%`,
-              }}
-            />
-          ))}
-        </div>
-
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col relative">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center justify-between px-4 py-3">
             <button
-              onClick={() => router.push("/profile")}
-              className="w-10 h-10 flex items-center justify-center"
+              onClick={() => {
+                trackAnalyticsEvent("SettingsAction", {
+                  route: "/settings",
+                  action: "back_clicked",
+                  destination: "/profile",
+                });
+                router.push("/profile");
+              }}
+              className="w-10 h-10 flex items-center justify-center rounded-lg text-[#b8c7da] transition-colors hover:bg-[#0b2338] hover:text-white"
+              aria-label="Back to profile"
             >
-              <ArrowLeft className="w-5 h-5 text-white" />
+              <ArrowLeft className="w-5 h-5" />
             </button>
             <h1 className="text-white text-xl font-semibold">Settings</h1>
             <div className="w-10" />
@@ -104,16 +273,16 @@ export default function SettingsPage() {
         </div>
 
         <div className="flex-1 overflow-y-auto relative z-10">
-          <div className="px-4 py-4 space-y-4">
+          <div className="px-4 py-5 space-y-4 pb-10">
             {/* Benefits Section */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="bg-[#1A1F2E] rounded-2xl p-5 border border-white/10"
+              className="bg-[#0b2338] rounded-lg p-5 border border-[#173653]"
             >
-              <h2 className="text-primary text-xl font-bold mb-4">
-                {isFlowB ? "Your Purchase Benefits" : "Your Subscription Benefits"}
-              </h2>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#38bdf8]">Access</p>
+              <h2 className="mt-2 text-white text-xl font-bold">{planTitle}</h2>
+              <p className="mt-1 mb-4 text-sm capitalize text-[#8fa3b8]">{planSubtitle}</p>
               <div className="space-y-3">
                 {displayBenefits.map((benefit, index) => (
                   <div key={index} className="flex items-center justify-between">
@@ -121,7 +290,7 @@ export default function SettingsPage() {
                       <span className="text-lg">{benefit.icon}</span>
                       <span className="text-white">{benefit.text}</span>
                     </div>
-                    <Check className="w-5 h-5 text-primary" />
+                    <Check className="w-5 h-5 text-[#38bdf8]" />
                   </div>
                 ))}
               </div>
@@ -132,31 +301,52 @@ export default function SettingsPage() {
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 }}
-              className="bg-[#1A1F2E] rounded-2xl border border-white/10 overflow-hidden"
+              className="bg-[#0b2338] rounded-lg border border-[#173653] overflow-hidden"
             >
               <button
-                onClick={() => window.open("/Terms/privacy-policy.html", "_blank")}
-                className="w-full p-4 flex items-center gap-3 hover:bg-white/5 transition-colors border-b border-white/10"
+                onClick={() => {
+                  trackAnalyticsEvent("SettingsAction", {
+                    route: "/settings",
+                    action: "legal_link_clicked",
+                    link: "privacy_policy",
+                  });
+                  window.open("/Terms/privacy-policy.html", "_blank");
+                }}
+                className="w-full p-4 flex items-center gap-3 hover:bg-[#0d2a45] transition-colors border-b border-[#173653]"
               >
-                <FileText className="w-5 h-5 text-white/50" />
+                <FileText className="w-5 h-5 text-[#8fa3b8]" />
                 <span className="text-white flex-1 text-left">Privacy Policy</span>
-                <ChevronRight className="w-5 h-5 text-white/30" />
+                <ChevronRight className="w-5 h-5 text-[#8fa3b8]" />
               </button>
               <button
-                onClick={() => window.open("/Terms/terms-of-service.html", "_blank")}
-                className="w-full p-4 flex items-center gap-3 hover:bg-white/5 transition-colors border-b border-white/10"
+                onClick={() => {
+                  trackAnalyticsEvent("SettingsAction", {
+                    route: "/settings",
+                    action: "legal_link_clicked",
+                    link: "terms_of_service",
+                  });
+                  window.open("/Terms/terms-of-service.html", "_blank");
+                }}
+                className="w-full p-4 flex items-center gap-3 hover:bg-[#0d2a45] transition-colors border-b border-[#173653]"
               >
-                <FileText className="w-5 h-5 text-white/50" />
+                <FileText className="w-5 h-5 text-[#8fa3b8]" />
                 <span className="text-white flex-1 text-left">Terms of Service</span>
-                <ChevronRight className="w-5 h-5 text-white/30" />
+                <ChevronRight className="w-5 h-5 text-[#8fa3b8]" />
               </button>
               <button
-                onClick={() => window.open("/Terms/contact-us.html", "_blank")}
-                className="w-full p-4 flex items-center gap-3 hover:bg-white/5 transition-colors"
+                onClick={() => {
+                  trackAnalyticsEvent("SettingsAction", {
+                    route: "/settings",
+                    action: "legal_link_clicked",
+                    link: "contact_us",
+                  });
+                  window.open("/Terms/contact-us.html", "_blank");
+                }}
+                className="w-full p-4 flex items-center gap-3 hover:bg-[#0d2a45] transition-colors"
               >
-                <Mail className="w-5 h-5 text-white/50" />
+                <Mail className="w-5 h-5 text-[#8fa3b8]" />
                 <span className="text-white flex-1 text-left">Contact Us</span>
-                <ChevronRight className="w-5 h-5 text-white/30" />
+                <ChevronRight className="w-5 h-5 text-[#8fa3b8]" />
               </button>
             </motion.div>
 
@@ -167,12 +357,18 @@ export default function SettingsPage() {
               transition={{ delay: 0.2 }}
             >
               <button
-                onClick={() => setShowLogoutConfirm(true)}
-                className="w-full bg-[#1A2235] rounded-2xl p-4 border border-red-500/20 hover:bg-red-500/10 transition-colors"
+                onClick={() => {
+                  setShowLogoutConfirm(true);
+                  trackAnalyticsEvent("SettingsAction", {
+                    route: "/settings",
+                    action: "logout_modal_opened",
+                  });
+                }}
+                className="w-full bg-[#0b2338] rounded-lg p-4 border border-red-500/25 hover:bg-red-500/10 transition-colors"
               >
                 <div className="flex flex-col items-center">
                   <span className="text-red-400 font-medium">Log out</span>
-                  <span className="text-white/40 text-sm">{userEmail}</span>
+                  <span className="text-[#8fa3b8] text-sm">{userEmail}</span>
                 </div>
               </button>
             </motion.div>
@@ -185,11 +381,20 @@ export default function SettingsPage() {
                 transition={{ delay: 0.3 }}
               >
                 <button
-                  onClick={() => router.push("/manage-subscription")}
-                  className="w-full bg-[#1A1F2E] rounded-2xl p-4 border border-primary/30 hover:bg-[#252A3A] transition-colors"
+                  onClick={() => {
+                    trackAnalyticsEvent("SettingsAction", {
+                      route: "/settings",
+                      action: "manage_subscription_clicked",
+                      destination: "/manage-subscription",
+                      subscription_status: subscription.subscriptionStatus,
+                      access_status: subscription.accessStatus,
+                    });
+                    router.push("/manage-subscription");
+                  }}
+                  className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#38bdf8]/30 hover:bg-[#0d2a45] transition-colors"
                 >
                   <div className="flex items-center justify-center gap-2">
-                    <CreditCard className="w-5 h-5 text-primary" />
+                    <CreditCard className="w-5 h-5 text-[#38bdf8]" />
                     <span className="text-white font-medium">Manage Subscription</span>
                   </div>
                 </button>
@@ -213,7 +418,7 @@ export default function SettingsPage() {
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9, y: 20 }}
                 onClick={(e) => e.stopPropagation()}
-                className="bg-[#1A1F2E] rounded-2xl w-full max-w-sm p-6 border border-white/10"
+                className="bg-[#0b2338] rounded-lg w-full max-w-sm p-6 border border-[#173653]"
               >
                 <div className="flex justify-center mb-4">
                   <div className="w-16 h-16 rounded-full bg-red-500/20 flex items-center justify-center">
@@ -236,7 +441,7 @@ export default function SettingsPage() {
                   <Button
                     onClick={() => setShowLogoutConfirm(false)}
                     variant="outline"
-                    className="w-full h-12 border-white/20 text-white hover:bg-white/10"
+                    className="w-full h-12 border-[#173653] bg-transparent text-white hover:bg-[#082035]"
                   >
                     Cancel
                   </Button>

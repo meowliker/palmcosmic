@@ -249,7 +249,7 @@ export default function DevToolsPage() {
                 variant="outline"
                 size="sm"
                 onClick={() => {
-                  purchaseBundle("palm-birth-compat", ["palmReading", "birthChart", "compatibilityTest"]);
+                  purchaseBundle("palm-birth-compat", ["palmReading", "birthChart", "compatibilityTest", "futurePartnerReport"]);
                   showMessage("Full bundle activated");
                 }}
                 className="text-xs"
@@ -445,7 +445,7 @@ export default function DevToolsPage() {
                   resetOnboarding();
                   localStorage.clear();
                   showMessage("All data cleared! Redirecting...");
-                  setTimeout(() => router.push("/onboarding/step-5"), 1500);
+                  setTimeout(() => router.push("/welcome"), 1500);
                 }}
                 className="w-full text-xs border-red-500/50 text-red-400 hover:bg-red-500/20 font-semibold"
               >
@@ -469,18 +469,18 @@ export default function DevToolsPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push("/onboarding/step-17")}
+                onClick={() => router.push("/onboarding/future-prediction/paywall")}
                 className="text-xs"
               >
-                Paywall (Step 17)
+                Future Paywall
               </Button>
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => router.push("/onboarding/step-18")}
+                onClick={() => router.push("/onboarding/soulmate-sketch/paywall")}
                 className="text-xs"
               >
-                Upsells (Step 18)
+                Sketch Paywall
               </Button>
               <Button
                 variant="outline"

@@ -1,128 +1,80 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { staggerContainer, staggerItem } from "@/lib/motion";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useOnboardingStore, Gender } from "@/lib/onboarding-store";
-import Image from "next/image";
-import { cn } from "@/lib/utils";
-import { Menu } from "lucide-react";
-import { OnboardingSidebar } from "@/components/OnboardingSidebar";
+import { Apple } from "lucide-react";
 import { pixelEvents } from "@/lib/pixel-events";
-
-const genderOptions: { value: Gender; label: string; icon: string }[] = [
-  { value: "female", label: "Female", icon: "♀" },
-  { value: "male", label: "Male", icon: "♂" },
-  { value: "non-binary", label: "Non-binary", icon: "⚥" },
-];
+import { Button } from "@/components/ui/button";
+import { BrandedOnboardingHeader } from "@/components/onboarding/BrandedOnboardingHeader";
 
 export default function OnboardingPage() {
   const router = useRouter();
-  const { gender, setGender } = useOnboardingStore();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Route protection: Check user status and redirect accordingly
   useEffect(() => {
     const hasCompletedPayment = localStorage.getItem("astrorekha_payment_completed") === "true";
     const hasCompletedRegistration = localStorage.getItem("astrorekha_registration_completed") === "true";
-    
+
     if (hasCompletedRegistration) {
-      router.replace("/home");
+      router.replace("/dashboard");
       return;
     } else if (hasCompletedPayment) {
-      router.replace("/onboarding/step-18");
+      const flow = localStorage.getItem("palmcosmic_active_flow") || "future_prediction";
+      router.replace(`/onboarding/create-password?flow=${encodeURIComponent(flow)}`);
       return;
     }
   }, [router]);
 
-  const handleGenderSelect = (selectedGender: Gender) => {
-    setGender(selectedGender);
-    pixelEvents.lead(); // Track lead when user starts onboarding
-    router.push("/onboarding/birthday");
+  const handleContinue = () => {
+    pixelEvents.lead();
+    router.push("/onboarding/insights-history");
   };
 
   return (
-    <>
-    <motion.div
-      variants={staggerContainer}
-      initial="hidden"
-      animate="visible"
-      className="flex-1 flex flex-col min-h-screen"
-    >
-      <header className="flex items-center justify-end px-4 py-4">
-        <button 
-          onClick={() => setSidebarOpen(true)}
-          className="p-2 -mr-2 text-foreground/70 hover:text-foreground transition-colors"
-        >
-          <Menu className="w-5 h-5" />
-        </button>
-      </header>
+    <div className="flex-1 min-h-screen bg-[#061525] text-white flex flex-col">
+      <BrandedOnboardingHeader onBack={() => router.back()} />
 
-      <div className="flex-1 flex flex-col items-center px-6">
-        <motion.div variants={staggerItem} className="flex flex-col items-center gap-2 mb-6">
-          <Image
-            src="/logo.png"
-            alt="PalmCosmic"
-            width={48}
-            height={48}
-            className="rounded-xl"
-            onError={(e) => {
-              e.currentTarget.style.display = "none";
-            }}
-          />
-          <span className="text-xl font-semibold">PalmCosmic</span>
-        </motion.div>
-
-        <motion.h1
-          variants={staggerItem}
-          className="text-2xl md:text-3xl font-bold text-center mb-2"
-        >
-          Personalized palm reading with
-          <br />
-          powerful predictions
-        </motion.h1>
-
-        <motion.p
-          variants={staggerItem}
-          className="text-muted-foreground text-center text-sm max-w-sm mb-12"
-        >
-          Complete a 1-minute quiz to get a personalized prediction. The result
-          is not guaranteed and may vary from case to case.
-        </motion.p>
-
-        <motion.p
-          variants={staggerItem}
-          className="text-muted-foreground text-sm mb-6"
-        >
-          Select your gender to start
-        </motion.p>
-
-        <motion.div
-          variants={staggerItem}
-          className="flex gap-4 w-full max-w-md justify-center"
-        >
-          {genderOptions.map((option) => (
-            <button
-              key={option.value}
-              onClick={() => handleGenderSelect(option.value)}
-              className={cn(
-                "flex flex-col items-center justify-center gap-3 p-6 rounded-2xl transition-all duration-200",
-                "bg-card hover:bg-card/80 border border-border hover:border-primary/50",
-                "min-w-[100px] md:min-w-[120px]",
-                gender === option.value && "border-primary bg-primary/10"
-              )}
-            >
-              <div className="w-12 h-12 rounded-full bg-secondary flex items-center justify-center">
-                <span className="text-2xl text-primary">{option.icon}</span>
-              </div>
-              <span className="text-sm font-medium">{option.label}</span>
-            </button>
-          ))}
-        </motion.div>
+      <div className="px-6 pb-4">
+        <div className="w-full h-1.5 bg-[#15314d] rounded-full overflow-hidden">
+          <div className="h-full w-[27%] bg-[#38bdf8] rounded-full" />
+        </div>
       </div>
-    </motion.div>
-    <OnboardingSidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-    </>
+
+      <div className="px-6 pt-3 flex flex-col items-center text-center">
+        <h1 className="text-2xl md:text-[28px] leading-tight font-semibold tracking-tight mb-4 max-w-[21rem]">
+          Trusted by over 8 million users for guidance and clarity
+        </h1>
+
+        <p className="text-base leading-relaxed text-[#b8c7da] mb-2">
+          Rated 4.9 Stars
+          <br />
+          by our satisfied users
+        </p>
+
+        <div className="text-2xl leading-none tracking-[0.18em] text-[#FFBE2F] mb-8">
+          ★★★★★
+        </div>
+
+        <div className="flex items-center justify-center gap-7 text-sm leading-none text-white/90 font-medium">
+          <div className="flex items-center gap-2.5">
+            <Apple className="w-4 h-4 text-white" strokeWidth={2.3} />
+            <span>App Store</span>
+          </div>
+          <div className="flex items-center gap-2.5">
+            <span className="text-base font-semibold text-[#4285F4]">G</span>
+            <span>Google Play</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-auto px-6 pb-6">
+        <Button
+          onClick={handleContinue}
+          className="w-full h-14 rounded-xl bg-[#38bdf8] text-base font-semibold text-black shadow-[0_18px_40px_rgba(56,189,248,0.24)] hover:bg-[#0284c7]"
+        >
+          Continue
+        </Button>
+      </div>
+    </div>
   );
 }
