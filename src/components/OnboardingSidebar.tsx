@@ -10,10 +10,10 @@ interface OnboardingSidebarProps {
 
 export function OnboardingSidebar({ isOpen, onClose }: OnboardingSidebarProps) {
   const menuItems = [
-    { label: "About us", href: "Terms/about-us.html" },
-    { label: "Contact us", href: "Terms/contact-us.html" },
-    { label: "Privacy Policy", href: "Terms/privacy-policy.html" },
-    { label: "Terms of Service", href: "Terms/terms-of-service.html" },
+    { label: "About us", href: "/Terms/about-us.html" },
+    { label: "Contact us", href: "/Terms/contact-us.html" },
+    { label: "Privacy Policy", href: "/Terms/privacy-policy.html" },
+    { label: "Terms of Service", href: "/Terms/terms-of-service.html" },
   ];
 
   return (
@@ -53,6 +53,7 @@ export function OnboardingSidebar({ isOpen, onClose }: OnboardingSidebarProps) {
                     key={item.label}
                     href={item.href}
                     target={item.href.startsWith("mailto") ? undefined : "_blank"}
+                    rel={item.href.startsWith("mailto") ? undefined : "noopener noreferrer"}
                     initial={{ opacity: 0, x: 20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.1 + index * 0.05 }}

@@ -11,15 +11,16 @@ import { pixelEvents } from "@/lib/pixel-events";
 import { generateUserId } from "@/lib/user-profile";
 import { runDemoPaymentBypass } from "@/lib/demo-payment";
 import { CouponCodeLink } from "@/components/onboarding/CouponCodeLink";
+import { OnboardingMenuButton } from "@/components/onboarding/OnboardingMenuButton";
 
 const INTRO_SECONDS = 12 * 60 + 45;
 
 const legalLine = (
   <>
-    (c) 2026 PalmCosmic. By continuing, you agree to our{" "}
-    <a href="/terms-of-service" className="underline underline-offset-2">Terms</a>{" "}
+    © 2026 PalmCosmic. By continuing, you agree to our{" "}
+    <a href="/Terms/terms-of-service.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">Terms</a>{" "}
     and{" "}
-    <a href="/privacy-policy" className="underline underline-offset-2">Privacy Policy</a>.
+    <a href="/Terms/privacy-policy.html" target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">Privacy Policy</a>.
     Start with an introductory offer of $0.99 USD for 3 days. After that, PalmCosmic Monthly Access renews at $9 USD/month and unlocks all reports while active. You can manage or cancel anytime.
   </>
 );
@@ -186,13 +187,14 @@ export default function FuturePartnerPaywallPage() {
     <main className="min-h-[100svh] bg-[#061525] text-white">
       <section className="sticky top-0 z-20 border-b border-[#38bdf8]/15 bg-[#071a2b]/95 px-5 py-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[28rem] items-center justify-between gap-4">
-          <div className="leading-tight">
+          <div className="min-w-0 flex-1 leading-tight">
             <p className="text-sm font-semibold text-[#38bdf8]">Your future partner reading is ready</p>
             <p className="text-xs text-[#b8c7da]">Unlock your relationship guide</p>
           </div>
           <div className="rounded-2xl bg-[#38bdf8] px-4 py-2 text-2xl font-bold tabular-nums text-black shadow-[0_14px_36px_rgba(56,189,248,0.25)]">
             {timerLabel}
           </div>
+          <OnboardingMenuButton className="-mr-2 shrink-0" />
         </div>
       </section>
 

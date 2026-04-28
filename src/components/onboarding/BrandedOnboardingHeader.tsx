@@ -2,6 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import Image from "next/image";
+import { OnboardingMenuButton } from "@/components/onboarding/OnboardingMenuButton";
 
 interface BrandedOnboardingHeaderProps {
   onBack: () => void;
@@ -27,6 +28,9 @@ export function BrandedOnboardingHeader({ onBack }: BrandedOnboardingHeaderProps
           priority
         />
         <span className="text-lg font-semibold text-white">PalmCosmic</span>
+      </div>
+      <div className="absolute right-4">
+        <OnboardingMenuButton />
       </div>
     </header>
   );
