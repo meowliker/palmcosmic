@@ -106,17 +106,11 @@ export default function Step6Page() {
           <div className="relative mx-auto h-[38svh] min-h-[15rem] max-h-[21rem] w-full">
             <div className="absolute inset-[-18%] rounded-full bg-[#38bdf8]/10 blur-3xl" />
             <Image
-              src="/onboarding-couple.png"
-              alt="Happy couple laughing together"
+              src="/onboarding-step-6-zodiac.png"
+              alt="Golden zodiac wheel with sun"
               fill
               sizes="(max-width: 768px) 78vw, 304px"
-              className="object-cover object-center opacity-70 mix-blend-luminosity contrast-110 brightness-[0.72] saturate-[0.82]"
-              style={{
-                WebkitMaskImage:
-                  "radial-gradient(ellipse at center, black 34%, rgba(0,0,0,0.82) 52%, rgba(0,0,0,0.28) 66%, transparent 76%)",
-                maskImage:
-                  "radial-gradient(ellipse at center, black 34%, rgba(0,0,0,0.82) 52%, rgba(0,0,0,0.28) 66%, transparent 76%)",
-              }}
+              className="object-contain object-center drop-shadow-[0_0_38px_rgba(245,178,77,0.28)]"
               priority
             />
             <div
