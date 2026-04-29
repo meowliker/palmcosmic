@@ -302,17 +302,6 @@ function buildWeekdaySalesSeries(
   });
 }
 
-async function fetchExchangeRate(): Promise<number> {
-  try {
-    const response = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
-    const data = await response.json();
-    const inr = Number(data?.rates?.INR);
-    return Number.isFinite(inr) && inr > 0 ? inr : 85;
-  } catch {
-    return 85;
-  }
-}
-
 async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promise<Map<string, number>> {
   const metaAccessToken = process.env.META_ACCESS_TOKEN;
   const adAccountId = process.env.META_AD_ACCOUNT_ID;

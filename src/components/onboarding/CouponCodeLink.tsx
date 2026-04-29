@@ -132,9 +132,6 @@ export function CouponCodeLink({ flow, route, stepId, emailPath }: CouponCodeLin
               <div className="mb-4 flex items-start justify-between gap-4">
                 <div>
                   <h2 className="text-lg font-bold text-white">Enter coupon code</h2>
-                  <p className="mt-1 text-sm leading-5 text-[#8fa3b8]">
-                    Test access without a payment charge.
-                  </p>
                 </div>
                 <button
                   type="button"

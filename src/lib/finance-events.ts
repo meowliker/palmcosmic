@@ -2,7 +2,7 @@ export type FinancialEventKind = "sale" | "refund" | "ignore";
 
 export interface FinancialEvent {
   kind: FinancialEventKind;
-  amount: number; // absolute amount in INR
+  amount: number; // absolute amount in major currency units
   signedAmount: number; // +amount for sale, -amount for refund, 0 for ignore
   status: string;
 }
@@ -40,13 +40,13 @@ export function isSaleLikeStatus(status: unknown): boolean {
   return SALE_STATUSES.has(normalizeFinanceStatus(status));
 }
 
-export function classifyStoredPaymentEvent(status: unknown, amountInPaise: unknown): FinancialEvent {
+export function classifyStoredPaymentEvent(status: unknown, amountInMinorUnits: unknown): FinancialEvent {
   const normalizedStatus = normalizeFinanceStatus(status);
-  const rawPaise = toNumber(amountInPaise);
-  const amount = Math.abs(rawPaise) / 100;
+  const rawMinorUnits = toNumber(amountInMinorUnits);
+  const amount = Math.abs(rawMinorUnits) / 100;
 
   // Negative rows are treated as refunds regardless of status label.
-  if (rawPaise < 0 || isRefundLikeStatus(normalizedStatus)) {
+  if (rawMinorUnits < 0 || isRefundLikeStatus(normalizedStatus)) {
     return {
       kind: amount > 0 ? "refund" : "ignore",
       amount,

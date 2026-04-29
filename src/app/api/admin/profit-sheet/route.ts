@@ -34,7 +34,7 @@ type FinancialRow = {
   createdAt: Date;
   dayKey: string;
   kind: "sale" | "refund";
-  amountInr: number;
+  amountUsd: number;
 };
 
 function pad2(value: number): string {
@@ -43,17 +43,6 @@ function pad2(value: number): string {
 
 function isIsoDate(value: string | null): value is string {
   return !!value && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
-}
-
-async function fetchExchangeRate(): Promise<number> {
-  try {
-    const response = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
-    const data = await response.json();
-    const rate = Number(data.rates?.INR);
-    return Number.isFinite(rate) && rate > 0 ? rate : 85;
-  } catch {
-    return 85;
-  }
 }
 
 async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promise<Map<string, number>> {
@@ -184,13 +173,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Session expired" }, { status: 401 });
     }
 
-    const customExchangeRate = searchParams.get("exchangeRate");
-    const parsedExchangeRate = customExchangeRate ? Number(customExchangeRate) : null;
-    const exchangeRate =
-      parsedExchangeRate && Number.isFinite(parsedExchangeRate) && parsedExchangeRate > 0
-        ? parsedExchangeRate
-        : await fetchExchangeRate();
-
     const metaSpendMap = await fetchMetaAdsDailySpend(startDate, endDate);
     const dates = getDateRange(startDate, endDate);
     const businessWindow = getBusinessWindow(startDate, endDate);
@@ -222,7 +204,7 @@ export async function GET(request: NextRequest) {
           createdAt,
           dayKey,
           kind: financial.kind,
-          amountInr: financial.amount * exchangeRate,
+          amountUsd: financial.amount,
         } satisfies FinancialRow;
       })
       .filter((row): row is FinancialRow => !!row);
@@ -231,15 +213,14 @@ export async function GET(request: NextRequest) {
       const dayTransactions = financialRows.filter((txn) => txn.dayKey === date);
       const saleRows = dayTransactions.filter((event) => event.kind === "sale");
       const refundRows = dayTransactions.filter((event) => event.kind === "refund");
-      const grossRevenue = saleRows.reduce((sum, event) => sum + event.amountInr, 0);
-      const refundAmount = refundRows.reduce((sum, event) => sum + event.amountInr, 0);
+      const grossRevenue = saleRows.reduce((sum, event) => sum + event.amountUsd, 0);
+      const refundAmount = refundRows.reduce((sum, event) => sum + event.amountUsd, 0);
       const revenue = grossRevenue - refundAmount;
       const gst = Math.max(revenue, 0) * 0.05;
       const adsCostUSD = metaSpendMap.get(date) || 0;
-      const adsCostINR = adsCostUSD * exchangeRate;
-      const netRevenue = revenue - gst - adsCostINR;
+      const netRevenue = revenue - gst - adsCostUSD;
       const profitPercent = revenue > 0 ? (netRevenue / revenue) * 100 : 0;
-      const roas = adsCostINR > 0 ? revenue / adsCostINR : 0;
+      const roas = adsCostUSD > 0 ? revenue / adsCostUSD : 0;
 
       return {
         date,
@@ -249,7 +230,7 @@ export async function GET(request: NextRequest) {
         refundAmount,
         gst,
         adsCostUSD,
-        adsCostINR,
+        adsCostINR: adsCostUSD,
         netRevenue,
         profitPercent,
         roas,
@@ -286,7 +267,7 @@ export async function GET(request: NextRequest) {
       }
     );
 
-    const overallRoas = totals.adsCostINR > 0 ? totals.revenue / totals.adsCostINR : 0;
+    const overallRoas = totals.adsCostUSD > 0 ? totals.revenue / totals.adsCostUSD : 0;
     const overallProfitPercent = totals.revenue > 0 ? (totals.netRevenue / totals.revenue) * 100 : 0;
 
     return NextResponse.json({
@@ -296,9 +277,9 @@ export async function GET(request: NextRequest) {
         roas: overallRoas,
         profitPercent: overallProfitPercent,
       },
-      exchangeRate,
+      exchangeRate: 1,
       source: "stripe_supabase",
-      currency: "INR",
+      currency: "USD",
       sourceCurrency: "USD",
       businessRule: "Stripe day: 11:30 AM IST -> next 11:29 AM IST",
       dateRange: { start: startDate, end: endDate },

@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   TrendingUp,
-  IndianRupee,
   Users,
   CreditCard,
   RefreshCw,
@@ -53,10 +52,10 @@ interface ProfitSheetRow {
   refundAmount?: number;  // Refund amount for that day
   gst: number;            // 5% of revenue
   adsCostUSD: number;     // Meta Ads spend in USD
-  adsCostINR: number;     // Meta Ads spend converted to INR
-  netRevenue: number;     // Profit: Revenue - GST - Ads Cost (INR)
+  adsCostINR: number;     // Deprecated alias; value is USD for dashboard compatibility
+  netRevenue: number;     // Profit: Revenue - GST - Meta spend (USD)
   profitPercent?: number; // Profit / Revenue * 100
-  roas: number;           // Revenue / Ads Cost INR (if ads cost > 0)
+  roas: number;           // Revenue / Meta spend USD (if ads cost > 0)
   transactionCount: number;
   salesCount?: number;
   refundCount?: number;
@@ -115,7 +114,8 @@ interface MetaBreakdownData {
     totalRefunds?: number;
     gst: number;
     netRevenue: number;
-    totalSpendINR: number;
+    totalSpend?: number;
+    totalSpendINR: number; // Deprecated alias; value is USD for dashboard compatibility.
     profit: number;
     roas: number;
   };
@@ -132,7 +132,7 @@ interface MetaBreakdownData {
   };
   totals: {
     spend: number;
-    spendINR: number;
+    spendINR: number; // Deprecated alias; value is USD for dashboard compatibility.
     impressions: number;
     clicks: number;
     purchases: number;
@@ -636,14 +636,11 @@ export default function AdminRevenuePage() {
   const [profitSheetEndDate, setProfitSheetEndDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [profitSheetFilter, setProfitSheetFilter] = useState<string>("all");
   const [profitSheetRoasFilter, setProfitSheetRoasFilter] = useState<string>("all");
-  const [profitSheetExchangeRate, setProfitSheetExchangeRate] = useState<number>(85);
-  const [profitSheetCustomExchangeRate, setProfitSheetCustomExchangeRate] = useState<string>("");
 
   // Meta Breakdown state
   const [metaBreakdown, setMetaBreakdown] = useState<MetaBreakdownData | null>(null);
   const [metaBreakdownLoading, setMetaBreakdownLoading] = useState(false);
   const [metaBreakdownDatePreset, setMetaBreakdownDatePreset] = useState<string>("last_7d");
-  const [metaBreakdownExchangeRate, setMetaBreakdownExchangeRate] = useState<string>("");
   const [metaBreakdownStartDate, setMetaBreakdownStartDate] = useState<string>(
     () => getPresetCalendarRange("last_7d").startDate
   );
@@ -778,20 +775,14 @@ export default function AdminRevenuePage() {
   };
 
   // Fetch Profit Sheet data
-  const fetchProfitSheet = async (customRate?: number) => {
+  const fetchProfitSheet = async () => {
     try {
       setProfitSheetLoading(true);
       setProfitSheetError(null);
       const token = localStorage.getItem("admin_session_token");
       if (!token) return;
 
-      let url = `/api/admin/profit-sheet?token=${token}&startDate=${profitSheetStartDate}&endDate=${profitSheetEndDate}`;
-
-      // Use custom exchange rate if provided
-      const rateToUse = customRate || (profitSheetCustomExchangeRate ? parseFloat(profitSheetCustomExchangeRate) : undefined);
-      if (rateToUse) {
-        url += `&exchangeRate=${rateToUse}`;
-      }
+      const url = `/api/admin/profit-sheet?token=${token}&startDate=${profitSheetStartDate}&endDate=${profitSheetEndDate}`;
 
       const res = await fetch(url);
       if (res.status === 401) {
@@ -808,12 +799,6 @@ export default function AdminRevenuePage() {
 
       const result = await res.json();
       setProfitSheetData(result.rows || []);
-      if (result.exchangeRate) {
-        setProfitSheetExchangeRate(result.exchangeRate);
-        if (!profitSheetCustomExchangeRate) {
-          setProfitSheetCustomExchangeRate(result.exchangeRate.toFixed(2));
-        }
-      }
     } catch (err) {
       console.error("Profit sheet fetch error:", err);
       setProfitSheetError(err instanceof Error ? err.message : "Failed to fetch profit sheet");
@@ -824,7 +809,7 @@ export default function AdminRevenuePage() {
   };
 
   // Fetch Meta Breakdown data
-  const fetchMetaBreakdown = async (customRate?: number, startDate?: string, endDate?: string) => {
+  const fetchMetaBreakdown = async (startDate?: string, endDate?: string) => {
     try {
       setMetaBreakdownLoading(true);
       const token = localStorage.getItem("admin_session_token");
@@ -845,18 +830,10 @@ export default function AdminRevenuePage() {
         url += `&datePreset=${metaBreakdownDatePreset}`;
       }
 
-      const rateToUse = customRate || (metaBreakdownExchangeRate ? parseFloat(metaBreakdownExchangeRate) : undefined);
-      if (rateToUse) {
-        url += `&exchangeRate=${rateToUse}`;
-      }
-
       const res = await fetch(url);
       if (res.ok) {
         const result = await res.json();
         setMetaBreakdown(result);
-        if (result.exchangeRate && !metaBreakdownExchangeRate) {
-          setMetaBreakdownExchangeRate(result.exchangeRate.toFixed(2));
-        }
       }
     } catch (err) {
       console.error("Meta breakdown fetch error:", err);
@@ -986,10 +963,9 @@ export default function AdminRevenuePage() {
 
   const formatCurrency = (value: string | number) => {
     const num = typeof value === "string" ? parseFloat(value) : value;
-    const currency = data.currency || "USD";
-    return new Intl.NumberFormat(currency === "USD" ? "en-US" : "en-IN", {
+    return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency,
+      currency: "USD",
     }).format(num);
   };
 
@@ -1323,14 +1299,14 @@ export default function AdminRevenuePage() {
         {/* Primary KPIs */}
         <section>
           <h2 className="text-white/70 text-sm font-medium mb-3 flex items-center gap-2">
-            <IndianRupee className="w-4 h-4" /> Primary KPIs
+            <CreditCard className="w-4 h-4" /> Primary KPIs
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <KPICard
               title="Total Revenue"
               value={formatCurrency(data.totalRevenue)}
               subtitle="All time"
-              icon={<IndianRupee className="w-4 h-4" />}
+              icon={<CreditCard className="w-4 h-4" />}
               color="text-green-400"
               tooltip="Total revenue from all paid Stripe/Supabase payments."
             />
@@ -1521,7 +1497,7 @@ export default function AdminRevenuePage() {
                   <span className="text-white/50 text-xs">Selected Range</span>
                   <Tooltip content="Revenue for the selected date range." />
                 </div>
-                <span className="text-green-400"><IndianRupee className="w-4 h-4" /></span>
+                <span className="text-green-400"><CreditCard className="w-4 h-4" /></span>
               </div>
               <p className="text-xl font-bold text-green-400">{formatCurrency(selectedDateRevenue)}</p>
               <p className="text-white/40 text-xs mt-1">{selectedDatePaymentCount} payments</p>
@@ -1896,10 +1872,7 @@ export default function AdminRevenuePage() {
             setPeriodFilter={setProfitSheetFilter}
             roasFilter={profitSheetRoasFilter}
             setRoasFilter={setProfitSheetRoasFilter}
-            exchangeRate={profitSheetCustomExchangeRate}
-            setExchangeRate={setProfitSheetCustomExchangeRate}
             onRefresh={() => fetchProfitSheet()}
-            onRefreshWithRate={(rate) => fetchProfitSheet(rate)}
           />
         )}
 
@@ -1916,15 +1889,12 @@ export default function AdminRevenuePage() {
             setEndDate={setMetaBreakdownEndDate}
             useCustomDateRange={metaBreakdownUseCustomDateRange}
             setUseCustomDateRange={setMetaBreakdownUseCustomDateRange}
-            exchangeRate={metaBreakdownExchangeRate}
-            setExchangeRate={setMetaBreakdownExchangeRate}
             expandedCampaigns={expandedCampaigns}
             expandedAdsets={expandedAdsets}
             toggleCampaign={toggleCampaign}
             toggleAdset={toggleAdset}
             onRefresh={() => fetchMetaBreakdown()}
-            onRefreshWithRate={(rate) => fetchMetaBreakdown(rate)}
-            onCustomDateRefresh={(start, end) => fetchMetaBreakdown(undefined, start, end)}
+            onCustomDateRefresh={(start, end) => fetchMetaBreakdown(start, end)}
           />
         )}
 
@@ -1960,10 +1930,7 @@ function ProfitSheetTab({
   setPeriodFilter,
   roasFilter,
   setRoasFilter,
-  exchangeRate,
-  setExchangeRate,
   onRefresh,
-  onRefreshWithRate,
 }: {
   data: ProfitSheetRow[];
   loading: boolean;
@@ -1976,15 +1943,12 @@ function ProfitSheetTab({
   setPeriodFilter: (v: string) => void;
   roasFilter: string;
   setRoasFilter: (v: string) => void;
-  exchangeRate: string;
-  setExchangeRate: (v: string) => void;
   onRefresh: () => void;
-  onRefreshWithRate: (rate: number) => void;
 }) {
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-IN", {
+    return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "INR",
+      currency: "USD",
       minimumFractionDigits: 2,
     }).format(value);
   };
@@ -2022,7 +1986,7 @@ function ProfitSheetTab({
   } else if (roasFilter === "negative") {
     filteredData = filteredData.filter(row => row.roas > 0 && row.roas <= 1);
   } else if (roasFilter === "noads") {
-    filteredData = filteredData.filter(row => row.adsCostINR === 0);
+    filteredData = filteredData.filter(row => row.adsCostUSD === 0);
   }
 
   // Calculate totals
@@ -2033,7 +1997,7 @@ function ProfitSheetTab({
       refundAmount: acc.refundAmount + (row.refundAmount ?? 0),
       gst: acc.gst + row.gst,
       adsCostUSD: acc.adsCostUSD + row.adsCostUSD,
-      adsCostINR: acc.adsCostINR + row.adsCostINR,
+      adsCostINR: acc.adsCostINR + row.adsCostUSD,
       netRevenue: acc.netRevenue + row.netRevenue,
       transactionCount: acc.transactionCount + row.transactionCount,
       refundCount: acc.refundCount + (row.refundCount ?? 0),
@@ -2050,7 +2014,7 @@ function ProfitSheetTab({
       refundCount: 0,
     }
   );
-  const overallRoas = totals.adsCostINR > 0 ? totals.revenue / totals.adsCostINR : 0;
+  const overallRoas = totals.adsCostUSD > 0 ? totals.revenue / totals.adsCostUSD : 0;
   const overallProfitPercent = totals.revenue > 0 ? (totals.netRevenue / totals.revenue) * 100 : 0;
 
   return (
@@ -2102,29 +2066,6 @@ function ProfitSheetTab({
               <option value="noads">No Ads</option>
             </select>
           </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">USD to INR Rate</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                step="0.01"
-                value={exchangeRate}
-                onChange={(e) => setExchangeRate(e.target.value)}
-                className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-                placeholder="85.00"
-              />
-              <button
-                onClick={() => {
-                  const rate = parseFloat(exchangeRate);
-                  if (rate > 0) onRefreshWithRate(rate);
-                }}
-                disabled={loading}
-                className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm rounded-lg transition-colors disabled:opacity-50"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
           <button
             onClick={onRefresh}
             disabled={loading}
@@ -2135,7 +2076,7 @@ function ProfitSheetTab({
           </button>
         </div>
         <p className="text-white/30 text-xs mt-3">
-          Note: Each date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue and Meta spend are compared in INR using the selected USD rate.
+          Note: Each date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue and Meta spend are shown in USD.
         </p>
       </div>
       {error && (
@@ -2172,8 +2113,7 @@ function ProfitSheetTab({
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
           <p className="text-white/50 text-xs mb-1">Meta Spend</p>
-          <p className="text-red-400 text-xl font-bold">{formatCurrency(totals.adsCostINR)}</p>
-          <p className="text-white/35 text-[11px] mt-1">${totals.adsCostUSD.toFixed(2)} USD</p>
+          <p className="text-red-400 text-xl font-bold">{formatCurrency(totals.adsCostUSD)}</p>
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
           <p className="text-white/50 text-xs mb-1">Profit</p>
@@ -2243,8 +2183,7 @@ function ProfitSheetTab({
                         <td className="text-green-400 text-sm px-4 py-3 text-right font-medium">{formatCurrency(row.revenue)}</td>
                         <td className="text-amber-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.gst)}</td>
                         <td className="text-red-400/70 text-sm px-4 py-3 text-right">
-                          {formatCurrency(row.adsCostINR)}
-                          <span className="block text-white/30 text-[11px]">${row.adsCostUSD.toFixed(2)}</span>
+                          {formatCurrency(row.adsCostUSD)}
                         </td>
                         <td className={`text-sm px-4 py-3 text-right font-medium ${row.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
                           {formatCurrency(row.netRevenue)}
@@ -2269,8 +2208,7 @@ function ProfitSheetTab({
                       <td className="text-green-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.revenue)}</td>
                       <td className="text-amber-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.gst)}</td>
                       <td className="text-red-400 text-sm px-4 py-3 text-right">
-                        {formatCurrency(totals.adsCostINR)}
-                        <span className="block text-white/35 text-[11px]">${totals.adsCostUSD.toFixed(2)}</span>
+                        {formatCurrency(totals.adsCostUSD)}
                       </td>
                       <td className={`text-sm px-4 py-3 text-right ${totals.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
                         {formatCurrency(totals.netRevenue)}
@@ -2307,14 +2245,11 @@ function MetaBreakdownTab({
   setEndDate,
   useCustomDateRange,
   setUseCustomDateRange,
-  exchangeRate,
-  setExchangeRate,
   expandedCampaigns,
   expandedAdsets,
   toggleCampaign,
   toggleAdset,
   onRefresh,
-  onRefreshWithRate,
   onCustomDateRefresh,
 }: {
   data: MetaBreakdownData | null;
@@ -2327,27 +2262,25 @@ function MetaBreakdownTab({
   setEndDate: (v: string) => void;
   useCustomDateRange: boolean;
   setUseCustomDateRange: (v: boolean) => void;
-  exchangeRate: string;
-  setExchangeRate: (v: string) => void;
   expandedCampaigns: Set<string>;
   expandedAdsets: Set<string>;
   toggleCampaign: (id: string) => void;
   toggleAdset: (id: string) => void;
   onRefresh: () => void;
-  onRefreshWithRate: (rate: number) => void;
   onCustomDateRefresh: (start: string, end: string) => void;
 }) {
-  const formatUSD = (value: number) => `$${value.toFixed(2)}`;
-  const formatINR = (value: number) => {
-    const rate = exchangeRate ? parseFloat(exchangeRate) : 85;
-    return `₹${(value * rate).toFixed(2)}`;
-  };
+  const formatUSD = (value: number) =>
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+    }).format(value || 0);
   const formatPercent = (value: number) => `${value.toFixed(2)}%`;
 
   // Campaign/adset/ad rows are Meta-attributed estimates. The top revenue summary is actual Stripe/Supabase revenue.
   const AVG_ORDER_VALUE = data?.revenue?.totalSales && data?.revenue?.totalRevenue
     ? data.revenue.totalRevenue / data.revenue.totalSales
-    : 1500;
+    : 0;
   const firstPartySales = data?.sourceBreakdown?.firstPartySales ?? data?.revenue?.totalSales ?? 0;
   const metaPurchases = data?.sourceBreakdown?.metaPurchases ?? data?.totals?.purchases ?? 0;
   const organicOrUnattributedSales = data?.sourceBreakdown?.organicOrUnattributedSales ?? Math.max(firstPartySales - metaPurchases, 0);
@@ -2355,24 +2288,19 @@ function MetaBreakdownTab({
   const resolveDisplayRoas = (purchases: number, spend: number, roas: number) => {
     if (roas > 0) return roas.toFixed(2);
     if (spend === 0 || purchases === 0) return "-";
-    const rate = exchangeRate ? parseFloat(exchangeRate) : 85;
     const estimatedRevenue = purchases * AVG_ORDER_VALUE;
-    const spendINR = spend * rate;
-    if (spendINR === 0) return "-";
-    return (estimatedRevenue / spendINR).toFixed(2);
+    return spend > 0 ? (estimatedRevenue / spend).toFixed(2) : "-";
   };
 
   // Calculate estimated profit per campaign
   const calculateEstimatedProfit = (purchases: number, spend: number, roas: number) => {
-    const rate = exchangeRate ? parseFloat(exchangeRate) : 85;
-    const spendINR = spend * rate;
-    if (spendINR <= 0) return 0;
+    if (spend <= 0) return 0;
     if (roas > 0) {
-      const metaRevenueInr = roas * spendINR;
-      return metaRevenueInr - spendINR;
+      const metaRevenueUsd = roas * spend;
+      return metaRevenueUsd - spend;
     }
-    const estimatedRevenueInr = purchases * AVG_ORDER_VALUE;
-    return estimatedRevenueInr - spendINR;
+    const estimatedRevenueUsd = purchases * AVG_ORDER_VALUE;
+    return estimatedRevenueUsd - spend;
   };
 
   const getRowRoas = (row: MetaAdMetrics) => {
@@ -2654,29 +2582,6 @@ function MetaBreakdownTab({
               </div>
             )}
           </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">USD to INR Rate</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                step="0.01"
-                value={exchangeRate}
-                onChange={(e) => setExchangeRate(e.target.value)}
-                className="w-20 bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-                placeholder="85.00"
-              />
-              <button
-                onClick={() => {
-                  const rate = parseFloat(exchangeRate);
-                  if (rate > 0) onRefreshWithRate(rate);
-                }}
-                disabled={loading}
-                className="px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-400 text-sm rounded-lg transition-colors disabled:opacity-50"
-              >
-                Apply
-              </button>
-            </div>
-          </div>
           <button
             onClick={onRefresh}
             disabled={loading}
@@ -2698,7 +2603,7 @@ function MetaBreakdownTab({
           <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
             <div>
             <p className="text-white/40 text-xs mb-1">Actual Revenue</p>
-              <p className="text-green-400 text-xl font-bold">₹{data.revenue.totalRevenue.toLocaleString()}</p>
+              <p className="text-green-400 text-xl font-bold">{formatUSD(data.revenue.totalRevenue)}</p>
             </div>
             <div>
               <p className="text-white/40 text-xs mb-1">First-Party Sales</p>
@@ -2706,20 +2611,20 @@ function MetaBreakdownTab({
             </div>
             <div>
               <p className="text-white/40 text-xs mb-1">GST (5%)</p>
-              <p className="text-amber-400 text-lg font-bold">₹{data.revenue.gst.toLocaleString()}</p>
+              <p className="text-amber-400 text-lg font-bold">{formatUSD(data.revenue.gst)}</p>
             </div>
             <div>
               <p className="text-white/40 text-xs mb-1">Net Revenue</p>
-              <p className="text-green-400/80 text-lg font-bold">₹{data.revenue.netRevenue.toLocaleString()}</p>
+              <p className="text-green-400/80 text-lg font-bold">{formatUSD(data.revenue.netRevenue)}</p>
             </div>
             <div>
-              <p className="text-white/40 text-xs mb-1">Ad Spend (INR)</p>
-              <p className="text-red-400 text-xl font-bold">₹{data.revenue.totalSpendINR.toLocaleString()}</p>
+              <p className="text-white/40 text-xs mb-1">Ad Spend (USD)</p>
+              <p className="text-red-400 text-xl font-bold">{formatUSD(data.revenue.totalSpend ?? data.revenue.totalSpendINR)}</p>
             </div>
             <div>
               <p className="text-white/40 text-xs mb-1">Actual Profit</p>
               <p className={`text-xl font-bold ${data.revenue.profit >= 0 ? "text-green-400" : "text-red-400"}`}>
-                {data.revenue.profit >= 0 ? "" : "-"}₹{Math.abs(data.revenue.profit).toLocaleString()}
+                {data.revenue.profit >= 0 ? "" : "-"}{formatUSD(Math.abs(data.revenue.profit))}
               </p>
             </div>
             <div>
@@ -2754,12 +2659,12 @@ function MetaBreakdownTab({
           <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
             <p className="text-white/50 text-xs mb-1">CPA (Cost/Purchase)</p>
             <p className="text-amber-400 text-xl font-bold">
-              {metaPurchases > 0 ? formatINR(data.totals.costPerPurchase) : "-"}
+              {metaPurchases > 0 ? formatUSD(data.totals.costPerPurchase) : "-"}
             </p>
           </div>
           <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
             <p className="text-white/50 text-xs mb-1">CPM</p>
-            <p className="text-white/70 text-xl font-bold">{formatINR(data.totals.cpm)}</p>
+            <p className="text-white/70 text-xl font-bold">{formatUSD(data.totals.cpm)}</p>
           </div>
           <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
             <p className="text-white/50 text-xs mb-1">CTR</p>
@@ -2821,16 +2726,16 @@ function MetaBreakdownTab({
                           {getAttributionBadge(campaign)}
                         </div>
                       </td>
-                      <td className="text-red-400 px-4 py-3 text-right">{formatINR(campaign.spend)}</td>
-                      <td className="text-white/60 px-4 py-3 text-right">{campaign.budget ? formatINR(campaign.budget) : "-"}</td>
+                      <td className="text-red-400 px-4 py-3 text-right">{formatUSD(campaign.spend)}</td>
+                      <td className="text-white/60 px-4 py-3 text-right">{campaign.budget ? formatUSD(campaign.budget) : "-"}</td>
                       <td className="text-green-400 px-4 py-3 text-right">{getRowRoas(campaign)}</td>
                       <td className={`px-4 py-3 text-right ${getRowProfit(campaign) >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        {getRowProfit(campaign) >= 0 ? "" : "-"}₹{Math.abs(getRowProfit(campaign)).toFixed(2)}
+                        {getRowProfit(campaign) >= 0 ? "" : "-"}{formatUSD(Math.abs(getRowProfit(campaign)))}
                       </td>
                       <td className="text-white px-4 py-3 text-right">{getRowPurchases(campaign)}</td>
-                      <td className="text-white/60 px-4 py-3 text-right">{formatINR(campaign.cpc)}</td>
-                      <td className="text-amber-400 px-4 py-3 text-right">{campaign.costPerPurchase > 0 ? formatINR(campaign.costPerPurchase) : "-"}</td>
-                      <td className="text-white/60 px-4 py-3 text-right">{formatINR(campaign.cpm)}</td>
+                      <td className="text-white/60 px-4 py-3 text-right">{formatUSD(campaign.cpc)}</td>
+                      <td className="text-amber-400 px-4 py-3 text-right">{campaign.costPerPurchase > 0 ? formatUSD(campaign.costPerPurchase) : "-"}</td>
+                      <td className="text-white/60 px-4 py-3 text-right">{formatUSD(campaign.cpm)}</td>
                       <td className="text-blue-400 px-4 py-3 text-right">{formatPercent(campaign.ctr)}</td>
                     </tr>
 
@@ -2852,16 +2757,16 @@ function MetaBreakdownTab({
                               {getAttributionBadge(adset)}
                             </div>
                           </td>
-                          <td className="text-red-400/80 px-4 py-3 text-right">{formatINR(adset.spend)}</td>
-                          <td className="text-white/50 px-4 py-3 text-right">{adset.budget ? formatINR(adset.budget) : "-"}</td>
+                          <td className="text-red-400/80 px-4 py-3 text-right">{formatUSD(adset.spend)}</td>
+                          <td className="text-white/50 px-4 py-3 text-right">{adset.budget ? formatUSD(adset.budget) : "-"}</td>
                           <td className="text-green-400/80 px-4 py-3 text-right">{getRowRoas(adset)}</td>
                           <td className={`px-4 py-3 text-right ${getRowProfit(adset) >= 0 ? "text-green-400/80" : "text-red-400/80"}`}>
-                            {getRowProfit(adset) >= 0 ? "" : "-"}₹{Math.abs(getRowProfit(adset)).toFixed(2)}
+                            {getRowProfit(adset) >= 0 ? "" : "-"}{formatUSD(Math.abs(getRowProfit(adset)))}
                           </td>
                           <td className="text-white/80 px-4 py-3 text-right">{getRowPurchases(adset)}</td>
-                          <td className="text-white/50 px-4 py-3 text-right">{formatINR(adset.cpc)}</td>
-                          <td className="text-amber-400/80 px-4 py-3 text-right">{adset.costPerPurchase > 0 ? formatINR(adset.costPerPurchase) : "-"}</td>
-                          <td className="text-white/50 px-4 py-3 text-right">{formatINR(adset.cpm)}</td>
+                          <td className="text-white/50 px-4 py-3 text-right">{formatUSD(adset.cpc)}</td>
+                          <td className="text-amber-400/80 px-4 py-3 text-right">{adset.costPerPurchase > 0 ? formatUSD(adset.costPerPurchase) : "-"}</td>
+                          <td className="text-white/50 px-4 py-3 text-right">{formatUSD(adset.cpm)}</td>
                           <td className="text-blue-400/80 px-4 py-3 text-right">{formatPercent(adset.ctr)}</td>
                         </tr>
 
@@ -2876,16 +2781,16 @@ function MetaBreakdownTab({
                                 {getAttributionBadge(ad)}
                               </div>
                             </td>
-                            <td className="text-red-400/60 px-4 py-3 text-right text-xs">{formatINR(ad.spend)}</td>
+                            <td className="text-red-400/60 px-4 py-3 text-right text-xs">{formatUSD(ad.spend)}</td>
                             <td className="text-white/40 px-4 py-3 text-right text-xs">-</td>
                             <td className="text-green-400/60 px-4 py-3 text-right text-xs">{getRowRoas(ad)}</td>
                             <td className={`px-4 py-3 text-right text-xs ${getRowProfit(ad) >= 0 ? "text-green-400/60" : "text-red-400/60"}`}>
-                              {getRowProfit(ad) >= 0 ? "" : "-"}₹{Math.abs(getRowProfit(ad)).toFixed(2)}
+                              {getRowProfit(ad) >= 0 ? "" : "-"}{formatUSD(Math.abs(getRowProfit(ad)))}
                             </td>
                             <td className="text-white/60 px-4 py-3 text-right text-xs">{getRowPurchases(ad)}</td>
-                            <td className="text-white/40 px-4 py-3 text-right text-xs">{formatINR(ad.cpc)}</td>
-                            <td className="text-amber-400/60 px-4 py-3 text-right text-xs">{ad.costPerPurchase > 0 ? formatINR(ad.costPerPurchase) : "-"}</td>
-                            <td className="text-white/40 px-4 py-3 text-right text-xs">{formatINR(ad.cpm)}</td>
+                            <td className="text-white/40 px-4 py-3 text-right text-xs">{formatUSD(ad.cpc)}</td>
+                            <td className="text-amber-400/60 px-4 py-3 text-right text-xs">{ad.costPerPurchase > 0 ? formatUSD(ad.costPerPurchase) : "-"}</td>
+                            <td className="text-white/40 px-4 py-3 text-right text-xs">{formatUSD(ad.cpm)}</td>
                             <td className="text-blue-400/60 px-4 py-3 text-right text-xs">{formatPercent(ad.ctr)}</td>
                           </tr>
                         ))}
@@ -2901,7 +2806,7 @@ function MetaBreakdownTab({
                       <span className="text-emerald-200 font-medium">Organic / Unattributed Sales</span>
                     </div>
                   </td>
-                  <td className="text-white/50 px-4 py-3 text-right">₹0.00</td>
+                  <td className="text-white/50 px-4 py-3 text-right">{formatUSD(0)}</td>
                   <td className="text-white/40 px-4 py-3 text-right">-</td>
                   <td className="text-white/40 px-4 py-3 text-right">-</td>
                   <td className="text-white/40 px-4 py-3 text-right">-</td>
@@ -4251,7 +4156,7 @@ function AnalyticsTab({
               value={formatCurrency(data.kpis.paidRevenueInr)}
               subtitle="From paid/success/captured"
               color="text-green-400"
-              icon={<IndianRupee className="w-4 h-4" />}
+              icon={<CreditCard className="w-4 h-4" />}
             />
             <KPICard
               title="Paid Orders"
@@ -5020,7 +4925,7 @@ function PlanBar({ label, value, total, color, count }: { label: string; value: 
       <div className="flex justify-between text-xs mb-1">
         <span className="text-white/70">{label}</span>
         <span className="text-white/50">
-          {new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR" }).format(value)}
+          {new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(value)}
           {count !== undefined ? ` (${count} sales)` : ` (${percentage.toFixed(0)}%)`}
         </span>
       </div>
@@ -5052,12 +4957,6 @@ function MetaAdsSection({
   onRefresh: () => void;
   onCustomDateRefresh: (startDate: string, endDate: string) => void;
 }) {
-  const [showInINR, setShowInINR] = useState(false);
-  const [exchangeRate, setExchangeRate] = useState<number>(93.32); // Default fallback
-  const [rateLoading, setRateLoading] = useState(false);
-  const [editingRate, setEditingRate] = useState(false);
-  const [rateInput, setRateInput] = useState<string>("93.32");
-
   // Custom date range for Meta Ads
   const [useCustomDateRange, setUseCustomDateRange] = useState(false);
   const [metaStartDate, setMetaStartDate] = useState<string>(
@@ -5067,37 +4966,6 @@ function MetaAdsSection({
     new Date().toISOString().split("T")[0]
   );
 
-  // Fetch real-time exchange rate
-  const fetchExchangeRate = async () => {
-    try {
-      setRateLoading(true);
-      const res = await fetch("/api/exchange-rate");
-      if (res.ok) {
-        const data = await res.json();
-        if (data.rate) {
-          setExchangeRate(data.rate);
-          setRateInput(data.rate.toFixed(2));
-        }
-      }
-    } catch (err) {
-      console.error("Failed to fetch exchange rate:", err);
-    } finally {
-      setRateLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchExchangeRate();
-  }, []);
-
-  const handleRateChange = (value: string) => {
-    setRateInput(value);
-    const num = parseFloat(value);
-    if (!isNaN(num) && num > 0) {
-      setExchangeRate(num);
-    }
-  };
-
   const formatNum = (n: number) => {
     if (n >= 1000000) return (n / 1000000).toFixed(1) + "M";
     if (n >= 1000) return (n / 1000).toFixed(1) + "K";
@@ -5106,12 +4974,6 @@ function MetaAdsSection({
 
   const formatMetaCurrency = (value: number | string) => {
     const num = typeof value === "string" ? parseFloat(value) : value;
-    if (showInINR) {
-      return new Intl.NumberFormat("en-IN", {
-        style: "currency",
-        currency: "INR",
-      }).format(num * exchangeRate);
-    }
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: "USD",
@@ -5247,38 +5109,10 @@ function MetaAdsSection({
             >
               <div className="flex items-center justify-between mb-2">
                 <span className="text-white/50 text-xs">Ad Spend</span>
-                <button
-                  onClick={() => setShowInINR(!showInINR)}
-                  className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/20 hover:bg-blue-500/30 transition-colors text-blue-400 text-xs"
-                  title={showInINR ? `Click to show USD (Rate: $1 = ₹${exchangeRate.toFixed(2)})` : `Click to show INR (Rate: $1 = ₹${exchangeRate.toFixed(2)})`}
-                >
-                  {showInINR ? "₹" : "$"}
-                  <ArrowUpDown className="w-3 h-3" />
-                </button>
+                <CreditCard className="w-4 h-4 text-blue-400" />
               </div>
               <p className="text-xl font-bold text-blue-400">{formatMetaCurrency(metaAds.account.spend)}</p>
               <p className="text-white/40 text-xs mt-1">{datePresetLabels[metaDatePreset]}</p>
-              {showInINR && (
-                <div className="flex items-center gap-1 mt-2">
-                  <span className="text-white/30 text-xs">$1 = ₹</span>
-                  <input
-                    type="number"
-                    value={rateInput}
-                    onChange={(e) => handleRateChange(e.target.value)}
-                    className="w-16 bg-white/10 border border-white/20 rounded px-1.5 py-0.5 text-xs text-white focus:outline-none focus:border-blue-400"
-                    step="0.01"
-                    min="1"
-                  />
-                  <button
-                    onClick={fetchExchangeRate}
-                    disabled={rateLoading}
-                    className="p-1 rounded bg-white/10 hover:bg-white/20 transition-colors"
-                    title="Fetch live rate"
-                  >
-                    <RefreshCw className={`w-3 h-3 text-white/60 ${rateLoading ? "animate-spin" : ""}`} />
-                  </button>
-                </div>
-              )}
             </motion.div>
             <motion.div
               initial={{ opacity: 0, y: 10 }}

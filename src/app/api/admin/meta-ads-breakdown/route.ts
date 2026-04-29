@@ -367,8 +367,7 @@ function addAttributionValue(
 
 function applyFirstPartyAttribution<T extends AdMetrics>(
   row: T,
-  summary: AttributionSummary | undefined,
-  exchangeRate: number
+  summary: AttributionSummary | undefined
 ): T {
   if (!summary) {
     return {
@@ -377,9 +376,8 @@ function applyFirstPartyAttribution<T extends AdMetrics>(
     };
   }
 
-  const spendInr = row.spend * exchangeRate;
   const gst = summary.revenue * 0.05;
-  const actualProfit = summary.revenue - gst - spendInr;
+  const actualProfit = summary.revenue - gst - row.spend;
 
   return {
     ...row,
@@ -387,7 +385,7 @@ function applyFirstPartyAttribution<T extends AdMetrics>(
     attributedSales: summary.sales,
     attributedRefunds: summary.refunds,
     actualProfit: Number(actualProfit.toFixed(2)),
-    actualRoas: spendInr > 0 ? Number((summary.revenue / spendInr).toFixed(4)) : 0,
+    actualRoas: row.spend > 0 ? Number((summary.revenue / row.spend).toFixed(4)) : 0,
     attributionSource: "first_party",
   };
 }
@@ -446,17 +444,6 @@ function getRoasValue(insight: any): number {
   return 0;
 }
 
-// Fetch exchange rate
-async function fetchExchangeRate(): Promise<number> {
-  try {
-    const response = await fetch("https://api.exchangerate-api.com/v4/latest/USD");
-    const data = await response.json();
-    return data.rates?.INR || 85;
-  } catch {
-    return 85;
-  }
-}
-
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
@@ -466,7 +453,6 @@ export async function GET(request: NextRequest) {
     const datePreset = searchParams.get("datePreset") || "last_7d";
     const customStartDate = searchParams.get("startDate");
     const customEndDate = searchParams.get("endDate");
-    const customExchangeRate = searchParams.get("exchangeRate");
 
     if (!token) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -500,8 +486,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get exchange rate
-    const exchangeRate = customExchangeRate ? parseFloat(customExchangeRate) : await fetchExchangeRate();
+    const exchangeRate = 1;
 
     const now = new Date();
     const customStartDateValue = isIsoDate(customStartDate) ? customStartDate : null;
@@ -555,23 +540,23 @@ export async function GET(request: NextRequest) {
     const totalSales = classifiedPayments.filter((row) => row.financial.kind === "sale").length;
     const totalRefunds = classifiedPayments.filter((row) => row.financial.kind === "refund").length;
 
-    const grossRevenue = grossRevenueUsd * exchangeRate;
-    const refundAmount = refundAmountUsd * exchangeRate;
-    const totalRevenue = totalRevenueUsd * exchangeRate;
+    const grossRevenue = grossRevenueUsd;
+    const refundAmount = refundAmountUsd;
+    const totalRevenue = totalRevenueUsd;
     const campaignAttributionMap = new Map<string, AttributionSummary>();
     const adsetAttributionMap = new Map<string, AttributionSummary>();
     const adAttributionMap = new Map<string, AttributionSummary>();
 
     for (const row of classifiedPayments) {
-      const signedRevenueInr = row.financial.signedAmount * exchangeRate;
+      const signedRevenueUsd = row.financial.signedAmount;
       const metadata = row.payment.metadata as Record<string, unknown> | null;
       const campaignId = getMetadataString(metadata, ["campaign_id", "meta_campaign_id", "utm_campaign"]);
       const adsetId = getMetadataString(metadata, ["adset_id", "meta_adset_id"]);
       const adId = getMetadataString(metadata, ["ad_id", "meta_ad_id", "utm_content"]);
       const kind = row.financial.kind === "refund" ? "refund" : "sale";
-      addAttributionValue(campaignAttributionMap, campaignId, signedRevenueInr, kind);
-      addAttributionValue(adsetAttributionMap, adsetId, signedRevenueInr, kind);
-      addAttributionValue(adAttributionMap, adId, signedRevenueInr, kind);
+      addAttributionValue(campaignAttributionMap, campaignId, signedRevenueUsd, kind);
+      addAttributionValue(adsetAttributionMap, adsetId, signedRevenueUsd, kind);
+      addAttributionValue(adAttributionMap, adId, signedRevenueUsd, kind);
     }
 
     // Build date range params for Meta (date-granular, mapped from IST business window)
@@ -715,7 +700,7 @@ export async function GET(request: NextRequest) {
             status: ad.status,
             budget: null,
             ...adMetrics,
-          }, adAttributionMap.get(ad.id), exchangeRate);
+          }, adAttributionMap.get(ad.id));
         });
 
         return applyFirstPartyAttribution({
@@ -725,7 +710,7 @@ export async function GET(request: NextRequest) {
           budget: adsetBudget,
           ...adsetMetrics,
           ads,
-        }, adsetAttributionMap.get(adset.id), exchangeRate);
+        }, adsetAttributionMap.get(adset.id));
       });
 
       return applyFirstPartyAttribution({
@@ -735,7 +720,7 @@ export async function GET(request: NextRequest) {
         budget,
         ...metrics,
         adsets,
-      }, campaignAttributionMap.get(campaign.id), exchangeRate);
+      }, campaignAttributionMap.get(campaign.id));
     });
 
     // Sort campaigns by spend (highest first)
@@ -772,12 +757,12 @@ export async function GET(request: NextRequest) {
       0
     );
 
-    // Calculate spend in INR and profit
-    const totalSpendINR = totals.spend * exchangeRate;
+    // Calculate USD spend and profit.
+    const totalSpend = totals.spend;
     const gst = totalRevenue * 0.05; // 5% GST
     const netRevenue = totalRevenue - gst;
-    const profit = netRevenue - totalSpendINR;
-    const roas = totalSpendINR > 0 ? totalRevenue / totalSpendINR : 0;
+    const profit = netRevenue - totalSpend;
+    const roas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
 
     return NextResponse.json({
       configured: true,
@@ -802,7 +787,7 @@ export async function GET(request: NextRequest) {
         : null,
       businessRule: "11:30 AM IST business-day boundary",
       campaigns,
-      // Revenue data from Stripe/Supabase, converted to INR for parity with the ad-spend view.
+      // Revenue data from Stripe/Supabase and ad spend are both USD.
       revenue: {
         totalRevenue,
         totalRevenueUsd,
@@ -814,7 +799,8 @@ export async function GET(request: NextRequest) {
         totalRefunds,
         gst,
         netRevenue,
-        totalSpendINR,
+        totalSpend,
+        totalSpendINR: totalSpend,
         profit,
         roas,
       },
@@ -834,7 +820,7 @@ export async function GET(request: NextRequest) {
       },
       totals: {
         ...totals,
-        spendINR: totalSpendINR,
+        spendINR: totalSpend,
         cpc: totals.clicks > 0 ? totals.spend / totals.clicks : 0,
         cpm: totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : 0,
         ctr: totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0,

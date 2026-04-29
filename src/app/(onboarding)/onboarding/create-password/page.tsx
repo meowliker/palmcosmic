@@ -11,14 +11,6 @@ import { pixelEvents } from "@/lib/pixel-events";
 import { generateUserId } from "@/lib/user-profile";
 import type { FlowKey } from "@/lib/report-entitlements";
 
-const FLOW_REDIRECTS: Record<FlowKey, string> = {
-  future_prediction: "/prediction-2026",
-  soulmate_sketch: "/soulmate-sketch",
-  palm_reading: "/palm-reading",
-  future_partner: "/future-partner",
-  compatibility: "/compatibility",
-};
-
 const FLOW_LABELS: Record<FlowKey, string> = {
   future_prediction: "2026 Prediction",
   soulmate_sketch: "Soulmate Sketch",
@@ -36,9 +28,9 @@ const REQUIREMENTS = [
 ];
 
 function normalizeFlow(value: string | null): FlowKey {
-  if (value && value in FLOW_REDIRECTS) return value as FlowKey;
+  if (value && value in FLOW_LABELS) return value as FlowKey;
   const stored = typeof window !== "undefined" ? localStorage.getItem("palmcosmic_active_flow") : null;
-  if (stored && stored in FLOW_REDIRECTS) return stored as FlowKey;
+  if (stored && stored in FLOW_LABELS) return stored as FlowKey;
   return "future_prediction";
 }
 
@@ -67,7 +59,6 @@ function CreatePasswordContent() {
   const [hasSubmitted, setHasSubmitted] = useState(false);
 
   const flow = useMemo(() => normalizeFlow(searchParams.get("flow")), [searchParams]);
-  const targetPath = FLOW_REDIRECTS[flow];
   const reportLabel = FLOW_LABELS[flow];
   const passwordError = password || confirmPassword ? getPasswordError(password, confirmPassword) : "";
   const emailIsValid = isValidEmail(email);
@@ -180,7 +171,13 @@ function CreatePasswordContent() {
       });
       pixelEvents.completeRegistration(email);
 
-      router.push(targetPath);
+      try {
+        await fetch("/api/session", { method: "POST", credentials: "include" });
+      } catch (sessionError) {
+        console.error("Failed to set session after registration:", sessionError);
+      }
+
+      router.push("/reports");
     } catch (err: any) {
       console.error("Create password failed:", err);
       const message = err?.message || "Unable to create your password. Please try again.";
