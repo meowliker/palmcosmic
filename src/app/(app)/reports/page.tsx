@@ -11,7 +11,6 @@ import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore, UnlockedFeatures } from "@/lib/user-store";
 import { UpsellPopup } from "@/components/UpsellPopup";
 import { TrialStatusBanner } from "@/components/TrialStatusBanner";
-import { supabase } from "@/lib/supabase";
 import { UserAvatar, cacheUserInfo } from "@/components/UserAvatar";
 import { BirthChartTimer } from "@/components/BirthChartTimer";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
@@ -139,7 +138,11 @@ export default function DashboardPage() {
           console.error("Error refreshing entitlements:", refreshError);
         });
 
-        const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
+        const hydrateResponse = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, {
+          cache: "no-store",
+        });
+        const hydrateResult = await hydrateResponse.json().catch(() => null);
+        const userData = hydrateResponse.ok && hydrateResult?.success ? hydrateResult.user : null;
 
         if (userData) {
           if (userData.name) setUserName(userData.name);
@@ -147,37 +150,26 @@ export default function DashboardPage() {
           cacheUserInfo(userData.name, userData.email);
 
           syncFromServer({
-            unlockedFeatures: userData.unlocked_features,
-            palmReading: userData.palm_reading,
-            birthChart: userData.birth_chart,
-            compatibilityTest: userData.compatibility_test,
-            prediction2026: userData.prediction_2026,
+            unlockedFeatures: userData.unlockedFeatures,
+            palmReading: userData.palmReading,
+            birthChart: userData.birthChart,
+            compatibilityTest: userData.compatibilityTest,
+            prediction2026: userData.prediction2026,
             coins: userData.coins,
-            purchasedBundle: userData.bundle_purchased || null,
+            purchasedBundle: userData.purchasedBundle || null,
           });
 
-          if (userData.birth_chart_timer_active !== undefined) {
-            setBirthChartTimerActive(userData.birth_chart_timer_active);
+          if (userData.birthChartTimerActive !== undefined) {
+            setBirthChartTimerActive(userData.birthChartTimerActive);
           }
-          if (userData.birth_chart_timer_started_at) {
-            setBirthChartTimerStartedAt(userData.birth_chart_timer_started_at);
-          }
-
-          let sunSignName = extractStoredSignName(userData.sun_sign);
-
-          if (!sunSignName && userId) {
-            try {
-              const { data: profile } = await supabase.from("user_profiles").select("sun_sign").eq("id", userId).single();
-              if (profile) {
-                sunSignName = extractStoredSignName(profile.sun_sign);
-              }
-            } catch (profileErr) {
-              console.error("Error reading user_profiles:", profileErr);
-            }
+          if (userData.birthChartTimerStartedAt) {
+            setBirthChartTimerStartedAt(userData.birthChartTimerStartedAt);
           }
 
-          if (!sunSignName && userData.birth_month && userData.birth_day) {
-            sunSignName = getZodiacSign(Number(userData.birth_month), Number(userData.birth_day));
+          let sunSignName = extractStoredSignName(userData.sunSign);
+
+          if (!sunSignName && userData.birthMonth && userData.birthDay) {
+            sunSignName = getZodiacSign(Number(userData.birthMonth), Number(userData.birthDay));
           }
 
           if (sunSignName) {
@@ -713,7 +705,11 @@ export default function DashboardPage() {
                               const userId = localStorage.getItem("astrorekha_user_id");
                               if (userId) {
                                 try {
-                                  await supabase.from("users").update({ birth_chart_timer_active: false }).eq("id", userId);
+                                  await fetch("/api/user/birth-chart-timer", {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ userId, active: false }),
+                                  });
                                 } catch (err) {
                                   console.error("Failed to deactivate timer:", err);
                                 }

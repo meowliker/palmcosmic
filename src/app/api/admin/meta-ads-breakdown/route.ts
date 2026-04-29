@@ -1,97 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import crypto from "crypto";
-import { classifyPayUEvent } from "@/lib/finance-events";
+import { classifyStoredPaymentEvent } from "@/lib/finance-events";
 
 export const dynamic = "force-dynamic";
 
 const META_API_VERSION = "v21.0";
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
-const PAYU_BASE_URL = "https://info.payu.in/merchant/postservice?form=2";
 const IST_TIMEZONE = "Asia/Kolkata";
 const IST_OFFSET_MINUTES = 5 * 60 + 30;
 const BUSINESS_BOUNDARY_HOUR = 11;
 const BUSINESS_BOUNDARY_MINUTE = 30;
 const MAX_RANGE_START_ISO = "2024-01-01";
-
-// Generate SHA-512 hash for PayU
-function generateHash(input: string): string {
-  return crypto.createHash("sha512").update(input).digest("hex");
-}
-
-interface PayUTransaction {
-  txnid: string;
-  amount: string;
-  status: string;
-  addedon: string;
-  net_amount_debit?: string;
-  field9?: string;
-  error_Message?: string;
-  unmappedstatus?: string;
-}
-
-// Fetch PayU transactions for a date range
-async function fetchPayUTransactions(fromDate: string, toDate: string): Promise<PayUTransaction[]> {
-  const merchantKey = process.env.PAYU_MERCHANT_KEY;
-  const merchantSalt = process.env.PAYU_MERCHANT_SALT;
-
-  if (!merchantKey || !merchantSalt) {
-    console.log("PayU credentials not configured");
-    return [];
-  }
-
-  const command = "get_Transaction_Details";
-  const hashString = `${merchantKey}|${command}|${fromDate}|${merchantSalt}`;
-  const hash = generateHash(hashString);
-
-  const formData = new URLSearchParams();
-  formData.append("key", merchantKey);
-  formData.append("command", command);
-  formData.append("var1", fromDate);
-  formData.append("var2", toDate);
-  formData.append("hash", hash);
-
-  try {
-    const response = await fetch(PAYU_BASE_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Accept": "application/json",
-      },
-      body: formData.toString(),
-    });
-
-    const responseText = await response.text();
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch {
-      return [];
-    }
-
-    if (data.status === 1 && data.Transaction_details) {
-      const allTxns = Array.isArray(data.Transaction_details)
-        ? data.Transaction_details
-        : Object.values(data.Transaction_details);
-
-      const financialTxns = allTxns.filter((txn: any) => {
-        const financial = classifyPayUEvent(txn as Record<string, unknown>);
-        return financial.kind !== "ignore";
-      });
-
-      console.log(`PayU: ${allTxns.length} total, ${financialTxns.length} financial`);
-      if (financialTxns.length > 0) {
-        console.log(`First financial txn amount: ${financialTxns[0].amount}`);
-      }
-
-      return financialTxns;
-    }
-  } catch (err) {
-    console.error("PayU fetch error:", err);
-  }
-
-  return [];
-}
 
 interface BusinessWindow {
   start: Date;
@@ -351,13 +270,6 @@ function resolveCustomBusinessWindow(
   };
 }
 
-function parsePayUTimestamp(value: unknown): Date | null {
-  if (typeof value !== "string" || !value.trim()) return null;
-  const parsed = new Date(value.replace(" ", "T") + "+05:30");
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
-}
-
 function formatIstDateTime(date: Date): string {
   const value = new Intl.DateTimeFormat("en-IN", {
     timeZone: IST_TIMEZONE,
@@ -386,6 +298,12 @@ interface AdMetrics {
   costPerPurchase: number;
   reach: number;
   roas: number;
+  attributedRevenue?: number;
+  attributedSales?: number;
+  attributedRefunds?: number;
+  actualProfit?: number;
+  actualRoas?: number;
+  attributionSource?: "first_party" | "meta_estimate";
 }
 
 interface AdSetData extends AdMetrics {
@@ -415,6 +333,63 @@ function parseMetricNumber(value: unknown): number {
 
 function normalizeAdAccountId(value: string): string {
   return value.replace(/^act_/i, "").trim();
+}
+
+function getMetadataString(metadata: unknown, keys: string[]): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const obj = metadata as Record<string, unknown>;
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+type AttributionSummary = {
+  revenue: number;
+  sales: number;
+  refunds: number;
+};
+
+function addAttributionValue(
+  map: Map<string, AttributionSummary>,
+  key: string | null,
+  signedRevenue: number,
+  kind: "sale" | "refund"
+) {
+  if (!key) return;
+  const entry = map.get(key) || { revenue: 0, sales: 0, refunds: 0 };
+  entry.revenue += signedRevenue;
+  if (kind === "sale") entry.sales += 1;
+  if (kind === "refund") entry.refunds += 1;
+  map.set(key, entry);
+}
+
+function applyFirstPartyAttribution<T extends AdMetrics>(
+  row: T,
+  summary: AttributionSummary | undefined,
+  exchangeRate: number
+): T {
+  if (!summary) {
+    return {
+      ...row,
+      attributionSource: "meta_estimate",
+    };
+  }
+
+  const spendInr = row.spend * exchangeRate;
+  const gst = summary.revenue * 0.05;
+  const actualProfit = summary.revenue - gst - spendInr;
+
+  return {
+    ...row,
+    attributedRevenue: Number(summary.revenue.toFixed(2)),
+    attributedSales: summary.sales,
+    attributedRefunds: summary.refunds,
+    actualProfit: Number(actualProfit.toFixed(2)),
+    actualRoas: spendInr > 0 ? Number((summary.revenue / spendInr).toFixed(4)) : 0,
+    attributionSource: "first_party",
+  };
 }
 
 async function fetchMetaJson(url: string): Promise<any> {
@@ -542,46 +517,62 @@ export async function GET(request: NextRequest) {
       ? resolveCustomBusinessWindow(customStartDateValue, customEndDate, now)
       : resolvePresetBusinessWindow(datePreset, now);
 
-    const payuFetchStartDate = getIstDateTimeParts(businessWindow.start).dayKey;
-    const payuFetchEndDate = getIstDateTimeParts(businessWindow.end).dayKey;
+    const { data: paymentRows, error: paymentsError } = await supabase
+      .from("payments")
+      .select("id, amount, payment_status, created_at, fulfilled_at, currency, type, metadata")
+      .order("created_at", { ascending: false })
+      .limit(10000);
 
-    // Fetch PayU transactions for the date range to get actual revenue
-    console.log(
-      `Fetching PayU transactions from ${payuFetchStartDate} to ${payuFetchEndDate} for business window ${formatIstDateTime(
-        businessWindow.start
-      )} -> ${formatIstDateTime(businessWindow.end)}`
-    );
-    const payuTransactions = await fetchPayUTransactions(payuFetchStartDate, payuFetchEndDate);
-
-    // Debug: log first transaction to see field names
-    if (payuTransactions.length > 0) {
-      console.log("Sample PayU transaction:", JSON.stringify(payuTransactions[0]));
+    if (paymentsError) {
+      throw paymentsError;
     }
 
-    const classifiedPayu = payuTransactions
-      .map((txn: any) => ({
-        txn,
-        financial: classifyPayUEvent(txn as Record<string, unknown>),
-        timestamp: parsePayUTimestamp(txn?.addedon),
-      }))
+    const classifiedPayments = (paymentRows || [])
+      .map((payment) => {
+        const financial = classifyStoredPaymentEvent(payment.payment_status, payment.amount);
+        const timestamp = new Date(String(payment.fulfilled_at || payment.created_at || ""));
+        return {
+          payment,
+          financial,
+          timestamp,
+        };
+      })
       .filter(
         (row) =>
           row.financial.kind !== "ignore" &&
-          !!row.timestamp &&
+          !Number.isNaN(row.timestamp.getTime()) &&
           row.timestamp >= businessWindow.start &&
           row.timestamp <= businessWindow.end
       );
 
-    const grossRevenue = classifiedPayu
+    const grossRevenueUsd = classifiedPayments
       .filter((row) => row.financial.kind === "sale")
       .reduce((sum, row) => sum + row.financial.amount, 0);
-    const refundAmount = classifiedPayu
+    const refundAmountUsd = classifiedPayments
       .filter((row) => row.financial.kind === "refund")
       .reduce((sum, row) => sum + row.financial.amount, 0);
-    const totalRevenue = grossRevenue - refundAmount;
-    const totalSales = classifiedPayu.filter((row) => row.financial.kind === "sale").length;
-    const totalRefunds = classifiedPayu.filter((row) => row.financial.kind === "refund").length;
-    console.log(`PayU: ${totalSales} sales, ₹${totalRevenue.toFixed(2)} revenue`);
+    const totalRevenueUsd = grossRevenueUsd - refundAmountUsd;
+    const totalSales = classifiedPayments.filter((row) => row.financial.kind === "sale").length;
+    const totalRefunds = classifiedPayments.filter((row) => row.financial.kind === "refund").length;
+
+    const grossRevenue = grossRevenueUsd * exchangeRate;
+    const refundAmount = refundAmountUsd * exchangeRate;
+    const totalRevenue = totalRevenueUsd * exchangeRate;
+    const campaignAttributionMap = new Map<string, AttributionSummary>();
+    const adsetAttributionMap = new Map<string, AttributionSummary>();
+    const adAttributionMap = new Map<string, AttributionSummary>();
+
+    for (const row of classifiedPayments) {
+      const signedRevenueInr = row.financial.signedAmount * exchangeRate;
+      const metadata = row.payment.metadata as Record<string, unknown> | null;
+      const campaignId = getMetadataString(metadata, ["campaign_id", "meta_campaign_id", "utm_campaign"]);
+      const adsetId = getMetadataString(metadata, ["adset_id", "meta_adset_id"]);
+      const adId = getMetadataString(metadata, ["ad_id", "meta_ad_id", "utm_content"]);
+      const kind = row.financial.kind === "refund" ? "refund" : "sale";
+      addAttributionValue(campaignAttributionMap, campaignId, signedRevenueInr, kind);
+      addAttributionValue(adsetAttributionMap, adsetId, signedRevenueInr, kind);
+      addAttributionValue(adAttributionMap, adId, signedRevenueInr, kind);
+    }
 
     // Build date range params for Meta (date-granular, mapped from IST business window)
     const metaSinceDate = getIstDateTimeParts(businessWindow.start).dayKey;
@@ -718,33 +709,33 @@ export async function GET(request: NextRequest) {
           const adInsight = adInsightsMap.get(ad.id);
           const adMetrics = extractMetrics(adInsight);
 
-          return {
+          return applyFirstPartyAttribution({
             id: ad.id,
             name: ad.name,
             status: ad.status,
             budget: null,
             ...adMetrics,
-          };
+          }, adAttributionMap.get(ad.id), exchangeRate);
         });
 
-        return {
+        return applyFirstPartyAttribution({
           id: adset.id,
           name: adset.name,
           status: adset.status,
           budget: adsetBudget,
           ...adsetMetrics,
           ads,
-        };
+        }, adsetAttributionMap.get(adset.id), exchangeRate);
       });
 
-      return {
+      return applyFirstPartyAttribution({
         id: campaign.id,
         name: campaign.name,
         status: campaign.status,
         budget,
         ...metrics,
         adsets,
-      };
+      }, campaignAttributionMap.get(campaign.id), exchangeRate);
     });
 
     // Sort campaigns by spend (highest first)
@@ -776,6 +767,10 @@ export async function GET(request: NextRequest) {
     const firstPartySales = totalSales;
     const metaPurchases = totals.purchases;
     const organicOrUnattributedSales = clampNonNegative(firstPartySales - metaPurchases);
+    const firstPartyAttributedSales = Array.from(campaignAttributionMap.values()).reduce(
+      (sum, entry) => sum + entry.sales,
+      0
+    );
 
     // Calculate spend in INR and profit
     const totalSpendINR = totals.spend * exchangeRate;
@@ -807,11 +802,14 @@ export async function GET(request: NextRequest) {
         : null,
       businessRule: "11:30 AM IST business-day boundary",
       campaigns,
-      // Revenue data from PayU
+      // Revenue data from Stripe/Supabase, converted to INR for parity with the ad-spend view.
       revenue: {
         totalRevenue,
+        totalRevenueUsd,
         grossRevenue,
+        grossRevenueUsd,
         refundAmount,
+        refundAmountUsd,
         totalSales,
         totalRefunds,
         gst,
@@ -822,14 +820,17 @@ export async function GET(request: NextRequest) {
       },
       sourceBreakdown: {
         firstPartySales,
+        firstPartyAttributedSales,
         metaPurchases,
         organicOrUnattributedSales,
       },
       attribution: {
-        campaignAttributionSource: "meta_reports",
-        firstPartyCampaignAttributionAvailable: false,
+        campaignAttributionSource: firstPartyAttributedSales > 0 ? "first_party_payments" : "meta_reports",
+        firstPartyCampaignAttributionAvailable: firstPartyAttributedSales > 0,
         note:
-          "Campaign rows use Meta-reported website purchases/ROAS. Organic or unattributed sales are computed from first-party PayU sales that are not currently attributable to a Meta campaign in our stored data.",
+          firstPartyAttributedSales > 0
+            ? "Rows marked with exact attribution use Stripe/Supabase revenue matched from stored campaign/adset/ad ids. Rows without first-party ids still use Meta-reported estimates."
+            : "Top-line profit uses actual Stripe/Supabase revenue and Meta spend. Campaign rows use Meta-reported purchases/ROAS until campaign/adset/ad ids are captured on new Stripe payments.",
       },
       totals: {
         ...totals,

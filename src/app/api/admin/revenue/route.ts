@@ -286,8 +286,8 @@ export async function GET(request: NextRequest) {
     }
 
     return NextResponse.json({
-      // Revenue KPIs (INR)
-      currency: "INR",
+      // Revenue KPIs. Stripe amounts are stored in cents and converted to major USD units.
+      currency: "USD",
       totalRevenue: totalRevenue.toFixed(2),
       grossRevenue: grossRevenue.toFixed(2),
       refundAmount: refundAmount.toFixed(2),

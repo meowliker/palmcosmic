@@ -112,10 +112,11 @@ interface PaymentRow {
   stripe_session_id: string | null;
   stripe_payment_intent_id: string | null;
   stripe_customer_id: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 const PAYMENT_SELECT =
-  "id,user_id,type,bundle_id,feature,coins,customer_email,amount,currency,payment_status,fulfilled_at,created_at,stripe_session_id,stripe_payment_intent_id,stripe_customer_id";
+  "id,user_id,type,bundle_id,feature,coins,customer_email,amount,currency,payment_status,fulfilled_at,created_at,stripe_session_id,stripe_payment_intent_id,stripe_customer_id,metadata";
 
 function normalizeEmail(email: string | null | undefined): string | null {
   if (!email) return null;
@@ -127,6 +128,72 @@ function parseIntOrZero(value: string | null | undefined): number {
   if (!value) return 0;
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+const ATTRIBUTION_KEYS = [
+  "utm_source",
+  "utm_medium",
+  "utm_campaign",
+  "utm_content",
+  "utm_term",
+  "fbclid",
+  "campaign_id",
+  "adset_id",
+  "ad_id",
+  "meta_campaign_id",
+  "meta_adset_id",
+  "meta_ad_id",
+  "landing_page",
+] as const;
+
+function pickAttribution(metadata: Record<string, unknown> | null | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!metadata || typeof metadata !== "object") return out;
+
+  for (const key of ATTRIBUTION_KEYS) {
+    const value = metadata[key];
+    if (typeof value === "string" && value.trim()) {
+      out[key] = value.trim();
+    }
+  }
+
+  if (!out.campaign_id && out.meta_campaign_id) out.campaign_id = out.meta_campaign_id;
+  if (!out.adset_id && out.meta_adset_id) out.adset_id = out.meta_adset_id;
+  if (!out.ad_id && out.meta_ad_id) out.ad_id = out.meta_ad_id;
+
+  return out;
+}
+
+async function findLatestAttribution(
+  userId: string | null,
+  email: string | null
+): Promise<Record<string, string>> {
+  if (!userId && !email) return {};
+  const supabase = getSupabaseAdmin();
+
+  let query = supabase
+    .from("analytics_events")
+    .select("metadata")
+    .order("created_at", { ascending: false })
+    .limit(25);
+
+  if (userId && email) {
+    query = query.or(`user_id.eq.${userId},email.eq.${email}`);
+  } else if (userId) {
+    query = query.eq("user_id", userId);
+  } else if (email) {
+    query = query.eq("email", email);
+  }
+
+  const { data, error } = await query;
+  if (error || !data?.length) return {};
+
+  for (const row of data) {
+    const attribution = pickAttribution(row.metadata as Record<string, unknown>);
+    if (Object.keys(attribution).length > 0) return attribution;
+  }
+
+  return {};
 }
 
 function parseFeatures(metadata: Record<string, string>): string[] {
@@ -542,6 +609,11 @@ async function upsertPaidPaymentRecord(input: StripeFulfillmentInput, nowIso: st
   }
 
   const userId = await resolveSafeUserId(metadata.userId || existing?.user_id || null);
+  const attribution = await findLatestAttribution(userId, customerEmail || existing?.customer_email || null);
+  const enrichedMetadata = {
+    ...attribution,
+    ...metadata,
+  };
   const type = metadata.type || existing?.type || "bundle";
   const bundleId = metadata.bundleId || metadata.packageId || existing?.bundle_id || null;
   const feature = metadata.feature || existing?.feature || null;
@@ -561,6 +633,10 @@ async function upsertPaidPaymentRecord(input: StripeFulfillmentInput, nowIso: st
     stripe_session_id: input.stripeSessionId || existing?.stripe_session_id || null,
     stripe_payment_intent_id: input.paymentIntentId || existing?.stripe_payment_intent_id || null,
     stripe_customer_id: input.stripeCustomerId || existing?.stripe_customer_id || null,
+    metadata: {
+      ...((existing?.metadata || {}) as Record<string, unknown>),
+      ...enrichedMetadata,
+    },
   };
 
   if (existing) {
@@ -602,8 +678,15 @@ export async function markStripePaymentStatus(input: StripePaymentStatusInput): 
     customerEmail
   );
 
+  const userId = await resolveSafeUserId(metadata.userId || existing?.user_id || null);
+  const attribution = await findLatestAttribution(userId, customerEmail || existing?.customer_email || null);
+  const enrichedMetadata = {
+    ...attribution,
+    ...metadata,
+  };
+
   const payload: Record<string, any> = {
-    user_id: await resolveSafeUserId(metadata.userId || existing?.user_id || null),
+    user_id: userId,
     type: metadata.type || existing?.type || "bundle",
     bundle_id: metadata.bundleId || metadata.packageId || existing?.bundle_id || null,
     feature: metadata.feature || existing?.feature || null,
@@ -616,6 +699,10 @@ export async function markStripePaymentStatus(input: StripePaymentStatusInput): 
     stripe_session_id: input.stripeSessionId || existing?.stripe_session_id || null,
     stripe_payment_intent_id: input.paymentIntentId || existing?.stripe_payment_intent_id || null,
     stripe_customer_id: input.stripeCustomerId || existing?.stripe_customer_id || null,
+    metadata: {
+      ...((existing?.metadata || {}) as Record<string, unknown>),
+      ...enrichedMetadata,
+    },
   };
 
   if (existing) {

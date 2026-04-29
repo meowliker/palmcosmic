@@ -261,8 +261,10 @@ CREATE TABLE IF NOT EXISTS public.predictions_2026_global (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.admins (
   id TEXT PRIMARY KEY,
+  name TEXT,
   password_hash TEXT NOT NULL,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- ============================================================
@@ -270,7 +272,7 @@ CREATE TABLE IF NOT EXISTS public.admins (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.admin_sessions (
   id TEXT PRIMARY KEY,
-  admin_id TEXT REFERENCES public.admins(id),
+  admin_id TEXT REFERENCES public.admins(id) ON DELETE CASCADE,
   expires_at TIMESTAMPTZ NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );

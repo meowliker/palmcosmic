@@ -46,19 +46,20 @@ type TabType = "dashboard" | "profit-sheet" | "meta-details" | "analytics";
 
 // Profit Sheet row interface
 interface ProfitSheetRow {
-  date: string;           // Costa Rica date (e.g., "2026-03-13")
+  date: string;           // Stripe business date (11:30 AM IST boundary)
   day: string;            // Day of week (e.g., "Sat")
-  revenue: number;        // Net revenue after refunds for that Costa Rica day
+  revenue: number;        // Net revenue after refunds for that Stripe day
   grossRevenue?: number;  // Gross received amount before refunds
   refundAmount?: number;  // Refund amount for that day
   gst: number;            // 5% of revenue
   adsCostUSD: number;     // Meta Ads spend in USD
   adsCostINR: number;     // Meta Ads spend converted to INR
-  netRevenue: number;     // Revenue - GST - Ads Cost (INR)
-  profitPercent?: number; // Net Revenue / Revenue * 100
+  netRevenue: number;     // Profit: Revenue - GST - Ads Cost (INR)
+  profitPercent?: number; // Profit / Revenue * 100
   roas: number;           // Revenue / Ads Cost INR (if ads cost > 0)
   transactionCount: number;
-  bundlePurchases: number;
+  salesCount?: number;
+  refundCount?: number;
 }
 
 // Meta Ads Breakdown interfaces
@@ -77,6 +78,12 @@ interface MetaAdMetrics {
   costPerPurchase: number;
   reach: number;
   roas: number;
+  attributedRevenue?: number;
+  attributedSales?: number;
+  attributedRefunds?: number;
+  actualProfit?: number;
+  actualRoas?: number;
+  attributionSource?: "first_party" | "meta_estimate";
 }
 
 interface MetaAdData extends MetaAdMetrics {}
@@ -99,8 +106,11 @@ interface MetaBreakdownData {
   campaigns: MetaCampaignData[];
   revenue: {
     totalRevenue: number;
+    totalRevenueUsd?: number;
     grossRevenue?: number;
+    grossRevenueUsd?: number;
     refundAmount?: number;
+    refundAmountUsd?: number;
     totalSales: number;
     totalRefunds?: number;
     gst: number;
@@ -111,6 +121,7 @@ interface MetaBreakdownData {
   };
   sourceBreakdown?: {
     firstPartySales: number;
+    firstPartyAttributedSales?: number;
     metaPurchases: number;
     organicOrUnattributedSales: number;
   };
@@ -592,7 +603,7 @@ export default function AdminRevenuePage() {
   const [selectedEndTime, setSelectedEndTime] = useState<string>("11:30");
   const [selectedTimezone, setSelectedTimezone] = useState<string>("ist");
   const [dateLoading, setDateLoading] = useState(false);
-  const [usePayU, setUsePayU] = useState<boolean>(true); // Default to PayU for accurate data
+  const [usePayU] = useState<boolean>(false); // Stripe/Supabase is the current PalmCosmic source of truth.
 
   // Sorting
   const [sortField, setSortField] = useState<string>("date");
@@ -615,7 +626,7 @@ export default function AdminRevenuePage() {
   const [analyticsEndDate, setAnalyticsEndDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
-  const [analyticsDayMode, setAnalyticsDayMode] = useState<"calendar_ist" | "business_1130_ist">("calendar_ist");
+  const [analyticsDayMode, setAnalyticsDayMode] = useState<"calendar_ist" | "business_1130_ist">("business_1130_ist");
 
   // Profit Sheet state
   const [profitSheetData, setProfitSheetData] = useState<ProfitSheetRow[]>([]);
@@ -975,9 +986,10 @@ export default function AdminRevenuePage() {
 
   const formatCurrency = (value: string | number) => {
     const num = typeof value === "string" ? parseFloat(value) : value;
-    return new Intl.NumberFormat("en-IN", {
+    const currency = data.currency || "USD";
+    return new Intl.NumberFormat(currency === "USD" ? "en-US" : "en-IN", {
       style: "currency",
-      currency: "INR",
+      currency,
     }).format(num);
   };
 
@@ -1320,7 +1332,7 @@ export default function AdminRevenuePage() {
               subtitle="All time"
               icon={<IndianRupee className="w-4 h-4" />}
               color="text-green-400"
-              tooltip="Total revenue from all paid Razorpay payments."
+              tooltip="Total revenue from all paid Stripe/Supabase payments."
             />
             <KPICard
               title="ARPU"
@@ -1357,10 +1369,10 @@ export default function AdminRevenuePage() {
             </h2>
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setUsePayU(!usePayU)}
-                className={`px-3 py-1.5 rounded-lg text-xs transition-colors ${usePayU ? 'bg-green-500/20 text-green-400' : 'bg-white/10 text-white/60'}`}
+                type="button"
+                className="cursor-default rounded-lg bg-[#38bdf8]/15 px-3 py-1.5 text-xs text-[#38bdf8]"
               >
-                {usePayU ? '✓ PayU (Live)' : '✓ Supabase'}
+                Stripe / Supabase
               </button>
             </div>
           </div>
@@ -2024,7 +2036,7 @@ function ProfitSheetTab({
       adsCostINR: acc.adsCostINR + row.adsCostINR,
       netRevenue: acc.netRevenue + row.netRevenue,
       transactionCount: acc.transactionCount + row.transactionCount,
-      bundlePurchases: acc.bundlePurchases + row.bundlePurchases,
+      refundCount: acc.refundCount + (row.refundCount ?? 0),
     }),
     {
       revenue: 0,
@@ -2035,7 +2047,7 @@ function ProfitSheetTab({
       adsCostINR: 0,
       netRevenue: 0,
       transactionCount: 0,
-      bundlePurchases: 0,
+      refundCount: 0,
     }
   );
   const overallRoas = totals.adsCostINR > 0 ? totals.revenue / totals.adsCostINR : 0;
@@ -2123,7 +2135,7 @@ function ProfitSheetTab({
           </button>
         </div>
         <p className="text-white/30 text-xs mt-3">
-          Note: Each date represents Costa Rica timezone (UTC-6). Revenue is calculated from 11:30 AM IST to next day 11:29 AM IST. Ads cost is fetched in USD and converted to INR.
+          Note: Each date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue and Meta spend are compared in INR using the selected USD rate.
         </p>
       </div>
       {error && (
@@ -2143,6 +2155,10 @@ function ProfitSheetTab({
           <p className="text-white text-xl font-bold">{totals.transactionCount}</p>
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
+          <p className="text-white/50 text-xs mb-1">Refunds</p>
+          <p className="text-red-400 text-xl font-bold">{totals.refundCount}</p>
+        </div>
+        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
           <p className="text-white/50 text-xs mb-1">Refund Amount</p>
           <p className="text-red-400 text-xl font-bold">-{formatCurrency(totals.refundAmount)}</p>
         </div>
@@ -2155,15 +2171,12 @@ function ProfitSheetTab({
           <p className="text-amber-400 text-xl font-bold">{formatCurrency(totals.gst)}</p>
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
-          <p className="text-white/50 text-xs mb-1">Ads Cost (USD)</p>
-          <p className="text-red-400/70 text-lg font-bold">${totals.adsCostUSD.toFixed(2)}</p>
-        </div>
-        <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
-          <p className="text-white/50 text-xs mb-1">Ads Cost (INR)</p>
+          <p className="text-white/50 text-xs mb-1">Meta Spend</p>
           <p className="text-red-400 text-xl font-bold">{formatCurrency(totals.adsCostINR)}</p>
+          <p className="text-white/35 text-[11px] mt-1">${totals.adsCostUSD.toFixed(2)} USD</p>
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
-          <p className="text-white/50 text-xs mb-1">Net Revenue</p>
+          <p className="text-white/50 text-xs mb-1">Profit</p>
           <p className={`text-xl font-bold ${totals.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
             {formatCurrency(totals.netRevenue)}
           </p>
@@ -2200,19 +2213,18 @@ function ProfitSheetTab({
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Refund</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Revenue</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">GST (5%)</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Ads (USD)</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Ads (INR)</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Net Revenue</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Meta Spend</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Profit</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Profit %</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">ROAS</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Bundle Purchases</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Orders</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Paid Orders</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Refunds</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredData.length === 0 ? (
                   <tr>
-                    <td colSpan={13} className="text-center text-white/40 py-8">
+                    <td colSpan={12} className="text-center text-white/40 py-8">
                       No data available for the selected filters
                     </td>
                   </tr>
@@ -2230,8 +2242,10 @@ function ProfitSheetTab({
                         </td>
                         <td className="text-green-400 text-sm px-4 py-3 text-right font-medium">{formatCurrency(row.revenue)}</td>
                         <td className="text-amber-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.gst)}</td>
-                        <td className="text-red-400/50 text-sm px-4 py-3 text-right">${row.adsCostUSD.toFixed(2)}</td>
-                        <td className="text-red-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.adsCostINR)}</td>
+                        <td className="text-red-400/70 text-sm px-4 py-3 text-right">
+                          {formatCurrency(row.adsCostINR)}
+                          <span className="block text-white/30 text-[11px]">${row.adsCostUSD.toFixed(2)}</span>
+                        </td>
                         <td className={`text-sm px-4 py-3 text-right font-medium ${row.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
                           {formatCurrency(row.netRevenue)}
                         </td>
@@ -2243,8 +2257,8 @@ function ProfitSheetTab({
                         }`}>
                           {row.roas > 0 ? row.roas.toFixed(2) : "-"}
                         </td>
-                        <td className="text-white/80 text-sm px-4 py-3 text-right">{row.bundlePurchases}</td>
                         <td className="text-white/60 text-sm px-4 py-3 text-right">{row.transactionCount}</td>
+                        <td className="text-white/60 text-sm px-4 py-3 text-right">{row.refundCount ?? 0}</td>
                       </tr>
                     ))}
                     {/* Totals Row */}
@@ -2254,8 +2268,10 @@ function ProfitSheetTab({
                       <td className="text-red-400 text-sm px-4 py-3 text-right">-{formatCurrency(totals.refundAmount)}</td>
                       <td className="text-green-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.revenue)}</td>
                       <td className="text-amber-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.gst)}</td>
-                      <td className="text-red-400/70 text-sm px-4 py-3 text-right">${totals.adsCostUSD.toFixed(2)}</td>
-                      <td className="text-red-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.adsCostINR)}</td>
+                      <td className="text-red-400 text-sm px-4 py-3 text-right">
+                        {formatCurrency(totals.adsCostINR)}
+                        <span className="block text-white/35 text-[11px]">${totals.adsCostUSD.toFixed(2)}</span>
+                      </td>
                       <td className={`text-sm px-4 py-3 text-right ${totals.netRevenue >= 0 ? "text-green-400" : "text-red-400"}`}>
                         {formatCurrency(totals.netRevenue)}
                       </td>
@@ -2265,8 +2281,8 @@ function ProfitSheetTab({
                       <td className={`text-sm px-4 py-3 text-right ${overallRoas >= 1 ? "text-green-400" : "text-amber-400"}`}>
                         {overallRoas > 0 ? overallRoas.toFixed(2) : "-"}
                       </td>
-                      <td className="text-white text-sm px-4 py-3 text-right">{totals.bundlePurchases}</td>
                       <td className="text-white text-sm px-4 py-3 text-right">{totals.transactionCount}</td>
+                      <td className="text-white text-sm px-4 py-3 text-right">{totals.refundCount}</td>
                     </tr>
                   </>
                 )}
@@ -2328,8 +2344,7 @@ function MetaBreakdownTab({
   };
   const formatPercent = (value: number) => `${value.toFixed(2)}%`;
 
-  // For per-campaign breakdown, prefer Meta ROAS (matches Ads Manager),
-  // fallback to estimated AOV model when ROAS is unavailable.
+  // Campaign/adset/ad rows are Meta-attributed estimates. The top revenue summary is actual Stripe/Supabase revenue.
   const AVG_ORDER_VALUE = data?.revenue?.totalSales && data?.revenue?.totalRevenue
     ? data.revenue.totalRevenue / data.revenue.totalSales
     : 1500;
@@ -2359,6 +2374,38 @@ function MetaBreakdownTab({
     const estimatedRevenueInr = purchases * AVG_ORDER_VALUE;
     return estimatedRevenueInr - spendINR;
   };
+
+  const getRowRoas = (row: MetaAdMetrics) => {
+    if (row.attributionSource === "first_party" && typeof row.actualRoas === "number") {
+      return row.actualRoas > 0 ? row.actualRoas.toFixed(2) : "-";
+    }
+    return resolveDisplayRoas(row.purchases, row.spend, row.roas);
+  };
+
+  const getRowProfit = (row: MetaAdMetrics) => {
+    if (row.attributionSource === "first_party" && typeof row.actualProfit === "number") {
+      return row.actualProfit;
+    }
+    return calculateEstimatedProfit(row.purchases, row.spend, row.roas);
+  };
+
+  const getRowPurchases = (row: MetaAdMetrics) => {
+    if (row.attributionSource === "first_party" && typeof row.attributedSales === "number") {
+      return row.attributedSales;
+    }
+    return row.purchases;
+  };
+
+  const getAttributionBadge = (row: MetaAdMetrics) =>
+    row.attributionSource === "first_party" ? (
+      <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] text-emerald-300">
+        exact
+      </span>
+    ) : (
+      <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/45">
+        meta
+      </span>
+    );
 
   const [pickerStartDate, setPickerStartDate] = useState<string>(startDate);
   const [pickerEndDate, setPickerEndDate] = useState<string>(endDate);
@@ -2650,7 +2697,7 @@ function MetaBreakdownTab({
           <h3 className="text-white/70 text-sm font-semibold mb-4">Revenue & Profit Summary</h3>
           <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
             <div>
-              <p className="text-white/40 text-xs mb-1">Total Revenue</p>
+            <p className="text-white/40 text-xs mb-1">Actual Revenue</p>
               <p className="text-green-400 text-xl font-bold">₹{data.revenue.totalRevenue.toLocaleString()}</p>
             </div>
             <div>
@@ -2670,7 +2717,7 @@ function MetaBreakdownTab({
               <p className="text-red-400 text-xl font-bold">₹{data.revenue.totalSpendINR.toLocaleString()}</p>
             </div>
             <div>
-              <p className="text-white/40 text-xs mb-1">Profit</p>
+              <p className="text-white/40 text-xs mb-1">Actual Profit</p>
               <p className={`text-xl font-bold ${data.revenue.profit >= 0 ? "text-green-400" : "text-red-400"}`}>
                 {data.revenue.profit >= 0 ? "" : "-"}₹{Math.abs(data.revenue.profit).toLocaleString()}
               </p>
@@ -2748,7 +2795,7 @@ function MetaBreakdownTab({
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Spend</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Budget</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">ROAS</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Profit</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Est. Profit</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Meta Purchases</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">CPC</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">CPA</th>
@@ -2771,15 +2818,16 @@ function MetaBreakdownTab({
                         <div className="flex items-center gap-2">
                           <span className={`w-2 h-2 rounded-full ${campaign.status === "ACTIVE" ? "bg-green-400" : "bg-gray-400"}`} />
                           <span className="text-white font-medium">{campaign.name}</span>
+                          {getAttributionBadge(campaign)}
                         </div>
                       </td>
                       <td className="text-red-400 px-4 py-3 text-right">{formatINR(campaign.spend)}</td>
                       <td className="text-white/60 px-4 py-3 text-right">{campaign.budget ? formatINR(campaign.budget) : "-"}</td>
-                      <td className="text-green-400 px-4 py-3 text-right">{resolveDisplayRoas(campaign.purchases, campaign.spend, campaign.roas)}</td>
-                      <td className={`px-4 py-3 text-right ${calculateEstimatedProfit(campaign.purchases, campaign.spend, campaign.roas) >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        {calculateEstimatedProfit(campaign.purchases, campaign.spend, campaign.roas) >= 0 ? "" : "-"}₹{Math.abs(calculateEstimatedProfit(campaign.purchases, campaign.spend, campaign.roas)).toFixed(2)}
+                      <td className="text-green-400 px-4 py-3 text-right">{getRowRoas(campaign)}</td>
+                      <td className={`px-4 py-3 text-right ${getRowProfit(campaign) >= 0 ? "text-green-400" : "text-red-400"}`}>
+                        {getRowProfit(campaign) >= 0 ? "" : "-"}₹{Math.abs(getRowProfit(campaign)).toFixed(2)}
                       </td>
-                      <td className="text-white px-4 py-3 text-right">{campaign.purchases}</td>
+                      <td className="text-white px-4 py-3 text-right">{getRowPurchases(campaign)}</td>
                       <td className="text-white/60 px-4 py-3 text-right">{formatINR(campaign.cpc)}</td>
                       <td className="text-amber-400 px-4 py-3 text-right">{campaign.costPerPurchase > 0 ? formatINR(campaign.costPerPurchase) : "-"}</td>
                       <td className="text-white/60 px-4 py-3 text-right">{formatINR(campaign.cpm)}</td>
@@ -2801,15 +2849,16 @@ function MetaBreakdownTab({
                             <div className="flex items-center gap-2 pl-4">
                               <span className={`w-1.5 h-1.5 rounded-full ${adset.status === "ACTIVE" ? "bg-green-400" : "bg-gray-400"}`} />
                               <span className="text-white/80">{adset.name}</span>
+                              {getAttributionBadge(adset)}
                             </div>
                           </td>
                           <td className="text-red-400/80 px-4 py-3 text-right">{formatINR(adset.spend)}</td>
                           <td className="text-white/50 px-4 py-3 text-right">{adset.budget ? formatINR(adset.budget) : "-"}</td>
-                          <td className="text-green-400/80 px-4 py-3 text-right">{resolveDisplayRoas(adset.purchases, adset.spend, adset.roas)}</td>
-                          <td className={`px-4 py-3 text-right ${calculateEstimatedProfit(adset.purchases, adset.spend, adset.roas) >= 0 ? "text-green-400/80" : "text-red-400/80"}`}>
-                            {calculateEstimatedProfit(adset.purchases, adset.spend, adset.roas) >= 0 ? "" : "-"}₹{Math.abs(calculateEstimatedProfit(adset.purchases, adset.spend, adset.roas)).toFixed(2)}
+                          <td className="text-green-400/80 px-4 py-3 text-right">{getRowRoas(adset)}</td>
+                          <td className={`px-4 py-3 text-right ${getRowProfit(adset) >= 0 ? "text-green-400/80" : "text-red-400/80"}`}>
+                            {getRowProfit(adset) >= 0 ? "" : "-"}₹{Math.abs(getRowProfit(adset)).toFixed(2)}
                           </td>
-                          <td className="text-white/80 px-4 py-3 text-right">{adset.purchases}</td>
+                          <td className="text-white/80 px-4 py-3 text-right">{getRowPurchases(adset)}</td>
                           <td className="text-white/50 px-4 py-3 text-right">{formatINR(adset.cpc)}</td>
                           <td className="text-amber-400/80 px-4 py-3 text-right">{adset.costPerPurchase > 0 ? formatINR(adset.costPerPurchase) : "-"}</td>
                           <td className="text-white/50 px-4 py-3 text-right">{formatINR(adset.cpm)}</td>
@@ -2824,15 +2873,16 @@ function MetaBreakdownTab({
                               <div className="flex items-center gap-2 pl-8">
                                 <span className={`w-1 h-1 rounded-full ${ad.status === "ACTIVE" ? "bg-green-400" : "bg-gray-400"}`} />
                                 <span className="text-white/60 text-xs">{ad.name}</span>
+                                {getAttributionBadge(ad)}
                               </div>
                             </td>
                             <td className="text-red-400/60 px-4 py-3 text-right text-xs">{formatINR(ad.spend)}</td>
                             <td className="text-white/40 px-4 py-3 text-right text-xs">-</td>
-                            <td className="text-green-400/60 px-4 py-3 text-right text-xs">{resolveDisplayRoas(ad.purchases, ad.spend, ad.roas)}</td>
-                            <td className={`px-4 py-3 text-right text-xs ${calculateEstimatedProfit(ad.purchases, ad.spend, ad.roas) >= 0 ? "text-green-400/60" : "text-red-400/60"}`}>
-                              {calculateEstimatedProfit(ad.purchases, ad.spend, ad.roas) >= 0 ? "" : "-"}₹{Math.abs(calculateEstimatedProfit(ad.purchases, ad.spend, ad.roas)).toFixed(2)}
+                            <td className="text-green-400/60 px-4 py-3 text-right text-xs">{getRowRoas(ad)}</td>
+                            <td className={`px-4 py-3 text-right text-xs ${getRowProfit(ad) >= 0 ? "text-green-400/60" : "text-red-400/60"}`}>
+                              {getRowProfit(ad) >= 0 ? "" : "-"}₹{Math.abs(getRowProfit(ad)).toFixed(2)}
                             </td>
-                            <td className="text-white/60 px-4 py-3 text-right text-xs">{ad.purchases}</td>
+                            <td className="text-white/60 px-4 py-3 text-right text-xs">{getRowPurchases(ad)}</td>
                             <td className="text-white/40 px-4 py-3 text-right text-xs">{formatINR(ad.cpc)}</td>
                             <td className="text-amber-400/60 px-4 py-3 text-right text-xs">{ad.costPerPurchase > 0 ? formatINR(ad.costPerPurchase) : "-"}</td>
                             <td className="text-white/40 px-4 py-3 text-right text-xs">{formatINR(ad.cpm)}</td>
@@ -2908,35 +2958,76 @@ function AnalyticsTab({
     "/",
     "/welcome",
     "/onboarding",
-    "/onboarding/step-5",
-    "/onboarding/step-6",
+    "/onboarding/insights-history",
+    "/onboarding/why-astrorekha",
+    "/onboarding/birth-details-intro",
+    "/onboarding/gender",
     "/onboarding/birthday",
     "/onboarding/birth-time",
     "/onboarding/birthplace",
+    "/onboarding/step-5",
+    "/onboarding/step-6",
     "/onboarding/step-7",
-    "/onboarding/step-8",
-    "/onboarding/step-9",
-    "/onboarding/step-10",
-    "/onboarding/step-11",
-    "/onboarding/step-12",
-    "/onboarding/step-10b",
-    "/onboarding/step-13",
-    "/onboarding/step-14",
-    "/onboarding/step-15",
-    "/onboarding/step-16",
-    "/onboarding/step-17",
-    "/onboarding/step-19",
-    "/onboarding/step-20",
-    "/onboarding/bundle-pricing",
-    "/onboarding/bundle-upsell",
-    "/onboarding/bundle-upsell-b",
-    "/paywall",
+    "/onboarding/future-prediction/intro",
+    "/onboarding/future-prediction/focus",
+    "/onboarding/future-prediction/relationships",
+    "/onboarding/future-prediction/decision-style",
+    "/onboarding/future-prediction/horizon",
+    "/onboarding/future-prediction/confidence",
+    "/onboarding/future-prediction/change",
+    "/onboarding/future-prediction/life-path",
+    "/onboarding/future-prediction/ready",
+    "/onboarding/future-prediction/email",
+    "/onboarding/future-prediction/paywall",
+    "/onboarding/soulmate-sketch/intro",
+    "/onboarding/soulmate-sketch/partner-gender",
+    "/onboarding/soulmate-sketch/age-range",
+    "/onboarding/soulmate-sketch/visual-style",
+    "/onboarding/soulmate-sketch/core-quality",
+    "/onboarding/soulmate-sketch/email",
+    "/onboarding/soulmate-sketch/paywall",
+    "/onboarding/palm-reading/intro",
+    "/onboarding/palm-reading/line-focus",
+    "/onboarding/palm-reading/life-area",
+    "/onboarding/palm-reading/clarity",
+    "/onboarding/palm-reading/hand-map",
+    "/onboarding/palm-reading/personality",
+    "/onboarding/palm-reading/timing",
+    "/onboarding/palm-reading/ready",
+    "/onboarding/palm-reading/email",
+    "/onboarding/palm-reading/paywall",
+    "/onboarding/future-partner/intro",
+    "/onboarding/future-partner/partner-type",
+    "/onboarding/future-partner/love-language",
+    "/onboarding/future-partner/relationship-values",
+    "/onboarding/future-partner/ideal-date",
+    "/onboarding/future-partner/cosmic-timing",
+    "/onboarding/future-partner/email",
+    "/onboarding/future-partner/paywall",
+    "/onboarding/compatibility/intro",
+    "/onboarding/compatibility/partner-gender",
+    "/onboarding/compatibility/partner-birthday",
+    "/onboarding/compatibility/partner-birthplace",
+    "/onboarding/compatibility/partner-birth-time",
+    "/onboarding/compatibility/ready",
+    "/onboarding/compatibility/email",
+    "/onboarding/compatibility/paywall",
+    "/onboarding/create-password",
     "/login",
-    "/scan",
-    "/dashboard",
     "/reports",
+    "/prediction-2026",
+    "/palm-reading",
+    "/birth-chart",
+    "/birth-chart/report",
+    "/soulmate-sketch",
+    "/future-partner",
+    "/compatibility",
+    "/horoscope",
+    "/chat",
     "/profile",
     "/profile/edit",
+    "/settings",
+    "/manage-subscription",
   ];
 
   const WEEKDAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -2992,9 +3083,9 @@ function AnalyticsTab({
   const [routeSortDir, setRouteSortDir] = useState<"asc" | "desc">("desc");
 
   const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("en-IN", {
+    new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "INR",
+      currency: "USD",
       minimumFractionDigits: 2,
     }).format(value);
 
@@ -3531,12 +3622,12 @@ function AnalyticsTab({
       ]
     : [];
 
-  const trafficSourceBadge = data?.sources.googleAnalytics.connected ? "GA4" : "Internal";
-  const salesSourceBadge = data?.sources.sales.connected ? "PayU" : "Supabase";
-  const dayModeShortLabel = dayMode === "business_1130_ist" ? "CST" : "IST";
+  const trafficSourceBadge = data?.routes?.[0]?.source === "internal" ? "Supabase" : "GA4";
+  const salesSourceBadge = "Stripe/Supabase";
+  const dayModeShortLabel = dayMode === "business_1130_ist" ? "Stripe TZ" : "IST";
   const dayModeDetailLabel =
     dayMode === "business_1130_ist"
-      ? "CST (11:30 IST treated as 12:00 AM)"
+      ? "Stripe day (11:30 IST treated as 12:00 AM)"
       : "IST calendar";
 
   const chartConfigs = data
@@ -3597,13 +3688,13 @@ function AnalyticsTab({
   const totalDropOffRate = data?.funnel?.dropOffRate ?? (totalVisitors > 0 ? (totalDropOff / totalVisitors) * 100 : 0);
 
   const profitabilityRows = matrixRows;
-  const profitabilitySourceBadge = matrixAdsSource === "meta" ? "Meta + PayU" : "PayU";
+  const profitabilitySourceBadge = matrixAdsSource === "meta" ? "Meta hourly + Stripe" : "Stripe";
 
   const profitabilityMatrix = useMemo(() => {
     if (!profitabilityRows.length) return null;
 
     const getMetricValue = (row: AnalyticsHourlyProfitabilityPoint) =>
-      profitMetric === "profit" ? row.profitInr : row.roas;
+      profitMetric === "profit" ? row.revenueInr : row.roas;
 
     const rangeStart = new Date(`${matrixStartDate}T00:00:00`);
     const rangeEnd = new Date(`${matrixEndDate}T00:00:00`);
@@ -3881,7 +3972,7 @@ function AnalyticsTab({
     return routeSortDir === "asc" ? aNum - bNum : bNum - aNum;
   });
 
-  const getMetricLabel = () => (profitMetric === "profit" ? "Profit / Loss (INR)" : "ROAS");
+  const getMetricLabel = () => (profitMetric === "profit" ? "Revenue (USD)" : "ROAS");
 
   const getMetricFormattedValue = (value: number) => {
     if (profitMetric === "profit") return formatCurrency(value);
@@ -4119,7 +4210,7 @@ function AnalyticsTab({
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
             >
               <option value="calendar_ist">IST (00:00 - 23:59)</option>
-              <option value="business_1130_ist">CST (11:30 IST - next 11:29)</option>
+              <option value="business_1130_ist">Stripe day (11:30 IST - next 11:29)</option>
             </select>
           </div>
           <button
@@ -4302,11 +4393,11 @@ function AnalyticsTab({
             <div className="px-4 py-3 border-b border-white/10 flex flex-wrap items-end justify-between gap-3">
               <div>
                 <div className="flex items-center gap-2">
-                  <h3 className="text-white/70 text-sm font-medium">Hourly Profitability Matrix</h3>
+                  <h3 className="text-white/70 text-sm font-medium">Hourly Revenue Matrix</h3>
                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/60">{profitabilitySourceBadge}</span>
                 </div>
                 <p className="text-white/40 text-xs mt-1">
-                  Single date shows that day. Multi-date range shows weekday averages. Active mode: {dayMode === "business_1130_ist" ? "CST (11:30 IST treated as 12:00 AM)" : "IST calendar day"}.
+                  Single date shows that day. Multi-date range shows weekday averages. Values are Stripe/Supabase revenue by payment hour. Active mode: {dayMode === "business_1130_ist" ? "Stripe day (11:30 IST treated as 12:00 AM)" : "IST calendar day"}.
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -4337,7 +4428,7 @@ function AnalyticsTab({
                   className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-primary/50"
                 >
                   <option value="calendar_ist">Day Mode: IST (00:00-23:59)</option>
-                  <option value="business_1130_ist">Day Mode: CST (11:30 IST → next 11:29)</option>
+                  <option value="business_1130_ist">Day Mode: Stripe day (11:30 IST → next 11:29)</option>
                 </select>
                 <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
                   {[7, 14, 28].map((days) => (
@@ -4358,7 +4449,7 @@ function AnalyticsTab({
                   onChange={(e) => setProfitMetric(e.target.value as ProfitMetric)}
                   className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-primary/50"
                 >
-                  <option value="profit">Metric: Profit / Loss</option>
+                  <option value="profit">Metric: Revenue</option>
                   <option value="roas">Metric: ROAS</option>
                 </select>
                 <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
@@ -4382,7 +4473,7 @@ function AnalyticsTab({
 
             <div className="p-4">
               {!profitabilityMatrix ? (
-                <p className="text-white/40 text-sm">No profitability data available for this range.</p>
+                <p className="text-white/40 text-sm">No hourly revenue data available for this range.</p>
               ) : profitView === "table" ? (
                 <div className="overflow-auto max-h-[560px] border border-white/10 rounded-lg">
                   <table className="w-full min-w-[760px]">
@@ -4461,11 +4552,11 @@ function AnalyticsTab({
                       }));
                       const style = chartStyleByKey["profit-hour"] || "bar";
                       if (profitMetric === "profit") {
-                        if (style === "line") return renderLineTrend("profit-hour", rows, "#34d399", "No hourly profitability data", 720);
-                        if (style === "pie") return renderPieTrend("profit-hour", rows, "No hourly profitability data");
-                        return renderSignedTrendBars(rows, "bg-emerald-500/80", "bg-rose-500/80", "No hourly profitability data", 720);
+                        if (style === "line") return renderLineTrend("profit-hour", rows, "#34d399", "No hourly revenue data", 720);
+                        if (style === "pie") return renderPieTrend("profit-hour", rows, "No hourly revenue data");
+                        return renderSignedTrendBars(rows, "bg-emerald-500/80", "bg-rose-500/80", "No hourly revenue data", 720);
                       }
-                      return renderChartByStyle("profit-hour", rows, "bg-cyan-500/70", "No hourly profitability data", 720, false);
+                      return renderChartByStyle("profit-hour", rows, "bg-cyan-500/70", "No hourly revenue data", 720, false);
                     })()}
                   </div>
                   <div className="bg-[#141C2F] rounded-lg border border-white/10 p-3">
@@ -4496,11 +4587,11 @@ function AnalyticsTab({
                       }));
                       const style = chartStyleByKey["profit-day"] || "bar";
                       if (profitMetric === "profit") {
-                        if (style === "line") return renderLineTrend("profit-day", rows, "#84cc16", "No day-level profitability data", 360);
-                        if (style === "pie") return renderPieTrend("profit-day", rows, "No day-level profitability data");
-                        return renderSignedTrendBars(rows, "bg-lime-500/80", "bg-red-500/80", "No day-level profitability data", 360);
+                        if (style === "line") return renderLineTrend("profit-day", rows, "#84cc16", "No day-level revenue data", 360);
+                        if (style === "pie") return renderPieTrend("profit-day", rows, "No day-level revenue data");
+                        return renderSignedTrendBars(rows, "bg-lime-500/80", "bg-red-500/80", "No day-level revenue data", 360);
                       }
-                      return renderChartByStyle("profit-day", rows, "bg-sky-500/70", "No day-level profitability data", 360, false);
+                      return renderChartByStyle("profit-day", rows, "bg-sky-500/70", "No day-level revenue data", 360, false);
                     })()}
                   </div>
                 </div>

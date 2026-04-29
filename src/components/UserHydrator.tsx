@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
 import { useUserStore } from "@/lib/user-store";
 import { useRouter } from "next/navigation";
 
@@ -71,14 +70,13 @@ export default function UserHydrator() {
     const userId = storedId;
 
     try {
-      const { data, error } = await supabase
-        .from("users")
-        .select("*")
-        .eq("id", userId)
-        .single();
+      const response = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, {
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => null);
 
-      // User not found in database - clear localStorage and redirect to login
-      if (error || !data) {
+      // User not found in database - clear localStorage and redirect to welcome.
+      if (response.status === 404 || result?.error === "user_not_found") {
         console.warn("User not found in database, clearing session");
         localStorage.removeItem("astrorekha_user_id");
         localStorage.removeItem("astrorekha_email");
@@ -94,24 +92,19 @@ export default function UserHydrator() {
         return;
       }
 
-      setUserId(userId);
-
-      // Backfill timezone for existing users who don't have it set
-      if (!data.timezone) {
-        try {
-          const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-          if (detectedTz) {
-            await supabase.from("users").update({ timezone: detectedTz }).eq("id", userId);
-          }
-        } catch {}
+      if (!response.ok || !result?.success || !result.user) {
+        throw new Error(result?.error || "Failed to hydrate user");
       }
+
+      const data = result.user;
+      setUserId(userId);
 
       if (typeof data.coins === "number") {
         setCoins(data.coins);
       }
 
       // Show post-login security update prompt only for affected users.
-      if (!data.password_hash && data.email) {
+      if (!data.passwordHashSet && data.email) {
         setSecurityEmail(String(data.email).trim().toLowerCase());
         const securityPromptStorageKey = getSecurityPromptStorageKey();
         const hasSeenPrompt = securityPromptStorageKey
@@ -122,7 +115,7 @@ export default function UserHydrator() {
         }
       }
 
-      if (data.is_dev_tester === true) {
+      if (data.isDevTester === true) {
         unlockAllFeatures();
         setCoins(typeof data.coins === "number" ? data.coins : 999999);
         return;
@@ -133,7 +126,7 @@ export default function UserHydrator() {
       syncFromServer({
         unlockedFeatures: unlocked,
         coins: data.coins,
-        purchasedBundle: data.bundle_purchased || null,
+        purchasedBundle: data.purchasedBundle || null,
       });
 
       const hasPalmReading = !!unlocked.palmReading;

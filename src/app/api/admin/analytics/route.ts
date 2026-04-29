@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { google } from "googleapis";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { classifyPayUEvent } from "@/lib/finance-events";
-import { getPayUTransactions } from "@/lib/payu-api";
+import { classifyStoredPaymentEvent } from "@/lib/finance-events";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,6 +57,132 @@ interface SourceStatus {
   message: string;
 }
 
+const WORKFLOW_ROUTES = [
+  "/",
+  "/welcome",
+  "/onboarding",
+  "/onboarding/insights-history",
+  "/onboarding/why-astrorekha",
+  "/onboarding/birth-details-intro",
+  "/onboarding/gender",
+  "/onboarding/birthday",
+  "/onboarding/birth-time",
+  "/onboarding/birthplace",
+  "/onboarding/step-5",
+  "/onboarding/step-6",
+  "/onboarding/step-7",
+  "/onboarding/future-prediction/intro",
+  "/onboarding/future-prediction/focus",
+  "/onboarding/future-prediction/relationships",
+  "/onboarding/future-prediction/decision-style",
+  "/onboarding/future-prediction/horizon",
+  "/onboarding/future-prediction/confidence",
+  "/onboarding/future-prediction/change",
+  "/onboarding/future-prediction/life-path",
+  "/onboarding/future-prediction/ready",
+  "/onboarding/future-prediction/email",
+  "/onboarding/future-prediction/paywall",
+  "/onboarding/soulmate-sketch/intro",
+  "/onboarding/soulmate-sketch/partner-gender",
+  "/onboarding/soulmate-sketch/age-range",
+  "/onboarding/soulmate-sketch/visual-style",
+  "/onboarding/soulmate-sketch/core-quality",
+  "/onboarding/soulmate-sketch/email",
+  "/onboarding/soulmate-sketch/paywall",
+  "/onboarding/palm-reading/intro",
+  "/onboarding/palm-reading/line-focus",
+  "/onboarding/palm-reading/life-area",
+  "/onboarding/palm-reading/clarity",
+  "/onboarding/palm-reading/hand-map",
+  "/onboarding/palm-reading/personality",
+  "/onboarding/palm-reading/timing",
+  "/onboarding/palm-reading/ready",
+  "/onboarding/palm-reading/email",
+  "/onboarding/palm-reading/paywall",
+  "/onboarding/future-partner/intro",
+  "/onboarding/future-partner/partner-type",
+  "/onboarding/future-partner/love-language",
+  "/onboarding/future-partner/relationship-values",
+  "/onboarding/future-partner/ideal-date",
+  "/onboarding/future-partner/cosmic-timing",
+  "/onboarding/future-partner/email",
+  "/onboarding/future-partner/paywall",
+  "/onboarding/compatibility/intro",
+  "/onboarding/compatibility/partner-gender",
+  "/onboarding/compatibility/partner-birthday",
+  "/onboarding/compatibility/partner-birthplace",
+  "/onboarding/compatibility/partner-birth-time",
+  "/onboarding/compatibility/ready",
+  "/onboarding/compatibility/email",
+  "/onboarding/compatibility/paywall",
+  "/onboarding/create-password",
+  "/login",
+  "/reports",
+  "/prediction-2026",
+  "/palm-reading",
+  "/birth-chart",
+  "/birth-chart/report",
+  "/soulmate-sketch",
+  "/future-partner",
+  "/compatibility",
+  "/horoscope",
+  "/chat",
+  "/profile",
+  "/profile/edit",
+  "/settings",
+  "/manage-subscription",
+];
+
+const CONTINUATION_ACTION_KEYWORDS = [
+  "continue",
+  "email_submit",
+  "lead",
+  "paywall_cta",
+  "checkout",
+  "subscription_checkout",
+  "demo_payment",
+  "coupon",
+  "promo",
+  "create_password_completed",
+  "registration",
+];
+
+function isPageViewEvent(eventName: unknown): boolean {
+  return eventName === "PageView";
+}
+
+function isContinuationEvent(event: { event_name?: unknown; action?: unknown; metadata?: unknown }): boolean {
+  const eventName = String(event.event_name || "").toLowerCase();
+  const action = String(event.action || "").toLowerCase();
+  const metadataAction =
+    event.metadata && typeof event.metadata === "object"
+      ? String((event.metadata as Record<string, unknown>).action || "").toLowerCase()
+      : "";
+  const haystack = `${eventName} ${action} ${metadataAction}`;
+  return CONTINUATION_ACTION_KEYWORDS.some((keyword) => haystack.includes(keyword));
+}
+
+function ensureRouteMetric(
+  map: Map<string, RouteMetric & { sessions: Set<string>; durationSamples: number[] }>,
+  route: string
+) {
+  if (!map.has(route)) {
+    map.set(route, {
+      route,
+      viewers: 0,
+      pageViews: 0,
+      bounceRate: 0,
+      avgSessionDurationSec: 0,
+      checkouts: 0,
+      bounces: 0,
+      source: "internal",
+      sessions: new Set<string>(),
+      durationSamples: [],
+    });
+  }
+  return map.get(route)!;
+}
+
 function toNumber(value: unknown): number {
   const num = Number(value ?? 0);
   return Number.isFinite(num) ? num : 0;
@@ -72,8 +197,8 @@ function normalizeBounceRate(rawValue: number): number {
   return rawValue <= 1 ? rawValue * 100 : rawValue;
 }
 
-function getModeShortLabel(mode: MatrixDayMode): "IST" | "CST" {
-  return mode === "business_1130_ist" ? "CST" : "IST";
+function getModeShortLabel(mode: MatrixDayMode): "IST" | "Stripe TZ" {
+  return mode === "business_1130_ist" ? "Stripe TZ" : "IST";
 }
 
 function formatHourLabel(hour: number, mode: MatrixDayMode): string {
@@ -112,6 +237,29 @@ function shiftIsoDate(isoDate: string, days: number): string {
   return d.toISOString().split("T")[0];
 }
 
+function getUtcWindowForMode(
+  startDate: string,
+  endDate: string,
+  mode: MatrixDayMode
+): { startIso: string; endIso: string } {
+  const boundaryMinutesInIst = mode === "business_1130_ist" ? (11 * 60 + 30) : 0;
+  const istOffsetMinutes = 5 * 60 + 30;
+  const utcOffsetFromDateStart = boundaryMinutesInIst - istOffsetMinutes;
+
+  const start = new Date(`${startDate}T00:00:00.000Z`);
+  start.setUTCMinutes(start.getUTCMinutes() + utcOffsetFromDateStart);
+
+  const end = new Date(`${endDate}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+  end.setUTCMinutes(end.getUTCMinutes() + utcOffsetFromDateStart);
+  end.setUTCMilliseconds(end.getUTCMilliseconds() - 1);
+
+  return {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  };
+}
+
 function getMatrixDateGroup(date: Date, mode: MatrixDayMode): { dayKey: string; hour: number; weekday: string } {
   const { dayKey: calendarDay, hour, minute } = getIstDateTimeParts(date);
 
@@ -121,7 +269,7 @@ function getMatrixDateGroup(date: Date, mode: MatrixDayMode): { dayKey: string; 
 
   const isBeforeBoundary = hour < 11 || (hour === 11 && minute < 30);
   const businessDay = isBeforeBoundary ? shiftIsoDate(calendarDay, -1) : calendarDay;
-  // CST mode starts at 11:30 IST, so 11:30 IST maps to 00:00 CST.
+  // Stripe day mode starts at 11:30 IST, so 11:30 IST maps to 00:00.
   const totalMinutes = hour * 60 + minute;
   const shiftedMinutes = (totalMinutes - (11 * 60 + 30) + 24 * 60) % (24 * 60);
   const cstHour = Math.floor(shiftedMinutes / 60);
@@ -191,6 +339,79 @@ async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promi
     }
     return spendMap;
   } catch {
+    return new Map();
+  }
+}
+
+function parseMetaHourlyBreakdownHour(value: unknown): number | null {
+  const text = String(value || "");
+  const match = text.match(/(\d{1,2}):\d{2}/);
+  if (!match) return null;
+  const hour = Number(match[1]);
+  return Number.isFinite(hour) && hour >= 0 && hour <= 23 ? hour : null;
+}
+
+function getDateFromStripeDayHour(dayKey: string, hour: number, mode: MatrixDayMode): Date {
+  if (mode === "business_1130_ist") {
+    return new Date(`${dayKey}T${String(hour).padStart(2, "0")}:00:00-06:00`);
+  }
+
+  const date = new Date(`${dayKey}T00:00:00.000Z`);
+  date.setUTCMinutes(date.getUTCMinutes() + 6 * 60 + hour * 60);
+  return date;
+}
+
+async function fetchMetaAdsHourlySpend(
+  startDate: string,
+  endDate: string,
+  mode: MatrixDayMode
+): Promise<Map<string, number>> {
+  const metaAccessToken = process.env.META_ACCESS_TOKEN;
+  const adAccountId = process.env.META_AD_ACCOUNT_ID;
+
+  if (!metaAccessToken || !adAccountId) {
+    return new Map();
+  }
+
+  try {
+    const fetchStart = mode === "business_1130_ist" ? startDate : shiftIsoDate(startDate, -1);
+    const fetchEnd = mode === "business_1130_ist" ? endDate : shiftIsoDate(endDate, 1);
+    const dateParams = `time_range={"since":"${fetchStart}","until":"${fetchEnd}"}`;
+    let url =
+      `https://graph.facebook.com/v21.0/act_${adAccountId}/insights` +
+      `?fields=spend` +
+      `&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone` +
+      `&time_increment=1&${dateParams}&limit=500&access_token=${metaAccessToken}`;
+
+    const spendMap = new Map<string, number>();
+    let pageCount = 0;
+
+    while (url && pageCount < 10) {
+      pageCount += 1;
+      const response = await fetch(url);
+      const data = await response.json();
+
+      if (Array.isArray(data?.data)) {
+        for (const row of data.data) {
+          const advertiserDay = String(row?.date_start || "");
+          const advertiserHour = parseMetaHourlyBreakdownHour(row?.hourly_stats_aggregated_by_advertiser_time_zone);
+          const spend = Number(row?.spend || 0);
+          if (!advertiserDay || advertiserHour === null || !Number.isFinite(spend)) continue;
+
+          const grouped = getMatrixDateGroup(getDateFromStripeDayHour(advertiserDay, advertiserHour, mode), mode);
+          if (grouped.dayKey < startDate || grouped.dayKey > endDate) continue;
+
+          const key = `${grouped.dayKey}|${grouped.hour}`;
+          spendMap.set(key, (spendMap.get(key) || 0) + spend);
+        }
+      }
+
+      url = typeof data?.paging?.next === "string" ? data.paging.next : "";
+    }
+
+    return spendMap;
+  } catch (error) {
+    console.warn("Failed to fetch Meta hourly spend:", error);
     return new Map();
   }
 }
@@ -406,8 +627,9 @@ async function fetchGoogleAnalyticsData(
 
     const analyticsData = google.analyticsdata({ version: "v1beta", auth });
 
-    const trafficEndDate = dayMode === "business_1130_ist" ? shiftIsoDate(endDate, 1) : endDate;
-    const trafficRange = [{ startDate, endDate: trafficEndDate }];
+    const trafficStartDate = shiftIsoDate(startDate, -1);
+    const trafficEndDate = shiftIsoDate(endDate, 1);
+    const trafficRange = [{ startDate: trafficStartDate, endDate: trafficEndDate }];
     const routeRange = [{ startDate, endDate }];
 
     const [hourResp, routeResp] = await Promise.all([
@@ -514,7 +736,7 @@ async function fetchGoogleAnalyticsData(
         configured: true,
         connected: true,
         message: dayMode === "business_1130_ist"
-          ? "Connected to GA4 Data API (CST mode uses shifted hour/day aggregation)."
+          ? "Connected to GA4 Data API (Stripe day mode uses shifted hour/day aggregation)."
           : "Connected to GA4 Data API.",
       },
     };
@@ -558,6 +780,160 @@ async function fetchInternalRouteAnalytics(
   avgSessionDurationSec: number;
 }> {
   const supabase = getSupabaseAdmin();
+
+  const { data: firstPartyEvents, error: firstPartyError } = await supabase
+    .from("analytics_events")
+    .select("event_name, route, session_id, user_id, created_at, action, metadata")
+    .gte("created_at", startIso)
+    .lte("created_at", endIso)
+    .order("created_at", { ascending: true })
+    .limit(30000);
+
+  if (!firstPartyError && firstPartyEvents && firstPartyEvents.length > 0) {
+    const routeMap = new Map<string, RouteMetric & { sessions: Set<string>; durationSamples: number[] }>();
+    const hourlySessions = new Map<string, Set<string>>();
+    const dailySessions = new Map<string, Set<string>>();
+    const weekdaySessions = new Map<string, Set<string>>();
+    const seenPageViews = new Set<string>();
+    const sessionEvents = new Map<
+      string,
+      Array<{
+        eventName: string;
+        route: string;
+        createdAt: string;
+        timestamp: number;
+        isPageView: boolean;
+        isContinuation: boolean;
+      }>
+    >();
+
+    for (const route of WORKFLOW_ROUTES) {
+      ensureRouteMetric(routeMap, route);
+    }
+
+    for (const evt of firstPartyEvents) {
+      if (!evt?.created_at) continue;
+      const grouped = getMatrixDateGroup(new Date(evt.created_at), dayMode);
+      if (grouped.dayKey < startDate || grouped.dayKey > endDate) continue;
+
+      const route = getRouteFromMetadata({ route: evt.route }, "/unknown");
+      const sessionKey = String(evt.session_id || evt.user_id || `${route}_${evt.created_at}`);
+      const eventName = String(evt.event_name || "");
+      const eventTimestamp = new Date(evt.created_at).getTime();
+      const isPageView = isPageViewEvent(eventName);
+      const isContinuation = isContinuationEvent(evt);
+
+      if (!sessionEvents.has(sessionKey)) {
+        sessionEvents.set(sessionKey, []);
+      }
+      sessionEvents.get(sessionKey)!.push({
+        eventName,
+        route,
+        createdAt: evt.created_at,
+        timestamp: eventTimestamp,
+        isPageView,
+        isContinuation,
+      });
+
+      if (!isPageView) continue;
+
+      const pageViewKey = `${sessionKey}|${route}|${evt.created_at}`;
+      const item = ensureRouteMetric(routeMap, route);
+      item.sessions.add(sessionKey);
+      if (!seenPageViews.has(pageViewKey)) {
+        seenPageViews.add(pageViewKey);
+        item.pageViews += 1;
+      }
+
+      const hourLabel = formatHourLabel(grouped.hour, dayMode);
+      if (!hourlySessions.has(hourLabel)) hourlySessions.set(hourLabel, new Set());
+      if (!dailySessions.has(grouped.dayKey)) dailySessions.set(grouped.dayKey, new Set());
+      if (!weekdaySessions.has(grouped.weekday)) weekdaySessions.set(grouped.weekday, new Set());
+      hourlySessions.get(hourLabel)!.add(sessionKey);
+      dailySessions.get(grouped.dayKey)!.add(sessionKey);
+      weekdaySessions.get(grouped.weekday)!.add(sessionKey);
+    }
+
+    for (const events of sessionEvents.values()) {
+      const sortedEvents = [...events].sort((a, b) => a.timestamp - b.timestamp);
+      const pageEvents = sortedEvents.filter((event) => event.isPageView);
+      if (pageEvents.length === 0) continue;
+
+      for (let idx = 0; idx < pageEvents.length; idx++) {
+        const current = pageEvents[idx];
+        const nextPage = pageEvents[idx + 1];
+        if (!nextPage) continue;
+        const durationSec = Math.max(0, Math.min((nextPage.timestamp - current.timestamp) / 1000, 30 * 60));
+        ensureRouteMetric(routeMap, current.route).durationSamples.push(durationSec);
+      }
+
+      const routeVisits = new Map<string, { first: number; last: number }>();
+      for (const pageEvent of pageEvents) {
+        const visit = routeVisits.get(pageEvent.route) || { first: pageEvent.timestamp, last: pageEvent.timestamp };
+        visit.first = Math.min(visit.first, pageEvent.timestamp);
+        visit.last = Math.max(visit.last, pageEvent.timestamp);
+        routeVisits.set(pageEvent.route, visit);
+      }
+
+      for (const [route, visit] of routeVisits.entries()) {
+        const hasLaterPageView = pageEvents.some((event) => event.timestamp > visit.last && event.route !== route);
+        const hasLaterContinuation = sortedEvents.some(
+          (event) => event.timestamp > visit.last && event.isContinuation
+        );
+
+        if (!hasLaterPageView && !hasLaterContinuation) {
+          ensureRouteMetric(routeMap, route).bounces += 1;
+        }
+      }
+    }
+
+    const hourlyMap = new Map<string, number>();
+    const dailyMap = new Map<string, number>();
+    const weekdayMap = new Map<string, number>();
+    hourlySessions.forEach((set, key) => hourlyMap.set(key, set.size));
+    dailySessions.forEach((set, key) => dailyMap.set(key, set.size));
+    weekdaySessions.forEach((set, key) => weekdayMap.set(key, set.size));
+
+    const routeMetrics = Array.from(routeMap.values())
+      .map(({ sessions, durationSamples, ...row }) => ({
+        ...row,
+        viewers: sessions.size,
+        bounceRate: sessions.size > 0 ? (row.bounces / sessions.size) * 100 : 0,
+        avgSessionDurationSec:
+          durationSamples.length > 0
+            ? durationSamples.reduce((sum, value) => sum + value, 0) / durationSamples.length
+            : 0,
+      }))
+      .sort((a, b) => {
+        const aIdx = WORKFLOW_ROUTES.indexOf(a.route);
+        const bIdx = WORKFLOW_ROUTES.indexOf(b.route);
+        if (aIdx !== -1 || bIdx !== -1) {
+          if (aIdx === -1) return 1;
+          if (bIdx === -1) return -1;
+          return aIdx - bIdx;
+        }
+        return a.route.localeCompare(b.route);
+      });
+
+    const totalSessions = new Set(firstPartyEvents.map((evt) => evt.session_id || evt.user_id).filter(Boolean)).size;
+    const totalViewers = routeMetrics.reduce((sum, row) => sum + row.viewers, 0);
+    const totalBounces = routeMetrics.reduce((sum, row) => sum + row.bounces, 0);
+    const totalWeightedDuration = routeMetrics.reduce((sum, row) => sum + row.avgSessionDurationSec * row.pageViews, 0);
+    const totalPageViews = routeMetrics.reduce((sum, row) => sum + row.pageViews, 0);
+
+    return {
+      routeMetrics,
+      peakTrafficHour: pickTopTrafficMetric(hourlyMap, "N/A"),
+      peakTrafficDay: pickTopTrafficMetric(weekdayMap, "N/A"),
+      hourlySeries: buildHourlyTrafficSeriesByMode(hourlyMap, dayMode),
+      dailySeries: buildDailyTrafficSeries(dailyMap, startDate, endDate),
+      weekdaySeries: buildWeekdayTrafficSeries(weekdayMap),
+      totalSessions: totalSessions || routeMetrics.reduce((sum, row) => sum + row.viewers, 0),
+      totalPageViews,
+      overallBounceRate: totalViewers > 0 ? (totalBounces / totalViewers) * 100 : 0,
+      avgSessionDurationSec: totalPageViews > 0 ? totalWeightedDuration / totalPageViews : 0,
+    };
+  }
 
   const { data: events } = await supabase
     .from("ab_test_events")
@@ -678,23 +1054,27 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Session expired - Please login again" }, { status: 401 });
     }
 
-    const startIso = `${startDate}T00:00:00.000Z`;
-    const endDateForMode = dayMode === "business_1130_ist" ? shiftIsoDate(endDate, 1) : endDate;
-    const endIso = `${endDateForMode}T23:59:59.999Z`;
+    const { startIso, endIso } = getUtcWindowForMode(startDate, endDate, dayMode);
+    const matrixWindow = getUtcWindowForMode(startDate, endDate, matrixDayMode);
+    const paymentFetchStartIso = startIso < matrixWindow.startIso ? startIso : matrixWindow.startIso;
+    const paymentFetchEndIso = endIso > matrixWindow.endIso ? endIso : matrixWindow.endIso;
 
     const { data: paymentRows } = await supabase
       .from("payments")
-      .select("id, amount, payment_status, created_at, type, bundle_id, currency, user_id")
-      .gte("created_at", startIso)
-      .lte("created_at", endIso)
+      .select("id, amount, payment_status, created_at, fulfilled_at, type, bundle_id, currency, user_id")
       .order("created_at", { ascending: false })
       .limit(10000);
 
-    const pendingRows = (paymentRows || []).filter((row) => {
+    const selectedPaymentRows = (paymentRows || []).filter((payment) => {
+      const eventTime = String(payment.fulfilled_at || payment.created_at || "");
+      return eventTime >= paymentFetchStartIso && eventTime <= paymentFetchEndIso;
+    });
+
+    const pendingRows = selectedPaymentRows.filter((row) => {
       const status = normalizeStatus(row.payment_status);
       return status === "created" || status === "pending";
     });
-    const failedRows = (paymentRows || []).filter((row) => normalizeStatus(row.payment_status) === "failed");
+    const failedRows = selectedPaymentRows.filter((row) => normalizeStatus(row.payment_status) === "failed");
 
     const inRange = (dayKey: string) => dayKey >= startDate && dayKey <= endDate;
 
@@ -706,34 +1086,27 @@ export async function GET(request: NextRequest) {
       signedAmount: number;
     };
 
-    const payuFetchEndForDayMode = dayMode === "business_1130_ist" ? shiftIsoDate(endDate, 1) : endDate;
-    const payuFetchEndForMatrixMode = matrixDayMode === "business_1130_ist" ? shiftIsoDate(endDate, 1) : endDate;
-    const payuFetchEnd = payuFetchEndForDayMode > payuFetchEndForMatrixMode
-      ? payuFetchEndForDayMode
-      : payuFetchEndForMatrixMode;
-    const payuTxns = await getPayUTransactions(startDate, payuFetchEnd);
-
-    type PayUFinancialRow = {
+    type PaymentFinancialRow = {
       created: Date;
       kind: "sale" | "refund";
       signedAmount: number;
     };
 
-    const payuFinancialRows: PayUFinancialRow[] = payuTxns
-      .map((txn) => {
-        const financial = classifyPayUEvent(txn as unknown as Record<string, unknown>);
-        if (financial.kind === "ignore" || !txn.addedon) return null;
-        const created = new Date(String(txn.addedon).replace(" ", "T") + "+05:30");
+    const paymentFinancialRows: PaymentFinancialRow[] = selectedPaymentRows
+      .map((payment) => {
+        const financial = classifyStoredPaymentEvent(payment.payment_status, payment.amount);
+        if (financial.kind === "ignore") return null;
+        const created = new Date(String(payment.fulfilled_at || payment.created_at));
         if (Number.isNaN(created.getTime())) return null;
         return {
           created,
           kind: financial.kind,
           signedAmount: financial.signedAmount,
-        } as PayUFinancialRow;
+        } as PaymentFinancialRow;
       })
-      .filter((row): row is PayUFinancialRow => !!row);
+      .filter((row): row is PaymentFinancialRow => !!row);
 
-    const salesRows: AggregatedSalesRow[] = payuFinancialRows
+    const salesRows: AggregatedSalesRow[] = paymentFinancialRows
       .map((row) => {
         const grouped = getMatrixDateGroup(row.created, dayMode);
         if (!inRange(grouped.dayKey)) return null;
@@ -747,7 +1120,7 @@ export async function GET(request: NextRequest) {
       })
       .filter((row): row is AggregatedSalesRow => !!row);
 
-    const hasLivePayUSalesData = payuFinancialRows.length > 0;
+    const hasStripeSalesData = paymentFinancialRows.length > 0;
     const refundRows = salesRows.filter((row) => row.kind === "refund");
 
     const salesHourlyMap = new Map<string, { count: number; revenueInr: number }>();
@@ -794,9 +1167,10 @@ export async function GET(request: NextRequest) {
     const salesDailySeries = buildDailySalesSeries(salesDailyMap, startDate, endDate);
     const salesWeekdaySeries = buildWeekdaySalesSeries(salesWeekdayMap);
 
-    const exchangeRate = await fetchExchangeRate();
     const metaSpendUsdMap = await fetchMetaAdsDailySpend(startDate, endDate);
     const hasMetaSpend = metaSpendUsdMap.size > 0;
+    const metaHourlySpendMap = await fetchMetaAdsHourlySpend(startDate, endDate, matrixDayMode);
+    const hasMetaHourlySpend = metaHourlySpendMap.size > 0;
     const hourlyProfitabilityRows: HourlyProfitabilityPoint[] = [];
 
     const dateKeys: string[] = [];
@@ -807,7 +1181,6 @@ export async function GET(request: NextRequest) {
       cursor.setUTCDate(cursor.getUTCDate() + 1);
     }
 
-    const matrixDailyRevenueMap = new Map<string, number>();
     const matrixDayHourMap = new Map<string, { count: number; revenueInr: number }>();
     type AggregatedMatrixRow = {
       dayKey: string;
@@ -816,7 +1189,7 @@ export async function GET(request: NextRequest) {
       signedAmount: number;
     };
 
-    const matrixRows: AggregatedMatrixRow[] = payuFinancialRows
+    const matrixRows: AggregatedMatrixRow[] = paymentFinancialRows
       .map((row) => {
         const grouped = getMatrixDateGroup(row.created, matrixDayMode);
         if (!inRange(grouped.dayKey)) return null;
@@ -831,7 +1204,6 @@ export async function GET(request: NextRequest) {
 
     for (const row of matrixRows) {
       const countDelta = row.kind === "refund" ? -1 : 1;
-      matrixDailyRevenueMap.set(row.dayKey, (matrixDailyRevenueMap.get(row.dayKey) || 0) + row.signedAmount);
       const key = `${row.dayKey}|${row.hour}`;
       const prev = matrixDayHourMap.get(key) || { count: 0, revenueInr: 0 };
       prev.count += countDelta;
@@ -840,8 +1212,6 @@ export async function GET(request: NextRequest) {
     }
 
     for (const dayKey of dateKeys) {
-      const dailyRevenue = matrixDailyRevenueMap.get(dayKey) || 0;
-      const adsCostInr = (metaSpendUsdMap.get(dayKey) || 0) * exchangeRate;
       const weekday = getWeekdayFromIsoDate(dayKey);
 
       for (let hour = 0; hour < 24; hour++) {
@@ -849,15 +1219,9 @@ export async function GET(request: NextRequest) {
         const dayHour = matrixDayHourMap.get(`${dayKey}|${hour}`) || { count: 0, revenueInr: 0 };
         const hourRevenue = dayHour.revenueInr;
         const hourCount = dayHour.count;
-
-        const allocatedAdsCostInr = dailyRevenue > 0
-          ? adsCostInr * (hourRevenue / dailyRevenue)
-          : adsCostInr > 0
-          ? adsCostInr / 24
-          : 0;
-
-        const hourProfitInr = (hourRevenue * 0.95) - allocatedAdsCostInr;
-        const hourRoas = allocatedAdsCostInr > 0 ? hourRevenue / allocatedAdsCostInr : 0;
+        const hourSpend = metaHourlySpendMap.get(`${dayKey}|${hour}`) || 0;
+        const hourProfit = hourRevenue - hourSpend;
+        const hourRoas = hourSpend > 0 ? hourRevenue / hourSpend : 0;
 
         hourlyProfitabilityRows.push({
           date: dayKey,
@@ -866,7 +1230,7 @@ export async function GET(request: NextRequest) {
           label: hourLabel,
           orderCount: hourCount,
           revenueInr: Number(hourRevenue.toFixed(2)),
-          profitInr: Number(hourProfitInr.toFixed(2)),
+          profitInr: Number(hourProfit.toFixed(2)),
           roas: Number(hourRoas.toFixed(4)),
         });
       }
@@ -875,18 +1239,18 @@ export async function GET(request: NextRequest) {
     const gaData = await fetchGoogleAnalyticsData(startDate, endDate, dayMode);
     const internalRouteData = await fetchInternalRouteAnalytics(startIso, endIso, dayMode, startDate, endDate);
 
-    const useGaRouteData = gaData.sourceStatus.connected && gaData.routeMetrics.length > 0;
+    const useInternalRouteData = internalRouteData.totalSessions > 0 || internalRouteData.routeMetrics.length > 0;
 
-    const selectedRouteData = useGaRouteData ? gaData : {
+    const selectedRouteData = useInternalRouteData ? {
       ...internalRouteData,
       sourceStatus: {
         configured: true,
         connected: true,
-        message: "Using internal event stream (ab_test_events) as fallback.",
+        message: "Using first-party Supabase analytics events for traffic buckets.",
       } as SourceStatus,
-    };
+    } : gaData;
 
-    const paymentStarts = paymentRows?.length || 0;
+    const paymentStarts = selectedPaymentRows.length;
     const paywallSignal = inferPaywallVisitors(selectedRouteData.routeMetrics);
     const totalVisitors = selectedRouteData.totalSessions > 0 ? selectedRouteData.totalSessions : paymentStarts;
     const paywallVisitors = paywallSignal.visitors > 0 ? paywallSignal.visitors : paymentStarts;
@@ -944,8 +1308,8 @@ export async function GET(request: NextRequest) {
       },
       hourlyProfitability: {
         rows: hourlyProfitabilityRows,
-        exchangeRate: Number(exchangeRate.toFixed(2)),
-        adsSource: hasMetaSpend ? "meta" : "none",
+        exchangeRate: 1,
+        adsSource: hasMetaHourlySpend ? "meta" : "none",
         dayMode: matrixDayMode,
       },
       traffic: {
@@ -958,10 +1322,10 @@ export async function GET(request: NextRequest) {
       sources: {
         sales: {
           configured: true,
-          connected: hasLivePayUSalesData,
-          message: hasLivePayUSalesData
-            ? "Sales are sourced from PayU live API for the full selected date range."
-            : "PayU live returned no sales data for the selected date range.",
+          connected: true,
+          message: hasStripeSalesData
+            ? "Sales are sourced from Stripe/Supabase payment rows using fulfilled_at when available."
+            : "No paid Stripe/Supabase sales rows were found for the selected range.",
         },
         googleAnalytics: gaData.sourceStatus,
         clarity: {
@@ -983,27 +1347,29 @@ export async function GET(request: NextRequest) {
         },
       },
       notes: [
-        useGaRouteData
-          ? "Traffic, route viewers, and bounce rates are sourced from GA4."
-          : "Traffic and route stats are currently sourced from internal fallback events. GA4 data unavailable.",
+        useInternalRouteData
+          ? "Traffic, route viewers, and hourly/day buckets are sourced from first-party Supabase analytics events."
+          : "Traffic and route stats are sourced from GA4 because no first-party Supabase traffic events were available.",
         paywallSignal.matchedRoute
           ? `Paywall audience inferred from route: ${paywallSignal.matchedRoute}.`
           : "Paywall audience inferred from payment starts because paywall route traffic was unavailable.",
         "Checkout funnel conversion is calculated using total visitors (not only paywall visitors).",
-        hasLivePayUSalesData
-          ? "Sales metrics are sourced from PayU live with refund/chargeback events subtracted."
-          : "PayU live did not return sales rows for this range.",
+        hasStripeSalesData
+          ? "Sales metrics are sourced from Stripe/Supabase payment rows with refund/chargeback rows subtracted."
+          : "No Stripe/Supabase sales rows were detected in this range.",
         refundRows.length > 0 || refundedOrders > 0
           ? "Refund and chargeback events are subtracted from revenue metrics."
           : "No refund events were detected in this range.",
         hasMetaSpend
-          ? "Profitability matrix uses Meta Ads daily spend (USD→INR) with proportional hourly cost allocation."
-          : "Profitability matrix has no ads spend for this range, so it reflects revenue after GST only.",
+          ? hasMetaHourlySpend
+            ? "ROAS uses Meta hourly spend by advertiser time zone joined to Stripe/Supabase revenue for the same Stripe-day hour."
+            : "Hourly matrix shows Stripe revenue only. Meta daily spend exists, but hourly spend was unavailable, so no fake hourly ROAS is calculated."
+          : "Hourly matrix shows Stripe revenue only because no Meta spend source is available.",
         matrixDayMode === "business_1130_ist"
-          ? "Matrix day mode: CST (11:30 AM IST to next day 11:29 AM IST, where 11:30 AM IST is treated as 12:00 AM CST)."
+          ? "Matrix day mode: Stripe day (11:30 AM IST to next day 11:29 AM IST, where 11:30 AM IST is treated as 12:00 AM)."
           : "Matrix day mode: IST calendar day (00:00 to 23:59 IST).",
         dayMode === "business_1130_ist"
-          ? "Global day mode: CST (11:30 AM IST to next day 11:29 AM IST, where 11:30 AM IST is treated as 12:00 AM CST)."
+          ? "Global day mode: Stripe day (11:30 AM IST to next day 11:29 AM IST, where 11:30 AM IST is treated as 12:00 AM)."
           : "Global day mode: IST calendar day (00:00 to 23:59 IST).",
       ],
     }, {
