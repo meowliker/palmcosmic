@@ -88,6 +88,35 @@ function makeBirthChartCacheKey(userProfile: AnyRecord | null, user: AnyRecord |
   return `${base}_vedic`;
 }
 
+function getBirthDateFromProfile(userProfile: AnyRecord | null, user: AnyRecord | null): string | null {
+  const monthRaw = userProfile?.birth_month || user?.birth_month || "";
+  const dayRaw = userProfile?.birth_day || user?.birth_day || "";
+  const yearRaw = userProfile?.birth_year || user?.birth_year || "";
+  if (!monthRaw || !dayRaw || !yearRaw) return null;
+
+  const month = getMonthNumber(String(monthRaw));
+  const day = parseInt(String(dayRaw), 10) || 1;
+  const year = parseInt(String(yearRaw), 10) || 2000;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function getBirthTimeFromProfile(userProfile: AnyRecord | null, user: AnyRecord | null): string {
+  const knowsBirthTime =
+    userProfile?.knows_birth_time !== undefined
+      ? !!userProfile.knows_birth_time
+      : user?.knows_birth_time !== undefined
+        ? !!user.knows_birth_time
+        : true;
+
+  if (!knowsBirthTime) return "12:00";
+
+  return to24HourTime(
+    String(userProfile?.birth_hour || user?.birth_hour || "12"),
+    String(userProfile?.birth_minute || user?.birth_minute || "00"),
+    String(userProfile?.birth_period || user?.birth_period || "PM")
+  );
+}
+
 async function upsertBirthChartUserLink(
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
   userId: string,
@@ -143,6 +172,98 @@ function hasKnownBirthTime(userProfile: AnyRecord | null, user: AnyRecord | null
   );
 }
 
+function isSameUtcDay(left: Date, right: Date): boolean {
+  return (
+    left.getUTCFullYear() === right.getUTCFullYear() &&
+    left.getUTCMonth() === right.getUTCMonth() &&
+    left.getUTCDate() === right.getUTCDate()
+  );
+}
+
+async function hydrateBirthChartFromApi(
+  request: NextRequest,
+  supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
+  userId: string,
+  userProfile: AnyRecord | null,
+  user: AnyRecord | null,
+  cacheKey: string
+): Promise<AnyRecord | null> {
+  const birthDate = getBirthDateFromProfile(userProfile, user);
+  if (!birthDate) return null;
+
+  const birthTime = getBirthTimeFromProfile(userProfile, user);
+  const birthPlace = String(userProfile?.birth_place || user?.birth_place || "").trim();
+
+  let latitude = 28.6139;
+  let longitude = 77.209;
+  let timezone = 5.5;
+
+  try {
+    if (birthPlace) {
+      const geoRes = await fetch(`${request.nextUrl.origin}/api/astrology/geo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ place_name: birthPlace }),
+        cache: "no-store",
+      });
+
+      if (geoRes.ok) {
+        const geo = await geoRes.json();
+        if (geo?.success && geo?.data) {
+          latitude = Number(geo.data.latitude) || latitude;
+          longitude = Number(geo.data.longitude) || longitude;
+          timezone = Number(geo.data.timezone) || timezone;
+        }
+      }
+    }
+
+    const chartRes = await fetch(`${request.nextUrl.origin}/api/astrology/birth-chart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        birthDate,
+        birthTime,
+        latitude,
+        longitude,
+        timezone,
+        chartType: "vedic",
+      }),
+      cache: "no-store",
+    });
+
+    if (!chartRes.ok) return null;
+    const chartJson = await chartRes.json();
+    if (!chartJson?.success || !chartJson?.data) return null;
+
+    const data = {
+      ...chartJson.data,
+      userBirthDetails: {
+        date: birthDate,
+        time: birthTime,
+        place: birthPlace || "Unknown",
+      },
+      cachedAt: new Date().toISOString(),
+    };
+
+    await supabaseAdmin
+      .from("birth_charts")
+      .upsert(
+        {
+          id: cacheKey,
+          data,
+          cached_at: new Date().toISOString(),
+        },
+        { onConflict: "id" }
+      );
+
+    await upsertBirthChartUserLink(supabaseAdmin, userId, cacheKey);
+    return { id: cacheKey, data };
+  } catch (error) {
+    console.error("[birth-chart-report/generate] chart hydration failed", error);
+    return null;
+  }
+}
+
 export async function POST(request: NextRequest) {
   const requestBody = await request
     .json()
@@ -174,61 +295,109 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "birth_time_required" }, { status: 400 });
     }
 
-    if (!force) {
-      const { data: existingComplete } = await supabaseAdmin
+    const birthChartCacheKey = makeBirthChartCacheKey(userProfile || null, user || null);
+
+    const { data: existingComplete } = await supabaseAdmin
+      .from("birth_chart_reports")
+      .select("id, birth_chart_id, status, sections, generated_at, created_at")
+      .eq("user_id", userId)
+      .eq("status", "complete")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingComplete && (!birthChartCacheKey || existingComplete.birth_chart_id === birthChartCacheKey)) {
+      await linkReportToUser({
+        supabase: supabaseAdmin,
+        userId,
+        reportKey: "birth_chart",
+        reportId: String(existingComplete.id),
+      });
+
+      return NextResponse.json({
+        report_id: existingComplete.id,
+        status: existingComplete.status,
+        sections: existingComplete.sections || {},
+        generated_at: existingComplete.generated_at || new Date().toISOString(),
+        reused: true,
+      });
+    }
+
+    if (force && existingComplete?.created_at) {
+      const generatedAt = new Date(existingComplete.generated_at || existingComplete.created_at);
+      if (isSameUtcDay(generatedAt, new Date())) {
+        return NextResponse.json(
+          {
+            error: "refresh_limit_reached",
+            message: "You can refresh your birth chart report once per day.",
+            nextAvailable: new Date(
+              Date.UTC(
+                generatedAt.getUTCFullYear(),
+                generatedAt.getUTCMonth(),
+                generatedAt.getUTCDate() + 1,
+                0,
+                0,
+                0,
+                0
+              )
+            ).toISOString(),
+          },
+          { status: 429 }
+        );
+      }
+    }
+
+    if (!force && existingComplete && existingComplete.birth_chart_id !== birthChartCacheKey) {
+      // Birth details changed. Continue into generation so the report matches the latest profile.
+    }
+
+    if (!force && !existingComplete) {
+      const { data: pendingOrComplete } = await supabaseAdmin
         .from("birth_chart_reports")
-        .select("id, status, sections, generated_at, created_at")
+        .select("id, birth_chart_id, status, sections, generated_at, created_at")
         .eq("user_id", userId)
-        .eq("status", "complete")
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (existingComplete) {
+      if (pendingOrComplete?.status === "complete" && (!birthChartCacheKey || pendingOrComplete.birth_chart_id === birthChartCacheKey)) {
         await linkReportToUser({
           supabase: supabaseAdmin,
           userId,
           reportKey: "birth_chart",
-          reportId: String(existingComplete.id),
+          reportId: String(pendingOrComplete.id),
         });
 
         return NextResponse.json({
-          report_id: existingComplete.id,
-          status: existingComplete.status,
-          sections: existingComplete.sections || {},
-          generated_at: existingComplete.generated_at || new Date().toISOString(),
+          report_id: pendingOrComplete.id,
+          status: pendingOrComplete.status,
+          sections: pendingOrComplete.sections || {},
+          generated_at: pendingOrComplete.generated_at || new Date().toISOString(),
+          reused: true,
         });
       }
     }
 
-    const birthChartCacheKey = makeBirthChartCacheKey(userProfile || null, user || null);
-
     let birthChart: AnyRecord | null = null;
 
-    const { data: linkedBirthChart } = await supabaseAdmin
-      .from("birth_chart_user_links")
-      .select("birth_chart_id")
-      .eq("user_id", userId)
-      .order("updated_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (linkedBirthChart?.birth_chart_id) {
-      const { data } = await supabaseAdmin
-        .from("birth_charts")
-        .select("*")
-        .eq("id", linkedBirthChart.birth_chart_id)
-        .maybeSingle();
-      birthChart = data;
-    }
-
-    if (!birthChart && birthChartCacheKey) {
+    if (birthChartCacheKey) {
       const { data } = await supabaseAdmin
         .from("birth_charts")
         .select("*")
         .eq("id", birthChartCacheKey)
         .maybeSingle();
       birthChart = data;
+    }
+
+    if (!birthChart && birthChartCacheKey) {
+      birthChart = await hydrateBirthChartFromApi(
+        request,
+        supabaseAdmin,
+        userId,
+        userProfile || null,
+        user || null,
+        birthChartCacheKey
+      );
     }
 
     if (birthChart?.id) {

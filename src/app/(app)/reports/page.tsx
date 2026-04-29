@@ -54,6 +54,7 @@ export default function DashboardPage() {
   const [insightsError, setInsightsError] = useState<string | null>(null);
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [soulmateSketchStatus, setSoulmateSketchStatus] = useState<SoulmateSketchStatus | null>(null);
+  const [reportAccessLoaded, setReportAccessLoaded] = useState(false);
 
   // Get sun sign from onboarding store as fallback
   const { birthMonth: storeBirthMonth, birthDay: storeBirthDay, sunSign: storeSunSign } = useOnboardingStore();
@@ -123,6 +124,7 @@ export default function DashboardPage() {
   }, [unlockedFeatures.soulmateSketch]);
 
   const loadUserZodiac = async () => {
+    setReportAccessLoaded(false);
     try {
       const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
 
@@ -184,6 +186,7 @@ export default function DashboardPage() {
               setUserEmail(storedEmail);
             }
 
+            setReportAccessLoaded(true);
             return;
           }
         }
@@ -217,6 +220,7 @@ export default function DashboardPage() {
         color: getZodiacColor(sign),
       });
     }
+    setReportAccessLoaded(true);
   };
 
 
@@ -630,6 +634,16 @@ export default function DashboardPage() {
             >
               <h2 className="text-white font-semibold text-xl mb-4">Reports from Advisors</h2>
 
+              {!reportAccessLoaded ? (
+                <div className="space-y-3">
+                  {[1, 2, 3, 4, 5, 6].map((item) => (
+                    <div
+                      key={item}
+                      className="h-[88px] animate-pulse rounded-lg border border-[#173653] bg-[#0b2338]"
+                    />
+                  ))}
+                </div>
+              ) : (
               <div className="space-y-3">
                 {/* Palm Reading Report */}
                 <div
@@ -930,6 +944,7 @@ export default function DashboardPage() {
                 </div>
 
               </div>
+              )}
             </motion.div>
           </div>
         </div>

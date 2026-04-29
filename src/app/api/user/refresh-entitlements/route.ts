@@ -67,10 +67,10 @@ export async function POST(request: NextRequest) {
 
     const { data: entitlements, error: entitlementError } = await supabase
       .from("user_entitlements")
-      .select("report_key")
+      .select("report_key,source")
       .eq("user_id", user.id)
       .eq("status", "active")
-      .lte("starts_at", nowIso)
+      .or(`starts_at.is.null,starts_at.lte.${nowIso}`)
       .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
 
     if (entitlementError) throw entitlementError;
@@ -94,11 +94,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (changed) {
+    const hasPostTrialPromoAccess = (entitlements || []).some(
+      (entitlement) => entitlement.source === "promo_post_trial"
+    );
+    const statusPatch = hasPostTrialPromoAccess
+      ? {
+          access_status: "promo_active",
+          subscription_status: "active",
+        }
+      : {};
+
+    if (changed || hasPostTrialPromoAccess) {
       const { error } = await supabase
         .from("users")
         .update({
-          unlocked_features: unlockedFeatures,
+          ...(changed ? { unlocked_features: unlockedFeatures } : {}),
+          ...statusPatch,
           updated_at: nowIso,
         })
         .eq("id", user.id);

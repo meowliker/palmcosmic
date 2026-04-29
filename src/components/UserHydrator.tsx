@@ -99,6 +99,11 @@ export default function UserHydrator() {
       const data = result.user;
       setUserId(userId);
 
+      if (data.trialEndsAt) {
+        localStorage.setItem("astrorekha_trial_end_date", data.trialEndsAt);
+        localStorage.setItem("palmcosmic_trial_end_date", data.trialEndsAt);
+      }
+
       if (typeof data.coins === "number") {
         setCoins(data.coins);
       }
@@ -122,7 +127,7 @@ export default function UserHydrator() {
       }
 
       // Sync unlocked features from server
-      const unlocked = data.unlocked_features || {};
+      const unlocked = data.unlockedFeatures || {};
       syncFromServer({
         unlockedFeatures: unlocked,
         coins: data.coins,
@@ -163,6 +168,25 @@ export default function UserHydrator() {
       window.removeEventListener("pageshow", onPageShow);
       document.removeEventListener("visibilitychange", onVisibility);
     };
+  }, [hydrate]);
+
+  useEffect(() => {
+    const trialEnd =
+      localStorage.getItem("astrorekha_trial_end_date") ||
+      localStorage.getItem("palmcosmic_trial_end_date");
+    if (!trialEnd) return;
+
+    const delay = new Date(trialEnd).getTime() - Date.now() + 1500;
+    if (delay <= 0) {
+      hydrate();
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      hydrate();
+    }, Math.min(delay, 24 * 60 * 60 * 1000));
+
+    return () => window.clearTimeout(timeout);
   }, [hydrate]);
 
   return (

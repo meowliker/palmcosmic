@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, RefreshCw } from "lucide-react";
 import ReportLoadingState from "@/components/ReportLoadingState";
 import ReportViewer from "@/components/ReportViewer";
 
@@ -46,6 +46,8 @@ export default function BirthChartReportPage() {
   const [screenState, setScreenState] = useState<ScreenState>("loading");
   const [report, setReport] = useState<ReportRow | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [refreshMessage, setRefreshMessage] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [isPolling, setIsPolling] = useState(false);
   const isFetchingRef = useRef(false);
 
@@ -131,6 +133,14 @@ export default function BirthChartReportPage() {
       }
     }
 
+    if (response.status === 429) {
+      const payload = await response.json().catch(() => ({}));
+      setRefreshMessage(payload?.message || "You can refresh your birth chart report once per day.");
+      setScreenState(report ? "ready" : "error");
+      setIsPolling(false);
+      return null;
+    }
+
     if (!response.ok) {
       setErrorMessage("Failed to generate report. Please try again.");
       setScreenState("error");
@@ -159,13 +169,27 @@ export default function BirthChartReportPage() {
       }
       setScreenState("ready");
       setIsPolling(false);
+      if (force) {
+        setRefreshMessage(payload.status === "complete" ? "Birth chart report refreshed." : null);
+      }
       return payload;
     }
 
     setScreenState("loading");
     setIsPolling(true);
     return payload;
-  }, [getRequestHeaders, userId]);
+  }, [fetchFullReport, getRequestHeaders, report, userId]);
+
+  const refreshReport = useCallback(async () => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setRefreshMessage(null);
+    try {
+      await generateReport(true);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [generateReport, isRefreshing]);
 
   const bootstrap = useCallback(async () => {
     if (isFetchingRef.current) return;
@@ -192,8 +216,7 @@ export default function BirthChartReportPage() {
       }
 
       if (status.status === "pending" || status.status === "generating") {
-        setScreenState("loading");
-        setIsPolling(true);
+        await generateReport(false);
         return;
       }
 
@@ -256,7 +279,7 @@ export default function BirthChartReportPage() {
     <div className="min-h-screen bg-[#061525] flex items-center justify-center">
       <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/50 flex flex-col">
         <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
-          <div className="flex items-center gap-3 px-4 py-3">
+          <div className="flex items-center justify-between gap-3 px-4 py-3">
             <button
               type="button"
               onClick={() => router.push("/birth-chart")}
@@ -265,10 +288,25 @@ export default function BirthChartReportPage() {
               <ArrowLeft className="w-4 h-4" />
               Birth Chart
             </button>
+            <button
+              type="button"
+              onClick={refreshReport}
+              disabled={isRefreshing || screenState === "loading"}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#173653] bg-[#0b2338] px-3 py-1.5 text-xs font-semibold text-[#b8c7da] transition-colors hover:border-[#38bdf8]/60 hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-6">
+          {refreshMessage && (
+            <div className="mb-4 rounded-xl border border-[#38bdf8]/25 bg-[#0b2338] px-4 py-3 text-sm text-[#b8c7da]">
+              {refreshMessage}
+            </div>
+          )}
+
           {screenState === "loading" && <ReportLoadingState />}
 
           {screenState === "ready" && report && (

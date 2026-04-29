@@ -79,6 +79,7 @@ export function CouponCodeLink({ flow, route, stepId, emailPath }: CouponCodeLin
       localStorage.setItem("palmcosmic_promo_code_applied", "true");
       localStorage.setItem("palmcosmic_promo_kind", data.kind || "");
       localStorage.setItem("palmcosmic_trial_end_date", data.trialEndsAt || "");
+      localStorage.setItem("astrorekha_trial_end_date", data.trialEndsAt || "");
 
       trackFunnelAction("coupon_code_applied", {
         funnel: flow,

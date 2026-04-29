@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { REPORT_TO_UNLOCKED_FEATURE, type ReportKey } from "@/lib/report-entitlements";
+import { normalizeUnlockedFeatures } from "@/lib/unlocked-features";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +51,68 @@ export async function GET(request: NextRequest) {
       .eq("id", user.id)
       .maybeSingle();
 
+    const nowIso = new Date().toISOString();
+    const { data: allEntitlements, error: allEntitlementError } = await supabase
+      .from("user_entitlements")
+      .select("report_key")
+      .eq("user_id", user.id)
+      .eq("status", "active");
+
+    if (allEntitlementError) {
+      throw allEntitlementError;
+    }
+
+    const { data: activeEntitlements, error: activeEntitlementError } = await supabase
+      .from("user_entitlements")
+      .select("report_key,source,starts_at,ends_at")
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .or(`starts_at.is.null,starts_at.lte.${nowIso}`)
+      .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+
+    if (activeEntitlementError) {
+      throw activeEntitlementError;
+    }
+
+    const hasEntitlementRecords = (allEntitlements || []).length > 0;
+    const unlockedFeatures = hasEntitlementRecords
+      ? normalizeUnlockedFeatures({})
+      : normalizeUnlockedFeatures(user.unlocked_features);
+
+    for (const entitlement of activeEntitlements || []) {
+      const featureKey = REPORT_TO_UNLOCKED_FEATURE[entitlement.report_key as ReportKey];
+      if (featureKey) {
+        (unlockedFeatures as any)[featureKey] = true;
+      }
+    }
+
+    const currentUnlockedFeatures = normalizeUnlockedFeatures(user.unlocked_features);
+    const unlockedFeaturesChanged = Object.keys(unlockedFeatures).some(
+      (key) => (unlockedFeatures as any)[key] !== (currentUnlockedFeatures as any)[key]
+    );
+    const hasPostTrialPromoAccess = (activeEntitlements || []).some(
+      (entitlement) => entitlement.source === "promo_post_trial"
+    );
+    const statusPatch: Record<string, unknown> = {};
+
+    if (hasPostTrialPromoAccess && user.access_status !== "promo_active") {
+      statusPatch.access_status = "promo_active";
+    }
+    if (hasPostTrialPromoAccess && user.subscription_status !== "active") {
+      statusPatch.subscription_status = "active";
+    }
+
+    if (unlockedFeaturesChanged || Object.keys(statusPatch).length > 0) {
+      await supabase
+        .from("users")
+        .update({
+          ...(unlockedFeaturesChanged ? { unlocked_features: unlockedFeatures } : {}),
+          ...statusPatch,
+          updated_at: nowIso,
+        })
+        .eq("id", user.id);
+    }
+
     return NextResponse.json({
       success: true,
       user: {
@@ -59,13 +123,13 @@ export async function GET(request: NextRequest) {
         timezone: user.timezone,
         isDevTester: user.is_dev_tester === true,
         passwordHashSet: !!user.password_hash,
-        unlockedFeatures: user.unlocked_features || {},
+        unlockedFeatures,
         purchasedBundle: user.bundle_purchased || null,
         purchaseType: user.purchase_type || null,
         primaryFlow: user.primary_flow || null,
         primaryReport: user.primary_report || null,
-        subscriptionStatus: user.subscription_status || null,
-        accessStatus: user.access_status || null,
+        subscriptionStatus: (statusPatch.subscription_status as string) || user.subscription_status || null,
+        accessStatus: (statusPatch.access_status as string) || user.access_status || null,
         subscriptionPlan: user.subscription_plan || null,
         trialEndsAt: user.trial_ends_at || null,
         subscriptionCurrentPeriodEnd: user.subscription_current_period_end || null,

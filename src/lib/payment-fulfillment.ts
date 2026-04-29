@@ -288,13 +288,18 @@ async function findPaymentMatch(
   }
 
   if (customerEmail) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("payments")
       .select(PAYMENT_SELECT)
       .eq("customer_email", customerEmail)
       .order("created_at", { ascending: false })
       .limit(1);
 
+    if (metadata.type) {
+      query = query.eq("type", metadata.type);
+    }
+
+    const { data, error } = await query;
     if (error) throw error;
     const first = (data?.[0] as PaymentRow | undefined) || null;
     if (first) return first;
