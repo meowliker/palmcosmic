@@ -5,6 +5,8 @@ import { getSoulmateSketchJobStatusFromKie } from "@/lib/soulmate-sketch";
 import { linkReportToUser } from "@/lib/user-report-links";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 const PROVIDER_POLL_COOLDOWN_MS = Number(process.env.KIE_STATUS_POLL_COOLDOWN_MS || 12000);
 

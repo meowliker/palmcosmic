@@ -11,6 +11,9 @@ import { normalizeUnlockedFeatures } from "@/lib/unlocked-features";
 import { linkReportToUser } from "@/lib/user-report-links";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 function normalizeAnswers(raw: any): SketchAnswers {
   if (!raw || typeof raw !== "object") return {};
