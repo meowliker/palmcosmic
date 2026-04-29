@@ -5,7 +5,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Star, Heart, Briefcase, Activity, Sparkles } from "lucide-react";
 import { useOnboardingStore } from "@/lib/onboarding-store";
-import { supabase } from "@/lib/supabase";
 import { extractStoredSignName } from "@/lib/zodiac-utils";
 import ReportDisclaimer from "@/components/ReportDisclaimer";
 import predictions2026Data from "../../../../data/predictions-2026.json";
@@ -106,24 +105,22 @@ export default function Prediction2026Page() {
     try {
       const userId = localStorage.getItem("astrorekha_user_id");
       if (userId) {
-        const { data: dbUser } = await supabase
-          .from("users")
-          .select("prediction_2026_report_id,zodiac_sign,sun_sign")
-          .eq("id", userId)
-          .single();
+        const response = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+        const result = await response.json().catch(() => null);
+        const dbUser = response.ok && result?.success ? result.user : null;
 
         const reportSignKey =
-          normalizeSignKey(dbUser?.prediction_2026_report_id) ||
-          normalizeSignKey(dbUser?.zodiac_sign) ||
-          normalizeSignKey(dbUser?.sun_sign);
+          normalizeSignKey(dbUser?.prediction2026ReportId) ||
+          normalizeSignKey(dbUser?.zodiacSign) ||
+          normalizeSignKey(dbUser?.sunSign);
 
         if (reportSignKey) {
           setZodiacSign(displaySignName(reportSignKey));
           return;
         }
 
-        if (dbUser?.sun_sign) {
-          const signName = extractStoredSignName(dbUser.sun_sign);
+        if (dbUser?.sunSign) {
+          const signName = extractStoredSignName(dbUser.sunSign);
           const signKey = normalizeSignKey(signName);
           if (signKey) {
             setZodiacSign(displaySignName(signKey));
@@ -153,17 +150,10 @@ export default function Prediction2026Page() {
 
     try {
       const signKey = zodiacSign.toLowerCase() as keyof typeof predictions2026Data;
-      const { data: supabasePrediction, error: supabaseError } = await supabase
-        .from("predictions_2026_global")
-        .select("prediction")
-        .eq("id", signKey)
-        .maybeSingle();
+      const response = await fetch(`/api/prediction-2026/global?sign=${encodeURIComponent(signKey)}`, { cache: "no-store" });
+      const supabasePrediction = await response.json().catch(() => null);
 
-      if (supabaseError) {
-        console.error("Failed to load 2026 prediction from Supabase:", supabaseError);
-      }
-
-      if (supabasePrediction?.prediction) {
+      if (response.ok && supabasePrediction?.prediction) {
         setPrediction(supabasePrediction.prediction);
       } else {
         const predictionData = predictions2026Data[signKey];

@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import ReportCTA from "@/components/ReportCTA";
 import { LocationInput } from "@/components/onboarding/LocationInput";
 import { useOnboardingStore } from "@/lib/onboarding-store";
-import { supabase } from "@/lib/supabase";
 
 const MONTH_MAP: Record<string, number> = {
   January: 1, February: 2, March: 3, April: 4, May: 5, June: 6,
@@ -120,17 +119,12 @@ export default function BirthChartPage() {
     const userId = getStoredUserId();
     if (!userId || !birthChartId) return;
 
-    const nowIso = new Date().toISOString();
     try {
-      await supabase.from("birth_chart_user_links").upsert(
-        {
-          user_id: userId,
-          birth_chart_id: birthChartId,
-          updated_at: nowIso,
-          last_accessed_at: nowIso,
-        },
-        { onConflict: "user_id,birth_chart_id" }
-      );
+      await fetch("/api/birth-chart/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "link", userId, cacheKey: birthChartId }),
+      });
     } catch (error) {
       console.error("Failed to link birth chart to user:", error);
     }
@@ -145,11 +139,9 @@ export default function BirthChartPage() {
     try {
       const userId = getStoredUserId();
       if (userId) {
-        const { data: profileData } = await supabase
-          .from("user_profiles")
-          .select("birth_month, birth_day, birth_year, birth_hour, birth_minute, birth_period, birth_place, knows_birth_time")
-          .eq("id", userId)
-          .single();
+        const response = await fetch(`/api/birth-chart/cache?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+        const result = await response.json().catch(() => null);
+        const profileData = response.ok && result?.success ? result.profile || result.user : null;
 
         if (profileData && profileData.birth_month && profileData.birth_day && profileData.birth_year) {
           setBirthMonthState(String(profileData.birth_month));
@@ -165,11 +157,7 @@ export default function BirthChartPage() {
         }
 
         // Legacy fallback for environments where birth fields still exist in users
-        const { data: dbUser } = await supabase
-          .from("users")
-          .select("birth_month, birth_day, birth_year, birth_hour, birth_minute, birth_period, birth_place")
-          .eq("id", userId)
-          .single();
+        const dbUser = response.ok && result?.success ? result.user : null;
 
         if (dbUser && dbUser.birth_month && dbUser.birth_day && dbUser.birth_year) {
           setBirthMonthState(String(dbUser.birth_month));
@@ -221,22 +209,22 @@ export default function BirthChartPage() {
 
     const userId = getStoredUserId();
     if (userId) {
-      const birthPayload = {
-        birth_month: birthMonth,
-        birth_day: birthDay,
-        birth_year: birthYear,
-        birth_hour: birthHour,
-        birth_minute: birthMinute,
-        birth_period: birthPeriod,
-        birth_place: birthPlace,
-        knows_birth_time: true,
-        updated_at: new Date().toISOString(),
-      };
-
-      await Promise.allSettled([
-        supabase.from("user_profiles").update(birthPayload).eq("id", userId),
-        supabase.from("users").update(birthPayload).eq("id", userId),
-      ]);
+      await fetch("/api/birth-chart/cache", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "birth_profile",
+          userId,
+          birthMonth,
+          birthDay,
+          birthYear,
+          birthHour,
+          birthMinute,
+          birthPeriod,
+          birthPlace,
+          knowsBirthTime: true,
+        }),
+      });
     }
 
     setShowMissingDataForm(false);
@@ -256,36 +244,28 @@ export default function BirthChartPage() {
 
     try {
       if (userId) {
-        const { data: linkedBirthChart } = await supabase
-          .from("birth_chart_user_links")
-          .select("birth_chart_id")
-          .eq("user_id", userId)
-          .order("updated_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        const stateResponse = await fetch(`/api/birth-chart/cache?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+        const state = await stateResponse.json().catch(() => null);
+        const linkedCached = stateResponse.ok && state?.success ? state.linkedChart : null;
 
-        if (linkedBirthChart?.birth_chart_id) {
-          const { data: linkedCached } = await supabase
-            .from("birth_charts")
-            .select("id, data")
-            .eq("id", linkedBirthChart.birth_chart_id)
-            .maybeSingle();
-
-          const linkedData = linkedCached?.data;
+        if (linkedCached?.id) {
+          const linkedData = linkedCached.data;
           const linkedHasAscendantPlanetSource =
             Array.isArray(linkedData?.planet_positions) &&
             linkedData.planet_positions.some((p: any) => String(p?.name || "").toLowerCase() === "ascendant");
 
           if (linkedData && hasRenderableChartData(linkedData) && linkedHasAscendantPlanetSource) {
             setChartData(linkedData);
-            await linkBirthChartToCurrentUser(linkedBirthChart.birth_chart_id);
+            await linkBirthChartToCurrentUser(linkedCached.id);
             setLoading(false);
             return;
           }
         }
       }
 
-      const { data: cached } = await supabase.from("birth_charts").select("data").eq("id", cacheKey).single();
+      const cachedResponse = await fetch(`/api/birth-chart/cache?cacheKey=${encodeURIComponent(cacheKey)}`, { cache: "no-store" });
+      const cachedResult = await cachedResponse.json().catch(() => null);
+      const cached = cachedResponse.ok && cachedResult?.success ? cachedResult.chart : null;
       const cachedData = cached?.data;
       const hasAscendantPlanetSource =
         Array.isArray(cachedData?.planet_positions) &&
@@ -358,9 +338,11 @@ export default function BirthChartPage() {
         };
         setChartData(chartDataWithDetails);
         try {
-          const nowIso = new Date().toISOString();
-          await supabase.from("birth_charts").upsert({ id: cacheKey, data: chartDataWithDetails, cached_at: nowIso }, { onConflict: "id" });
-          await linkBirthChartToCurrentUser(cacheKey);
+          await fetch("/api/birth-chart/cache", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId: getStoredUserId(), cacheKey, data: chartDataWithDetails }),
+          });
         } catch (cacheErr) {
           console.error("Failed to cache chart:", cacheErr);
         }

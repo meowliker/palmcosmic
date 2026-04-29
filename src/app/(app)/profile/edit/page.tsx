@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronRight, Loader2, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOnboardingStore } from "@/lib/onboarding-store";
-import { supabase } from "@/lib/supabase";
 import { getZodiacSign } from "@/lib/astrology-api";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
 import { pixelEvents } from "@/lib/pixel-events";
@@ -80,21 +79,22 @@ export default function EditProfilePage() {
         return;
       }
 
-      // Load from Supabase
-        const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
+      const response = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+      const result = await response.json().catch(() => null);
+      const userData = response.ok && result?.success ? result.user : null;
 
       if (userData) {
         if (userData.name) setLocalName(userData.name);
         if (userData.gender) setGender(userData.gender);
-        if (userData.birth_month && userData.birth_day && userData.birth_year) {
-          setBirthDate(String(userData.birth_month), String(userData.birth_day), String(userData.birth_year));
+        if (userData.birthMonth && userData.birthDay && userData.birthYear) {
+          setBirthDate(String(userData.birthMonth), String(userData.birthDay), String(userData.birthYear));
         }
-        if (userData.birth_place) setBirthPlace(userData.birth_place);
-        if (userData.birth_hour) {
+        if (userData.birthPlace) setBirthPlace(userData.birthPlace);
+        if (userData.birthHour) {
           setBirthTime(
-            String(userData.birth_hour),
-            String(userData.birth_minute || 0),
-            userData.birth_period || "AM"
+            String(userData.birthHour),
+            String(userData.birthMinute || 0),
+            userData.birthPeriod || "AM"
           );
         }
       } else {
@@ -224,16 +224,26 @@ export default function EditProfilePage() {
           }
         }
         
-        await supabase.from("users").update(updateData).eq("id", userId);
-        await supabase
-          .from("user_profiles")
-          .upsert(
-            {
-              id: userId,
-              ...updateData,
-            },
-            { onConflict: "id" }
-          );
+        await fetch("/api/user/profile", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId,
+            email: localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || undefined,
+            name: updateData.name,
+            gender: updateData.gender,
+            birthMonth: updateData.birth_month,
+            birthDay: updateData.birth_day,
+            birthYear: updateData.birth_year,
+            birthPlace: updateData.birth_place,
+            birthHour: updateData.birth_hour,
+            birthMinute: updateData.birth_minute,
+            birthPeriod: updateData.birth_period,
+            sunSign: updateData.sun_sign,
+            moonSign: updateData.moon_sign,
+            ascendantSign: updateData.ascendant_sign,
+          }),
+        });
       }
       trackAnalyticsEvent("EditProfileAction", {
         route: "/profile/edit",

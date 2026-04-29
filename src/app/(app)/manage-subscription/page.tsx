@@ -5,7 +5,6 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, CreditCard, Loader2, RotateCcw, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { supabase } from "@/lib/supabase";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
 import { pixelEvents } from "@/lib/pixel-events";
 
@@ -95,17 +94,26 @@ export default function ManageSubscriptionPage() {
         return;
       }
 
-      let query = supabase
-        .from("users")
-        .select(
-          "id,email,primary_flow,subscription_status,access_status,subscription_plan,trial_ends_at,subscription_current_period_end,subscription_cancel_at_period_end,stripe_subscription_id"
-        )
-        .limit(1);
-
-      query = userId ? query.eq("id", userId) : query.eq("email", email);
-
-      const { data, error } = await query.maybeSingle();
-      if (error) throw error;
+      const params = new URLSearchParams();
+      if (userId) params.set("userId", userId);
+      if (email) params.set("email", email);
+      const response = await fetch(`/api/user/hydrate?${params.toString()}`, { cache: "no-store" });
+      const result = await response.json().catch(() => null);
+      const user = response.ok && result?.success ? result.user : null;
+      const data = user
+        ? {
+            id: user.id,
+            email: user.email,
+            primary_flow: user.primaryFlow,
+            subscription_status: user.subscriptionStatus,
+            access_status: user.accessStatus,
+            subscription_plan: user.subscriptionPlan,
+            trial_ends_at: user.trialEndsAt,
+            subscription_current_period_end: user.subscriptionCurrentPeriodEnd,
+            subscription_cancel_at_period_end: user.subscriptionCancelAtPeriodEnd,
+            stripe_subscription_id: user.stripeSubscriptionId,
+          }
+        : null;
 
       setSubscription(data || null);
       trackAnalyticsEvent("ManageSubscriptionLoaded", {

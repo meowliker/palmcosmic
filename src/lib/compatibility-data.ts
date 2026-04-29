@@ -1,5 +1,3 @@
-import { supabase } from "./supabase";
-
 export interface ChallengeItem {
   title: string;
   description: string;
@@ -22,43 +20,31 @@ export interface CompatibilityResult {
   createdAt: string;
 }
 
-// Get compatibility result from Supabase
 export async function getCompatibilityResult(
   sign1: string,
   sign2: string
 ): Promise<CompatibilityResult | null> {
   try {
-    const [s1, s2] = [sign1, sign2].sort();
-    const docId = `${s1.toLowerCase()}_${s2.toLowerCase()}`;
-    
-    const { data } = await supabase.from("compatibility").select("*").eq("id", docId).single();
-    
-    if (data) {
-      return data as CompatibilityResult;
-    }
-    
-    return null;
+    const params = new URLSearchParams({ sign1, sign2 });
+    const response = await fetch(`/api/compatibility/cache?${params.toString()}`, { cache: "no-store" });
+    const data = await response.json().catch(() => null);
+    return response.ok && data?.success && data.result ? (data.result as CompatibilityResult) : null;
   } catch (error) {
     console.error("Error fetching compatibility:", error);
     return null;
   }
 }
 
-// Save compatibility result to Supabase
 export async function saveCompatibilityResult(
   result: CompatibilityResult
 ): Promise<boolean> {
   try {
-    const [s1, s2] = [result.sign1, result.sign2].sort();
-    const docId = `${s1.toLowerCase()}_${s2.toLowerCase()}`;
-    
-    await supabase.from("compatibility").upsert({
-      id: docId,
-      ...result,
-      created_at: new Date().toISOString(),
-    }, { onConflict: "id" });
-    
-    return true;
+    const response = await fetch("/api/compatibility/cache", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(result),
+    });
+    return response.ok;
   } catch (error) {
     console.error("Error saving compatibility:", error);
     return false;

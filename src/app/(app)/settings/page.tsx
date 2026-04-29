@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Check, FileText, Mail, LogOut, CreditCard, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUserStore } from "@/lib/user-store";
-import { supabase } from "@/lib/supabase";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
 import { pixelEvents } from "@/lib/pixel-events";
 
@@ -182,27 +181,24 @@ export default function SettingsPage() {
 
       if (!userId && !email) return;
 
-      let query = supabase
-        .from("users")
-        .select("primary_flow,primary_report,subscription_status,access_status,bundle_purchased,unlocked_features,purchase_type")
-        .limit(1);
-
-      query = userId ? query.eq("id", userId) : query.eq("email", email);
-
-      const { data, error } = await query.maybeSingle();
-      if (error) throw error;
+      const params = new URLSearchParams();
+      if (userId) params.set("userId", userId);
+      if (email) params.set("email", email);
+      const response = await fetch(`/api/user/hydrate?${params.toString()}`, { cache: "no-store" });
+      const result = await response.json().catch(() => null);
+      const data = response.ok && result?.success ? result.user : null;
       if (!data) return;
 
       setSubscription({
-        primaryFlow: data.primary_flow || null,
-        primaryReport: data.primary_report || null,
-        subscriptionStatus: data.subscription_status || null,
-        accessStatus: data.access_status || null,
-        bundlePurchased: data.bundle_purchased || null,
-        unlockedFeatures: data.unlocked_features || {},
+        primaryFlow: data.primaryFlow || null,
+        primaryReport: data.primaryReport || null,
+        subscriptionStatus: data.subscriptionStatus || null,
+        accessStatus: data.accessStatus || null,
+        bundlePurchased: data.purchasedBundle || null,
+        unlockedFeatures: data.unlockedFeatures || {},
       });
-      setBundleId(data.bundle_purchased || bundleId);
-      setIsFlowB(data.purchase_type === "one-time" || isFlowB);
+      setBundleId(data.purchasedBundle || bundleId);
+      setIsFlowB(data.purchaseType === "one-time" || isFlowB);
     } catch (error) {
       console.error("Failed to load subscription state:", error);
     }

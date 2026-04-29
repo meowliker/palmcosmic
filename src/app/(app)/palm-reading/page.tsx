@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Loader2, ChevronDown, ChevronUp, Camera, Flashlight, FlashlightOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useOnboardingStore } from "@/lib/onboarding-store";
-import { supabase } from "@/lib/supabase";
 import { calculateZodiacSign, generateUserId } from "@/lib/user-profile";
 import ReportDisclaimer from "@/components/ReportDisclaimer";
 
@@ -73,7 +72,9 @@ export default function PalmReadingPage() {
   const loadExistingReading = async () => {
     try {
       const userId = generateUserId();
-      const { data: palmData } = await supabase.from("palm_readings").select("*").eq("id", userId).single();
+      const response = await fetch(`/api/palm-reading/user?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+      const result = await response.json().catch(() => null);
+      const palmData = response.ok && result?.success ? result.reading : null;
       
       if (palmData?.reading) {
         setReading(palmData.reading);
@@ -195,14 +196,18 @@ export default function PalmReadingPage() {
 
       // Save to Firestore
       const userId = generateUserId();
-      await supabase.from("palm_readings").upsert({
-        id: userId,
-        reading: palmReading,
-        palm_image_url: imageData,
-        created_at: new Date().toISOString(),
-        birth_date: birthDate,
-        zodiac_sign: zodiacSign,
-      }, { onConflict: "id" });
+      await fetch("/api/palm-reading/user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId,
+          reading: palmReading,
+          palmImageUrl: imageData,
+          createdAt: new Date().toISOString(),
+          birthDate,
+          zodiacSign,
+        }),
+      });
 
     } catch (err) {
       console.error("Palm analysis error:", err);

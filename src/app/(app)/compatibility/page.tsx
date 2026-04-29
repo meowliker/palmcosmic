@@ -7,7 +7,6 @@ import { ArrowLeft, Loader2, ChevronDown, ChevronUp, Lightbulb } from "lucide-re
 import { Button } from "@/components/ui/button";
 import { getZodiacSign } from "@/lib/astrology-api";
 import { getInstantCompatibility, getCompatibilityResult, saveCompatibilityResult } from "@/lib/compatibility-data";
-import { supabase } from "@/lib/supabase";
 import ReportDisclaimer from "@/components/ReportDisclaimer";
 
 const ZODIAC_SIGNS = [
@@ -428,34 +427,13 @@ export default function CompatibilityPage() {
           return;
         }
 
-        const { data: userData } = await supabase
-          .from("users")
-          .select("sun_sign, birth_month, birth_day")
-          .eq("id", userId)
-          .maybeSingle();
+        const response = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+        const result = await response.json().catch(() => null);
+        const userData = response.ok && result?.success ? result.user : null;
 
-        let signName = resolveSignName(userData?.sun_sign);
-        if (!signName && userData?.birth_month && userData?.birth_day) {
-          signName = getZodiacSign(Number(userData.birth_month), Number(userData.birth_day));
-        }
-
-        if (!signName) {
-          const { data: profileData } = await supabase
-            .from("user_profiles")
-            .select("sun_sign, birth_month, birth_day")
-            .eq("id", userId)
-            .maybeSingle();
-
-          signName = resolveSignName(profileData?.sun_sign);
-
-          if (!signName && profileData?.birth_month && profileData?.birth_day) {
-            const monthText = String(profileData.birth_month).trim();
-            const monthNumeric = Number(monthText);
-            const month = Number.isFinite(monthNumeric) && monthNumeric > 0
-              ? monthNumeric
-              : (new Date(`${monthText} 1, 2000`).getMonth() + 1 || 1);
-            signName = getZodiacSign(month, Number(profileData.birth_day));
-          }
+        let signName = resolveSignName(userData?.sunSign);
+        if (!signName && userData?.birthMonth && userData?.birthDay) {
+          signName = getZodiacSign(Number(userData.birthMonth), Number(userData.birthDay));
         }
 
         if (signName) {
@@ -465,13 +443,7 @@ export default function CompatibilityPage() {
 
         if (!signName) fallbackFromLocalBirthDate();
 
-        const { data: sessionData } = await supabase
-          .from("onboarding_sessions")
-          .select("answers")
-          .eq("id", `session_${userId}`)
-          .maybeSingle();
-
-        applyPartnerSign(resolvePartnerSignFromAnswers(sessionData?.answers as Record<string, any> | undefined));
+        applyPartnerSign(resolvePartnerSignFromLocalStorage());
       } catch (error) {
         console.error("Failed to load user sun sign:", error);
         fallbackFromLocalBirthDate();

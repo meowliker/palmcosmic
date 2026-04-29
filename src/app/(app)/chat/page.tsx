@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import Image from "next/image";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore } from "@/lib/user-store";
-import { supabase } from "@/lib/supabase";
 import { generateUserId } from "@/lib/user-profile";
 import { usePricing } from "@/hooks/usePricing";
 import { DEFAULT_PRICING } from "@/lib/pricing";
@@ -209,10 +208,16 @@ export default function ChatPage() {
     const loadData = async () => {
       const userId = localStorage.getItem("astrorekha_user_id") || generateUserId();
       setCurrentUserId(userId);
+      const anonId = localStorage.getItem("astrorekha_anon_id") || "";
+      const stateResponse = await fetch(
+        `/api/chat/state?userId=${encodeURIComponent(userId)}${anonId ? `&anonId=${encodeURIComponent(anonId)}` : ""}`,
+        { cache: "no-store" }
+      );
+      const state = await stateResponse.json().catch(() => null);
 
       // Load palm reading from Supabase
       try {
-        const { data: palmData } = await supabase.from("palm_readings").select("*").eq("id", userId).single();
+        const palmData = stateResponse.ok && state?.success ? state.palmReading : null;
         if (palmData) {
           setPalmReading(palmData.reading);
           if (palmData.palm_image_url) setPalmImage(palmData.palm_image_url);
@@ -223,7 +228,7 @@ export default function ChatPage() {
 
       // Load natal chart from Supabase (calculated by astro-engine)
       try {
-        const { data: chartData } = await supabase.from("natal_charts").select("*").eq("id", userId).single();
+        const chartData = stateResponse.ok && state?.success ? state.natalChart : null;
         if (chartData) {
           setNatalChart(chartData);
         } else {
@@ -246,8 +251,9 @@ export default function ChatPage() {
               }),
             });
             if (signsResponse.ok) {
-              // Re-fetch the chart that was just saved
-              const { data: newChart } = await supabase.from("natal_charts").select("*").eq("id", userId).single();
+              const chartReloadResponse = await fetch(`/api/chat/state?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+              const chartReload = await chartReloadResponse.json().catch(() => null);
+              const newChart = chartReloadResponse.ok && chartReload?.success ? chartReload.natalChart : null;
               if (newChart) {
                 setNatalChart(newChart);
               }
@@ -262,41 +268,7 @@ export default function ChatPage() {
 
       // Load chat history from Supabase
       try {
-        let { data: chatDoc } = await supabase
-          .from("chat_messages")
-          .select("*")
-          .eq("id", userId)
-          .maybeSingle();
-
-        // Fallback: if user upgraded from anon to registered ID and old chat row still exists on anon ID,
-        // load that history and migrate it to current user ID.
-        if (!chatDoc) {
-          const anonId = localStorage.getItem("astrorekha_anon_id");
-          if (anonId && anonId !== userId) {
-            const { data: anonChatDoc } = await supabase
-              .from("chat_messages")
-              .select("*")
-              .eq("id", anonId)
-              .maybeSingle();
-
-            if (anonChatDoc?.messages?.length) {
-              chatDoc = anonChatDoc;
-
-              // Best-effort migration to current ID.
-              await supabase.from("chat_messages").upsert(
-                {
-                  id: userId,
-                  messages: anonChatDoc.messages,
-                  updated_at: new Date().toISOString(),
-                },
-                { onConflict: "id" }
-              );
-
-              // Best-effort cleanup of old anon row.
-              await supabase.from("chat_messages").delete().eq("id", anonId);
-            }
-          }
-        }
+        const chatDoc = stateResponse.ok && state?.success ? state.chat : null;
 
         if (chatDoc?.messages && chatDoc.messages.length > 0) {
           const loadedMessages: Message[] = chatDoc.messages.map((m: StoredMessage) => ({
@@ -359,14 +331,11 @@ export default function ChatPage() {
           return msg;
         });
         
-        await supabase.from("chat_messages").upsert(
-          {
-            id: currentUserId,
-            messages: storedMessages,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "id" }
-        );
+        await fetch("/api/chat/state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: currentUserId, messages: storedMessages }),
+        });
       } catch (err: any) {
         console.error("[Chat] Failed to save chat:", err);
         console.error("[Chat] Error code:", err?.code);
@@ -456,13 +425,11 @@ export default function ChatPage() {
 
         try {
           const userId = generateUserId();
-          const { data: currentUser } = await supabase.from("users").select("coins").eq("id", userId).single();
-          if (currentUser) {
-            await supabase.from("users").update({
-              coins: Math.max(0, (currentUser.coins || 0) - 3),
-              updated_at: new Date().toISOString(),
-            }).eq("id", userId);
-          }
+          await fetch("/api/chat/state", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ userId, action: "deduct_coins", amount: 3 }),
+          });
         } catch (err) {
           console.error("Failed to persist coin deduction:", err);
         }

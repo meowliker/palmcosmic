@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronDown, Loader2, Sparkles, Star } from "lucide-react";
 import { getZodiacSign, getZodiacSymbol } from "@/lib/astrology-api";
 import { useOnboardingStore } from "@/lib/onboarding-store";
-import { supabase } from "@/lib/supabase";
 import { extractStoredSignName } from "@/lib/zodiac-utils";
 
 const ZODIAC_SIGNS = [
@@ -68,32 +67,20 @@ export default function HoroscopePage() {
       const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
 
       if (userId) {
-        const { data: userData } = await supabase.from("users").select("*").eq("id", userId).single();
+        const response = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+        const result = await response.json().catch(() => null);
+        const userData = response.ok && result?.success ? result.user : null;
 
         if (userData) {
-          const storedSunSign = extractStoredSignName(userData.sun_sign);
+          const storedSunSign = extractStoredSignName(userData.sunSign);
           if (storedSunSign) {
             setSelectedSign(storedSunSign);
             setUserSign(storedSunSign);
             return;
           }
 
-          try {
-            const { data: profile } = await supabase.from("user_profiles").select("sun_sign").eq("id", userId).single();
-            if (profile) {
-              const profileSunSign = extractStoredSignName(profile.sun_sign);
-              if (profileSunSign) {
-                setSelectedSign(profileSunSign);
-                setUserSign(profileSunSign);
-                return;
-              }
-            }
-          } catch (profileErr) {
-            console.error("Error reading user_profiles:", profileErr);
-          }
-
-          if (userData.birth_month && userData.birth_day) {
-            const sign = getZodiacSign(Number(userData.birth_month), Number(userData.birth_day));
+          if (userData.birthMonth && userData.birthDay) {
+            const sign = getZodiacSign(Number(userData.birthMonth), Number(userData.birthDay));
             setSelectedSign(sign);
             setUserSign(sign);
             return;

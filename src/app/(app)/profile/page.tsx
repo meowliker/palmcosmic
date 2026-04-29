@@ -7,7 +7,6 @@ import { ArrowLeft, Settings, ChevronRight } from "lucide-react";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore } from "@/lib/user-store";
 import { getZodiacSign } from "@/lib/astrology-api";
-import { supabase } from "@/lib/supabase";
 import { UserAvatar, getUserDisplayName } from "@/components/UserAvatar";
 import { extractStoredSignName } from "@/lib/zodiac-utils";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
@@ -96,42 +95,23 @@ export default function ProfilePage() {
       const userId = localStorage.getItem("astrorekha_user_id");
 
       if (userId) {
-        const { data: dbUser } = await supabase.from("users").select("*").eq("id", userId).single();
+        const response = await fetch(`/api/user/hydrate?userId=${encodeURIComponent(userId)}`, { cache: "no-store" });
+        const result = await response.json().catch(() => null);
+        const dbUser = response.ok && result?.success ? result.user : null;
 
         if (dbUser) {
           const data = dbUser;
-          const month = data.birth_month ? String(data.birth_month) : storeBirthMonth;
-          const day = data.birth_day ? String(data.birth_day) : storeBirthDay;
-          const year = data.birth_year ? String(data.birth_year) : storeBirthYear;
-          const hour = data.birth_hour || storeBirthHour || "12";
-          const minute = data.birth_minute || storeBirthMinute || "00";
-          const period = data.birth_period || storeBirthPeriod || "PM";
-          const place = data.birth_place || "";
+          const month = data.birthMonth ? String(data.birthMonth) : storeBirthMonth;
+          const day = data.birthDay ? String(data.birthDay) : storeBirthDay;
+          const year = data.birthYear ? String(data.birthYear) : storeBirthYear;
+          const hour = data.birthHour || storeBirthHour || "12";
+          const minute = data.birthMinute || storeBirthMinute || "00";
+          const period = data.birthPeriod || storeBirthPeriod || "PM";
+          const place = data.birthPlace || "";
           
-          let sunSignValue = extractStoredSignName(data.sun_sign);
-          let moonSignValue = extractStoredSignName(data.moon_sign);
-          let ascendantValue = extractStoredSignName(data.ascendant_sign);
-          
-          if (!sunSignValue || !moonSignValue || !ascendantValue) {
-            try {
-              const { data: profileData } = await supabase.from("user_profiles").select("*").eq("id", userId).single();
-              if (profileData) {
-                if (!sunSignValue) sunSignValue = extractStoredSignName(profileData.sun_sign);
-                if (!moonSignValue) moonSignValue = extractStoredSignName(profileData.moon_sign);
-                if (!ascendantValue) ascendantValue = extractStoredSignName(profileData.ascendant_sign);
-                
-                if (sunSignValue || moonSignValue || ascendantValue) {
-                  await supabase.from("users").update({
-                    ...(sunSignValue ? { sun_sign: sunSignValue } : {}),
-                    ...(moonSignValue ? { moon_sign: moonSignValue } : {}),
-                    ...(ascendantValue ? { ascendant_sign: ascendantValue } : {}),
-                  }).eq("id", userId);
-                }
-              }
-            } catch (profileError) {
-              console.error("Error reading user_profiles:", profileError);
-            }
-          }
+          let sunSignValue = extractStoredSignName(data.sunSign);
+          let moonSignValue = extractStoredSignName(data.moonSign);
+          let ascendantValue = extractStoredSignName(data.ascendantSign);
           
           if (!sunSignValue || !moonSignValue || !ascendantValue) {
             try {
@@ -154,11 +134,17 @@ export default function ProfilePage() {
                 if (!moonSignValue) moonSignValue = extractStoredSignName(signsData.moonSign);
                 if (!ascendantValue) ascendantValue = extractStoredSignName(signsData.ascendant);
                 
-                await supabase.from("users").update({
-                  sun_sign: signsData.sunSign?.name || signsData.sunSign,
-                  moon_sign: signsData.moonSign?.name || signsData.moonSign,
-                  ascendant_sign: signsData.ascendant?.name || signsData.ascendant,
-                }).eq("id", userId);
+                await fetch("/api/user/profile", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    userId,
+                    email: data.email || localStorage.getItem("astrorekha_email") || undefined,
+                    sunSign: signsData.sunSign?.name || signsData.sunSign,
+                    moonSign: signsData.moonSign?.name || signsData.moonSign,
+                    ascendantSign: signsData.ascendant?.name || signsData.ascendant,
+                  }),
+                });
               }
             } catch (signsError) {
               console.error("Error fetching signs:", signsError);
