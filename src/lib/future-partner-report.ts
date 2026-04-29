@@ -12,9 +12,20 @@ export interface FuturePartnerReportData {
   strengths: string[];
   growthAreas: string[];
   guidance: string;
+  reportVersion?: string;
+  variationSeed?: string;
 }
 
 const PARTNER_REPORT_MAX_RETRIES = 4;
+export const FUTURE_PARTNER_REPORT_VERSION = "2026-04-29-v2";
+
+interface FuturePartnerAnchors {
+  partnerName: string;
+  marriageYear: string;
+  partnerAgeAtMarriage: string;
+  compatibilityScore: number;
+  variationSeed: string;
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -159,14 +170,130 @@ function firstKnownValue(values: unknown[]): string {
   return "—";
 }
 
-export async function generateFuturePartnerReport({
+function hashString(input: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function pickFromHash<T>(items: T[], hash: number, salt: number): T {
+  return items[(hash + salt) % items.length];
+}
+
+function parseBirthYear(...values: unknown[]): number | null {
+  for (const value of values) {
+    const parsed = Number(String(value || "").trim());
+    if (Number.isFinite(parsed) && parsed >= 1940 && parsed <= 2010) {
+      return Math.floor(parsed);
+    }
+  }
+  return null;
+}
+
+function buildAnswersSummary(answers: Record<string, any> | null | undefined): string {
+  if (!answers || typeof answers !== "object") return "not specified";
+
+  const entries = Object.entries(answers)
+    .filter(([, value]) => typeof value === "string" && value.trim())
+    .map(([key, value]) => `${key.replace(/^future-partner-/, "")}: ${String(value).trim()}`);
+
+  return entries.length ? entries.join("; ") : "not specified";
+}
+
+function buildFuturePartnerAnchors({
   user,
   userProfile,
   chartData,
+  answers,
 }: {
   user: Record<string, any>;
   userProfile: Record<string, any> | null;
   chartData: Record<string, any> | null;
+  answers: Record<string, any> | null;
+}): FuturePartnerAnchors {
+  const seedParts = [
+    user?.id,
+    user?.email,
+    user?.birth_day,
+    user?.birth_month,
+    user?.birth_year,
+    user?.birth_hour,
+    user?.birth_minute,
+    user?.birth_place,
+    userProfile?.birth_day,
+    userProfile?.birth_month,
+    userProfile?.birth_year,
+    userProfile?.birth_hour,
+    userProfile?.birth_minute,
+    userProfile?.birth_place,
+    chartData?.sun_sign,
+    chartData?.moon_sign,
+    chartData?.lagna,
+    chartData?.ascendant,
+    JSON.stringify(answers || {}),
+  ]
+    .map((value) => toPlainSign(value))
+    .join("|");
+
+  const seedHash = hashString(seedParts);
+  const initialLetters = [
+    "A",
+    "B",
+    "C",
+    "D",
+    "E",
+    "H",
+    "I",
+    "J",
+    "K",
+    "L",
+    "M",
+    "N",
+    "P",
+    "R",
+    "S",
+    "T",
+    "V",
+    "Y",
+  ];
+
+  const birthYear = parseBirthYear(user?.birth_year, userProfile?.birth_year, chartData?.birth_year);
+  const currentYear = new Date().getFullYear();
+  const targetMarriageAge = 24 + (seedHash % 10);
+  let marriageYear = birthYear ? birthYear + targetMarriageAge : currentYear + 1 + (seedHash % 8);
+
+  if (marriageYear <= currentYear) {
+    marriageYear = currentYear + 1 + ((seedHash >>> 5) % 7);
+  }
+
+  const userAgeAtMarriage = birthYear ? Math.max(21, marriageYear - birthYear) : 27 + ((seedHash >>> 8) % 7);
+  const partnerAgeOffset = ((seedHash >>> 11) % 7) - 3;
+  const partnerAgeAtMarriage = Math.max(21, Math.min(42, userAgeAtMarriage + partnerAgeOffset));
+
+  const compatibilityScore = 66 + ((seedHash >>> 14) % 25);
+
+  return {
+    partnerName: `${pickFromHash(initialLetters, seedHash, 3)}.`,
+    marriageYear: String(marriageYear),
+    partnerAgeAtMarriage: String(partnerAgeAtMarriage),
+    compatibilityScore,
+    variationSeed: seedHash.toString(36),
+  };
+}
+
+export async function generateFuturePartnerReport({
+  user,
+  userProfile,
+  chartData,
+  answers,
+}: {
+  user: Record<string, any>;
+  userProfile: Record<string, any> | null;
+  chartData: Record<string, any> | null;
+  answers?: Record<string, any> | null;
 }): Promise<FuturePartnerReportData> {
   const name = String(user?.name || userProfile?.name || "friend").trim() || "friend";
 
@@ -192,6 +319,13 @@ export async function generateFuturePartnerReport({
     String(user?.relationship_status || userProfile?.relationship_status || "").trim() || "not specified";
 
   const userGender = String(user?.gender || userProfile?.gender || "").trim() || "not specified";
+  const anchors = buildFuturePartnerAnchors({
+    user,
+    userProfile,
+    chartData,
+    answers: answers || null,
+  });
+  const answerSummary = buildAnswersSummary(answers || null);
 
   const prompt = `You are an experienced Vedic astrologer for an Indian audience.
 
@@ -205,6 +339,13 @@ User details:
 - Sun sign: ${sunSign}
 - Moon sign: ${moonSign}
 - Ascendant: ${ascendant}
+- Future partner preference answers: ${answerSummary}
+
+Use these precomputed headline values exactly:
+- partnerName: ${anchors.partnerName}
+- marriageYear: ${anchors.marriageYear}
+- partnerAgeAtMarriage: ${anchors.partnerAgeAtMarriage}
+- compatibilityScore: ${anchors.compatibilityScore}
 
 Strict requirements:
 1. Return VALID JSON only. No markdown, no explanation.
@@ -221,9 +362,10 @@ Strict requirements:
   "growthAreas": ["point", "point"],
   "guidance": "2-3 sentences"
 }
-3. Use only one plausible initial for the future partner name, formatted like A.
+3. Use the precomputed headline values exactly. Do not change partnerName, marriageYear, partnerAgeAtMarriage, or compatibilityScore.
 4. Keep tone warm and practical. This is an entertainment-style astrological insight.
-5. Do not include uncertainty language like "cannot predict".`;
+5. Do not include uncertainty language like "cannot predict".
+6. Make relationshipTheme, summaries, strengths, growthAreas, and guidance specific to the chart and preference answers.`;
 
   let lastError: unknown = null;
 
@@ -238,7 +380,16 @@ Strict requirements:
       });
 
       const text = extractText(response);
-      return parseReportJson(text);
+      const parsed = parseReportJson(text);
+      return {
+        ...parsed,
+        partnerName: anchors.partnerName,
+        marriageYear: anchors.marriageYear,
+        partnerAgeAtMarriage: anchors.partnerAgeAtMarriage,
+        compatibilityScore: anchors.compatibilityScore,
+        reportVersion: FUTURE_PARTNER_REPORT_VERSION,
+        variationSeed: anchors.variationSeed,
+      };
     } catch (error) {
       lastError = error;
 

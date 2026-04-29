@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
+import { FUTURE_PARTNER_REPORT_VERSION } from "@/lib/future-partner-report";
 import { toPartnerInitial } from "@/lib/future-partner-format";
 import { linkReportToUser } from "@/lib/user-report-links";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 function getSessionUserId(request: NextRequest): string | null {
   const accessCookie = request.cookies.get("ar_access")?.value;
@@ -43,6 +46,20 @@ export async function GET(request: NextRequest) {
 
     if (!data) {
       return NextResponse.json({ status: "not_started" });
+    }
+
+    if (
+      data.status === "complete" &&
+      data.report_data &&
+      typeof data.report_data === "object" &&
+      (data.report_data as Record<string, unknown>).reportVersion !== FUTURE_PARTNER_REPORT_VERSION
+    ) {
+      return NextResponse.json({
+        status: "pending",
+        report: null,
+        generated_at: data.generated_at || null,
+        updated_at: data.updated_at || null,
+      });
     }
 
     if (data.status === "complete" && data.id) {

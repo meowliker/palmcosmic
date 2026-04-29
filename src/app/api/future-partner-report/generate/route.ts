@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
-import { generateFuturePartnerReport } from "@/lib/future-partner-report";
+import {
+  FUTURE_PARTNER_REPORT_VERSION,
+  generateFuturePartnerReport,
+} from "@/lib/future-partner-report";
 import { normalizeUnlockedFeatures } from "@/lib/unlocked-features";
 import { linkReportToUser } from "@/lib/user-report-links";
 
 export const maxDuration = 60;
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 type AnyRecord = Record<string, any>;
 
@@ -166,7 +172,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "generation_failed" }, { status: 500 });
   }
 
-  if (existingRow?.status === "complete" && existingRow?.report_data) {
+  if (
+    existingRow?.status === "complete" &&
+    existingRow?.report_data &&
+    existingRow.report_data?.reportVersion === FUTURE_PARTNER_REPORT_VERSION
+  ) {
     if (existingRow.id) {
       await linkReportToUser({
         supabase,
@@ -244,6 +254,12 @@ export async function POST(request: NextRequest) {
     .eq("id", userId)
     .maybeSingle();
 
+  const { data: onboardingSession } = await supabase
+    .from("onboarding_sessions")
+    .select("answers")
+    .eq("id", `session_${userId}`)
+    .maybeSingle();
+
   const chartData = {
     ...(natalChart || {}),
     ...(birthChart || {}),
@@ -272,6 +288,10 @@ export async function POST(request: NextRequest) {
       user,
       userProfile,
       chartData,
+      answers:
+        onboardingSession?.answers && typeof onboardingSession.answers === "object"
+          ? onboardingSession.answers
+          : null,
     });
 
     const generatedAt = new Date().toISOString();
