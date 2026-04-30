@@ -14,6 +14,8 @@ const MONTH_MAP: Record<string, number> = {
   July: 7, August: 8, September: 9, October: 10, November: 11, December: 12,
 };
 const MONTH_NAMES = Object.keys(MONTH_MAP);
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, "0"));
+const REFRESH_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 
 function getMonthNumber(month: string): number {
   const trimmed = String(month || "").trim();
@@ -74,6 +76,8 @@ export default function BirthChartPage() {
   const [birthPeriod, setBirthPeriodState] = useState<string>("PM");
   const [birthPlace, setBirthPlaceState] = useState<string>("");
   const [knowsBirthTime, setKnowsBirthTimeState] = useState<boolean>(true);
+  const [refreshAvailableAt, setRefreshAvailableAt] = useState<number | null>(null);
+  const [refreshNow, setRefreshNow] = useState(() => Date.now());
   
   const { 
     birthMonth: storeBirthMonth, birthDay: storeBirthDay, birthYear: storeBirthYear, 
@@ -114,6 +118,24 @@ export default function BirthChartPage() {
     localStorage.getItem("astrorekha_anon_id")?.trim() ||
     localStorage.getItem("palmcosmic_anon_id")?.trim() ||
     "";
+
+  const getRefreshCooldownKey = () => {
+    const userId = getStoredUserId() || "anonymous";
+    return `palmcosmic_birth_chart_refresh_available_at_${userId}`;
+  };
+
+  const refreshRemainingMs = Math.max(0, (refreshAvailableAt || 0) - refreshNow);
+  const canRefreshChart = refreshRemainingMs === 0 && !loading;
+
+  const formatRefreshWait = (milliseconds: number) => {
+    const totalMinutes = Math.ceil(milliseconds / (60 * 1000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (hours <= 0) return `${minutes}m`;
+    if (minutes === 0) return `${hours}h`;
+    return `${hours}h ${minutes}m`;
+  };
 
   const linkBirthChartToCurrentUser = async (birthChartId: string) => {
     const userId = getStoredUserId();
@@ -202,6 +224,18 @@ export default function BirthChartPage() {
     loadOrGenerateChart();
   }, [userDataLoaded, isMissingRequiredData, needsBirthTime]);
 
+  useEffect(() => {
+    if (!userDataLoaded) return;
+
+    const storedAvailableAt = Number(localStorage.getItem(getRefreshCooldownKey()) || 0);
+    if (Number.isFinite(storedAvailableAt) && storedAvailableAt > Date.now()) {
+      setRefreshAvailableAt(storedAvailableAt);
+    }
+
+    const interval = window.setInterval(() => setRefreshNow(Date.now()), 30 * 1000);
+    return () => window.clearInterval(interval);
+  }, [userDataLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const saveBirthTimeAndContinue = async () => {
     setBirthTime(birthHour, birthMinute, birthPeriod as "AM" | "PM");
     setKnowsBirthTime(true);
@@ -284,7 +318,23 @@ export default function BirthChartPage() {
     }
   };
 
-  const generateChart = async (cacheKey: string) => {
+  const refreshChart = async () => {
+    if (!canRefreshChart) return;
+
+    setLoading(true);
+    setError(null);
+    setChartData(null);
+    const refreshed = await generateChart(`${getUserChartId()}_${chartType}`);
+
+    if (refreshed) {
+      const nextAvailableAt = Date.now() + REFRESH_COOLDOWN_MS;
+      localStorage.setItem(getRefreshCooldownKey(), String(nextAvailableAt));
+      setRefreshAvailableAt(nextAvailableAt);
+      setRefreshNow(Date.now());
+    }
+  };
+
+  const generateChart = async (cacheKey: string): Promise<boolean> => {
     const birthDate = getBirthDate();
     const birthTime = getBirthTime();
     let latitude = 28.6139, longitude = 77.209, timezone = 5.5;
@@ -321,14 +371,14 @@ export default function BirthChartPage() {
       if (!result.success) {
         setError(result.error || "Failed to generate chart. Please try again.");
         setLoading(false);
-        return;
+        return false;
       }
       
       if (result.success && result.data) {
         if (!hasRenderableChartData(result.data)) {
           setError("Birth chart data is currently unavailable. Please try again in a few minutes.");
           setLoading(false);
-          return;
+          return false;
         }
 
         const chartDataWithDetails = {
@@ -346,6 +396,7 @@ export default function BirthChartPage() {
         } catch (cacheErr) {
           console.error("Failed to cache chart:", cacheErr);
         }
+        return true;
       }
     } catch (err) {
       console.error("Failed to generate chart:", err);
@@ -353,6 +404,7 @@ export default function BirthChartPage() {
     } finally {
       setLoading(false);
     }
+    return false;
   };
 
   return (
@@ -447,7 +499,7 @@ export default function BirthChartPage() {
                         }}
                         className="bg-[#061525] border border-[#173653] rounded-lg px-3 py-2 text-white text-sm"
                       >
-                        {["00", "15", "30", "45"].map(m => <option key={m} value={m}>{m}</option>)}
+                        {MINUTE_OPTIONS.map(m => <option key={m} value={m}>{m}</option>)}
                       </select>
                       <select
                         value={birthPeriod}
@@ -518,6 +570,14 @@ export default function BirthChartPage() {
                       <span className="text-white">{birthPlace}</span>
                     </div>
                   )}
+                  <Button
+                    onClick={() => void refreshChart()}
+                    disabled={!canRefreshChart}
+                    className="mt-4 h-10 w-full bg-[#38bdf8] text-sm font-semibold text-black hover:bg-[#7dd3fc] disabled:bg-[#173653] disabled:text-[#8fa3b8] [&_svg]:text-black disabled:[&_svg]:text-[#8fa3b8]"
+                  >
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    {refreshRemainingMs > 0 ? `Refresh in ${formatRefreshWait(refreshRemainingMs)}` : "Refresh Chart"}
+                  </Button>
                 </div>
 
                 {!hasRenderableChartData(chartData) && (

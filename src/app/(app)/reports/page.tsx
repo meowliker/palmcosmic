@@ -39,7 +39,8 @@ interface SoulmateSketchStatus {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [userZodiac, setUserZodiac] = useState({ sign: "Aries", symbol: "♈", color: "from-red-500 to-orange-500" });
+  const [userZodiac, setUserZodiac] = useState({ sign: "", symbol: "?", color: "from-[#173653] to-[#0b2338]" });
+  const [zodiacLoaded, setZodiacLoaded] = useState(false);
   const [upsellPopup, setUpsellPopup] = useState<{ isOpen: boolean; feature: keyof UnlockedFeatures | null }>({
     isOpen: false,
     feature: null,
@@ -82,8 +83,11 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchDailyInsightsV2();
-  }, []);
+    const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
+    if (userId || zodiacLoaded) {
+      fetchDailyInsightsV2();
+    }
+  }, [zodiacLoaded]);
 
   useEffect(() => {
     if (!unlockedFeatures.soulmateSketch) return;
@@ -129,7 +133,7 @@ export default function DashboardPage() {
       const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
 
       if (userId) {
-        await fetch("/api/user/refresh-entitlements", {
+        fetch("/api/user/refresh-entitlements", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -181,6 +185,7 @@ export default function DashboardPage() {
               color: getZodiacColor(sunSignName),
             });
 
+            setZodiacLoaded(true);
             const storedEmail = localStorage.getItem("astrorekha_email");
             if (storedEmail && !userEmail) {
               setUserEmail(storedEmail);
@@ -209,6 +214,7 @@ export default function DashboardPage() {
         symbol: getZodiacSymbol(storeSunSign.name),
         color: getZodiacColor(storeSunSign.name),
       });
+      setZodiacLoaded(true);
     } else if (storeBirthMonth && storeBirthDay) {
       // Calculate sun sign from birth date
       const month = Number(storeBirthMonth);
@@ -219,6 +225,7 @@ export default function DashboardPage() {
         symbol: getZodiacSymbol(sign),
         color: getZodiacColor(sign),
       });
+      setZodiacLoaded(true);
     }
     setReportAccessLoaded(true);
   };
@@ -323,6 +330,10 @@ export default function DashboardPage() {
       card,
     });
   };
+
+  const horoscopeSign = zodiacLoaded ? userZodiac.sign : "Loading...";
+  const horoscopeSymbol = zodiacLoaded ? userZodiac.symbol : "…";
+  const horoscopeColor = zodiacLoaded ? userZodiac.color : "from-[#173653] to-[#0b2338]";
 
   return (
     <div className="min-h-screen bg-[#061525] flex items-center justify-center">
@@ -580,14 +591,14 @@ export default function DashboardPage() {
                 trackAnalyticsEvent("ReportsDashboardAction", {
                   action: "horoscope_card_clicked",
                   route: "/reports",
-                  sign: userZodiac.sign,
+                  sign: zodiacLoaded ? userZodiac.sign : "",
                 });
                 router.push("/horoscope");
               }}
             >
               {/* Gradient background */}
               <div className="absolute inset-0 bg-[#0b2338]" />
-              <div className={`absolute inset-0 bg-gradient-to-br ${userZodiac.color} opacity-50 group-hover:opacity-60 transition-opacity`} />
+              <div className={`absolute inset-0 bg-gradient-to-br ${horoscopeColor} opacity-50 group-hover:opacity-60 transition-opacity`} />
               <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
 
               {/* Decorative stars */}
@@ -600,12 +611,12 @@ export default function DashboardPage() {
 
               <div className="relative p-5">
                 <div className="flex items-start gap-4">
-                  <div className={`w-14 h-14 rounded-lg bg-gradient-to-br ${userZodiac.color} flex items-center justify-center shadow-lg flex-shrink-0`}>
-                    <span className="text-white text-2xl">{userZodiac.symbol}</span>
+                  <div className={`w-14 h-14 rounded-lg bg-gradient-to-br ${horoscopeColor} flex items-center justify-center shadow-lg flex-shrink-0`}>
+                    <span className="text-white text-2xl">{horoscopeSymbol}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-white/50 text-xs font-medium uppercase tracking-wider mb-0.5">Your Horoscope</p>
-                    <h3 className="text-white font-bold text-lg">{userZodiac.sign}</h3>
+                    <h3 className="text-white font-bold text-lg">{horoscopeSign}</h3>
                     <p className="text-white/50 text-xs mt-1">
                       {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                     </p>

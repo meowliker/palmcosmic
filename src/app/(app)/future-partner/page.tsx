@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Heart, Loader2, Sparkles, CalendarDays, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { toPartnerInitial } from "@/lib/future-partner-format";
+import { toMaskedPartnerInitial } from "@/lib/future-partner-format";
 import { useUserStore } from "@/lib/user-store";
 import type { FuturePartnerReportData } from "@/lib/future-partner-report";
 import ReportDisclaimer from "@/components/ReportDisclaimer";
@@ -185,7 +185,9 @@ export default function FuturePartnerPage() {
             >
               <div className="rounded-2xl border border-[#38bdf8]/25 bg-[#061525] p-4 shadow-[0_16px_38px_rgba(0,0,0,0.22)]">
                 <p className="text-xs uppercase tracking-wide text-[#8fa3b8]">Predicted Partner Initial</p>
-                <p className="mt-1 text-2xl font-bold text-white">{toPartnerInitial(report.partnerName)}</p>
+                <p className="mt-1 text-2xl font-bold text-white tracking-[0.18em]">
+                  {toMaskedPartnerInitial(report.partnerName)}
+                </p>
 
                 <div className="mt-4 grid grid-cols-3 gap-2 text-center">
                   <div className="rounded-xl border border-[#173653] bg-[#0b2338] p-2">

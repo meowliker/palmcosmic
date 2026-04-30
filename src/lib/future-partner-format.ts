@@ -9,3 +9,8 @@ export function toPartnerInitial(value: unknown): string {
 
   return firstLetter ? `${firstLetter}.` : "A.";
 }
+
+export function toMaskedPartnerInitial(value: unknown): string {
+  const initial = toPartnerInitial(value).replace(".", "");
+  return `${initial}***`;
+}
