@@ -6,6 +6,8 @@ import { classifyStoredPaymentEvent } from "@/lib/finance-events";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+const DEFAULT_ANALYTICS_START_DATE = "2026-04-30";
+
 interface PeakSalesMetric {
   label: string;
   count: number;
@@ -302,6 +304,14 @@ function buildWeekdaySalesSeries(
   });
 }
 
+function normalizeAdAccountId(value: string): string {
+  return value.replace(/^act_/i, "").trim();
+}
+
+function encodeMetaTimeRange(startDate: string, endDate: string): string {
+  return `time_range=${encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))}`;
+}
+
 async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promise<Map<string, number>> {
   const metaAccessToken = process.env.META_ACCESS_TOKEN;
   const adAccountId = process.env.META_AD_ACCOUNT_ID;
@@ -311,8 +321,9 @@ async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promi
   }
 
   try {
-    const dateParams = `time_range={"since":"${startDate}","until":"${endDate}"}`;
-    const dailyUrl = `https://graph.facebook.com/v21.0/act_${adAccountId}/insights?fields=spend&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
+    const normalizedAdAccountId = normalizeAdAccountId(adAccountId);
+    const dateParams = encodeMetaTimeRange(startDate, endDate);
+    const dailyUrl = `https://graph.facebook.com/v21.0/act_${normalizedAdAccountId}/insights?fields=spend&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
     const response = await fetch(dailyUrl);
     const data = await response.json();
 
@@ -365,9 +376,10 @@ async function fetchMetaAdsHourlySpend(
   try {
     const fetchStart = mode === "business_1130_ist" ? startDate : shiftIsoDate(startDate, -1);
     const fetchEnd = mode === "business_1130_ist" ? endDate : shiftIsoDate(endDate, 1);
-    const dateParams = `time_range={"since":"${fetchStart}","until":"${fetchEnd}"}`;
+    const normalizedAdAccountId = normalizeAdAccountId(adAccountId);
+    const dateParams = encodeMetaTimeRange(fetchStart, fetchEnd);
     let url =
-      `https://graph.facebook.com/v21.0/act_${adAccountId}/insights` +
+      `https://graph.facebook.com/v21.0/act_${normalizedAdAccountId}/insights` +
       `?fields=spend` +
       `&breakdowns=hourly_stats_aggregated_by_advertiser_time_zone` +
       `&time_increment=1&${dateParams}&limit=500&access_token=${metaAccessToken}`;
@@ -1012,10 +1024,8 @@ export async function GET(request: NextRequest) {
     const token = searchParams.get("token");
 
     const today = new Date();
-    const defaultStart = new Date(today);
-    defaultStart.setDate(defaultStart.getDate() - 30);
 
-    const startDate = searchParams.get("startDate") || defaultStart.toISOString().split("T")[0];
+    const startDate = searchParams.get("startDate") || DEFAULT_ANALYTICS_START_DATE;
     const endDate = searchParams.get("endDate") || today.toISOString().split("T")[0];
     const dayModeParam = searchParams.get("dayMode");
     const matrixDayModeParam = searchParams.get("matrixDayMode");

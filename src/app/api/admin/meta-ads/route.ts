@@ -18,6 +18,14 @@ function parseMetricNumber(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeAdAccountId(value: string): string {
+  return value.replace(/^act_/i, "").trim();
+}
+
+function encodeMetaTimeRange(startDate: string, endDate: string): string {
+  return `time_range=${encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))}`;
+}
+
 function getActionMetricValue(collection: any[], actionTypes: string[]): number {
   for (const actionType of actionTypes) {
     const hit = collection.find((row: any) => row?.action_type === actionType);
@@ -83,13 +91,14 @@ export async function GET(request: NextRequest) {
     // Build date range params - use custom dates if provided, otherwise use preset
     let dateParams: string;
     if (customStartDate && customEndDate) {
-      dateParams = `time_range={"since":"${customStartDate}","until":"${customEndDate}"}`;
+      dateParams = encodeMetaTimeRange(customStartDate, customEndDate);
     } else {
       dateParams = `date_preset=${datePreset}`;
     }
 
     // Fetch account-level insights
-    const insightsUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,cost_per_action_type,conversions,cost_per_conversion,purchase_roas,website_purchase_roas&${dateParams}&access_token=${metaAccessToken}`;
+    const normalizedAdAccountId = normalizeAdAccountId(adAccountId);
+    const insightsUrl = `${META_BASE_URL}/act_${normalizedAdAccountId}/insights?fields=spend,impressions,clicks,cpc,cpm,ctr,reach,frequency,actions,cost_per_action_type,conversions,cost_per_conversion,purchase_roas,website_purchase_roas&${dateParams}&access_token=${metaAccessToken}`;
     
     const insightsRes = await fetch(insightsUrl);
     const insightsData = await insightsRes.json();
@@ -104,19 +113,19 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch campaign-level breakdown
-    const campaignsUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=campaign_name,campaign_id,spend,impressions,clicks,cpc,cpm,ctr,reach,actions,cost_per_action_type,purchase_roas,website_purchase_roas&level=campaign&${dateParams}&limit=50&access_token=${metaAccessToken}`;
+    const campaignsUrl = `${META_BASE_URL}/act_${normalizedAdAccountId}/insights?fields=campaign_name,campaign_id,spend,impressions,clicks,cpc,cpm,ctr,reach,actions,cost_per_action_type,purchase_roas,website_purchase_roas&level=campaign&${dateParams}&limit=50&access_token=${metaAccessToken}`;
 
     const campaignsRes = await fetch(campaignsUrl);
     const campaignsData = await campaignsRes.json();
 
     // Fetch daily breakdown for chart
-    const dailyUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend,impressions,clicks,reach,actions&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
+    const dailyUrl = `${META_BASE_URL}/act_${normalizedAdAccountId}/insights?fields=spend,impressions,clicks,reach,actions&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
 
     const dailyRes = await fetch(dailyUrl);
     const dailyData = await dailyRes.json();
 
     // Fetch active campaigns count
-    const activeCampaignsUrl = `${META_BASE_URL}/act_${adAccountId}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&filtering=[{"field":"effective_status","operator":"IN","value":["ACTIVE"]}]&limit=50&access_token=${metaAccessToken}`;
+    const activeCampaignsUrl = `${META_BASE_URL}/act_${normalizedAdAccountId}/campaigns?fields=name,status,objective,daily_budget,lifetime_budget&filtering=[{"field":"effective_status","operator":"IN","value":["ACTIVE"]}]&limit=50&access_token=${metaAccessToken}`;
 
     const activeCampaignsRes = await fetch(activeCampaignsUrl);
     const activeCampaignsData = await activeCampaignsRes.json();

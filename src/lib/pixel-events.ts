@@ -81,7 +81,7 @@ export const pixelEvents = {
   addToCart: (value: number, contentName: string) =>
     trackPixelEvent("AddToCart", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_name: contentName,
       content_type: "product"
     }),
@@ -99,7 +99,7 @@ export const pixelEvents = {
   startTrial: (value: number = 0) =>
     trackPixelEvent("StartTrial", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_name: "PalmCosmic Bundle"
     }),
 
@@ -107,7 +107,7 @@ export const pixelEvents = {
   subscribe: (value: number, plan: string) =>
     trackPixelEvent("Subscribe", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_name: plan,
       predicted_ltv: value
     }),
@@ -118,7 +118,7 @@ export const pixelEvents = {
   initiateCheckout: (value: number, items: string[], eventId?: string) =>
     trackPixelEvent("InitiateCheckout", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_ids: items,
       num_items: items.length
     }, eventId ? { eventID: eventId } : undefined),
@@ -127,7 +127,7 @@ export const pixelEvents = {
   addPaymentInfo: (value: number, contentName: string) =>
     trackPixelEvent("AddPaymentInfo", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_name: contentName,
       content_category: "Bundle"
     }),
@@ -136,7 +136,7 @@ export const pixelEvents = {
   purchase: (value: number, productId: string, productName: string, eventId?: string) =>
     trackPixelEvent("Purchase", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_ids: [productId],
       content_name: productName,
       content_type: "product"
@@ -146,7 +146,7 @@ export const pixelEvents = {
   purchaseCoins: (value: number, coinAmount: number) =>
     trackPixelEvent("Purchase", {
       value,
-      currency: "INR",
+      currency: "USD",
       content_ids: [`coins-${coinAmount}`],
       content_name: `${coinAmount} Coins`,
       content_type: "product"

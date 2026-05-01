@@ -93,11 +93,14 @@ export async function sendMetaConversionEvent(input: MetaEventInput): Promise<vo
   }
 
   try {
-    const response = await fetch(`https://graph.facebook.com/${graphVersion}/${pixelId}/events`, {
+    const response = await fetch(
+      `https://graph.facebook.com/${graphVersion}/${pixelId}/events?access_token=${encodeURIComponent(accessToken)}`,
+      {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+      }
+    );
 
     if (!response.ok) {
       const text = await response.text().catch(() => "");

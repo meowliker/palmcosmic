@@ -50,10 +50,11 @@ interface ProfitSheetRow {
   revenue: number;        // Net revenue after refunds for that Stripe day
   grossRevenue?: number;  // Gross received amount before refunds
   refundAmount?: number;  // Refund amount for that day
-  gst: number;            // 5% of revenue
+  stripeFees?: number;    // Stripe processing fees in USD
+  gst?: number;           // Legacy API alias for Stripe fees
   adsCostUSD: number;     // Meta Ads spend in USD
   adsCostINR: number;     // Deprecated alias; value is USD for dashboard compatibility
-  netRevenue: number;     // Profit: Revenue - GST - Meta spend (USD)
+  netRevenue: number;     // Profit: Revenue - Stripe fees - Meta spend (USD)
   profitPercent?: number; // Profit / Revenue * 100
   roas: number;           // Revenue / Meta spend USD (if ads cost > 0)
   transactionCount: number;
@@ -112,7 +113,8 @@ interface MetaBreakdownData {
     refundAmountUsd?: number;
     totalSales: number;
     totalRefunds?: number;
-    gst: number;
+    gst?: number; // Legacy API alias for Stripe fees
+    stripeFees?: number;
     netRevenue: number;
     totalSpend?: number;
     totalSpendINR: number; // Deprecated alias; value is USD for dashboard compatibility.
@@ -379,6 +381,7 @@ const META_IST_TIMEZONE = "Asia/Kolkata";
 const META_BUSINESS_BOUNDARY_HOUR = 11;
 const META_BUSINESS_BOUNDARY_MINUTE = 30;
 const META_MIN_RANGE_START = "2024-01-01";
+const REVENUE_DEFAULT_START_DATE = "2026-04-30";
 
 type CalendarRange = { startDate: string; endDate: string };
 type CalendarCell = { isoDate: string; day: number; inCurrentMonth: boolean };
@@ -622,7 +625,7 @@ export default function AdminRevenuePage() {
   const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
-  const [analyticsStartDate, setAnalyticsStartDate] = useState<string>("2026-03-13");
+  const [analyticsStartDate, setAnalyticsStartDate] = useState<string>(REVENUE_DEFAULT_START_DATE);
   const [analyticsEndDate, setAnalyticsEndDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
@@ -632,7 +635,7 @@ export default function AdminRevenuePage() {
   const [profitSheetData, setProfitSheetData] = useState<ProfitSheetRow[]>([]);
   const [profitSheetLoading, setProfitSheetLoading] = useState(false);
   const [profitSheetError, setProfitSheetError] = useState<string | null>(null);
-  const [profitSheetStartDate, setProfitSheetStartDate] = useState<string>("2026-03-13");
+  const [profitSheetStartDate, setProfitSheetStartDate] = useState<string>(REVENUE_DEFAULT_START_DATE);
   const [profitSheetEndDate, setProfitSheetEndDate] = useState<string>(new Date().toISOString().split("T")[0]);
   const [profitSheetFilter, setProfitSheetFilter] = useState<string>("all");
   const [profitSheetRoasFilter, setProfitSheetRoasFilter] = useState<string>("all");
@@ -640,14 +643,14 @@ export default function AdminRevenuePage() {
   // Meta Breakdown state
   const [metaBreakdown, setMetaBreakdown] = useState<MetaBreakdownData | null>(null);
   const [metaBreakdownLoading, setMetaBreakdownLoading] = useState(false);
-  const [metaBreakdownDatePreset, setMetaBreakdownDatePreset] = useState<string>("last_7d");
+  const [metaBreakdownDatePreset, setMetaBreakdownDatePreset] = useState<string>("custom");
   const [metaBreakdownStartDate, setMetaBreakdownStartDate] = useState<string>(
-    () => getPresetCalendarRange("last_7d").startDate
+    REVENUE_DEFAULT_START_DATE
   );
   const [metaBreakdownEndDate, setMetaBreakdownEndDate] = useState<string>(
-    () => getPresetCalendarRange("last_7d").endDate
+    () => new Date().toISOString().split("T")[0]
   );
-  const [metaBreakdownUseCustomDateRange, setMetaBreakdownUseCustomDateRange] = useState(false);
+  const [metaBreakdownUseCustomDateRange, setMetaBreakdownUseCustomDateRange] = useState(true);
   const [expandedCampaigns, setExpandedCampaigns] = useState<Set<string>>(new Set());
   const [expandedAdsets, setExpandedAdsets] = useState<Set<string>>(new Set());
 
@@ -1360,7 +1363,7 @@ export default function AdminRevenuePage() {
               <input
                 type="date"
                 value={selectedStartDate}
-                min="2026-03-13"
+                min={REVENUE_DEFAULT_START_DATE}
                 onChange={(e) => setSelectedStartDate(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
               />
@@ -1381,7 +1384,7 @@ export default function AdminRevenuePage() {
               <input
                 type="date"
                 value={selectedEndDate}
-                min="2026-03-13"
+                min={REVENUE_DEFAULT_START_DATE}
                 onChange={(e) => setSelectedEndDate(e.target.value)}
                 className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
               />
@@ -1454,7 +1457,7 @@ export default function AdminRevenuePage() {
               </button>
               <button
                 onClick={() => {
-                  setSelectedStartDate("2026-03-13");
+                  setSelectedStartDate(REVENUE_DEFAULT_START_DATE);
                   setSelectedEndDate(new Date().toISOString().split("T")[0]);
                   setSelectedStartTime("00:00");
                   setSelectedEndTime("23:59");
@@ -1995,7 +1998,7 @@ function ProfitSheetTab({
       revenue: acc.revenue + row.revenue,
       grossRevenue: acc.grossRevenue + (row.grossRevenue ?? row.revenue),
       refundAmount: acc.refundAmount + (row.refundAmount ?? 0),
-      gst: acc.gst + row.gst,
+      stripeFees: acc.stripeFees + (row.stripeFees ?? row.gst ?? 0),
       adsCostUSD: acc.adsCostUSD + row.adsCostUSD,
       adsCostINR: acc.adsCostINR + row.adsCostUSD,
       netRevenue: acc.netRevenue + row.netRevenue,
@@ -2006,7 +2009,7 @@ function ProfitSheetTab({
       revenue: 0,
       grossRevenue: 0,
       refundAmount: 0,
-      gst: 0,
+      stripeFees: 0,
       adsCostUSD: 0,
       adsCostINR: 0,
       netRevenue: 0,
@@ -2027,6 +2030,7 @@ function ProfitSheetTab({
             <input
               type="date"
               value={startDate}
+              min={REVENUE_DEFAULT_START_DATE}
               onChange={(e) => setStartDate(e.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
             />
@@ -2036,6 +2040,7 @@ function ProfitSheetTab({
             <input
               type="date"
               value={endDate}
+              min={REVENUE_DEFAULT_START_DATE}
               onChange={(e) => setEndDate(e.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
             />
@@ -2076,7 +2081,7 @@ function ProfitSheetTab({
           </button>
         </div>
         <p className="text-white/30 text-xs mt-3">
-          Note: Each date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue and Meta spend are shown in USD.
+          Note: Each date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue, Stripe fees, and Meta spend are shown in USD.
         </p>
       </div>
       {error && (
@@ -2108,8 +2113,8 @@ function ProfitSheetTab({
           <p className="text-green-400 text-xl font-bold">{formatCurrency(totals.revenue)}</p>
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
-          <p className="text-white/50 text-xs mb-1">Total GST (5%)</p>
-          <p className="text-amber-400 text-xl font-bold">{formatCurrency(totals.gst)}</p>
+          <p className="text-white/50 text-xs mb-1">Stripe Fees</p>
+          <p className="text-amber-400 text-xl font-bold">{formatCurrency(totals.stripeFees)}</p>
         </div>
         <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10 min-w-0">
           <p className="text-white/50 text-xs mb-1">Meta Spend</p>
@@ -2152,7 +2157,7 @@ function ProfitSheetTab({
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Received</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Refund</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Revenue</th>
-                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">GST (5%)</th>
+                  <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Stripe Fees</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Meta Spend</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Profit</th>
                   <th className="text-right text-white/70 text-xs font-semibold px-4 py-3">Profit %</th>
@@ -2181,7 +2186,7 @@ function ProfitSheetTab({
                           -{formatCurrency(row.refundAmount ?? 0)}
                         </td>
                         <td className="text-green-400 text-sm px-4 py-3 text-right font-medium">{formatCurrency(row.revenue)}</td>
-                        <td className="text-amber-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.gst)}</td>
+                        <td className="text-amber-400/70 text-sm px-4 py-3 text-right">{formatCurrency(row.stripeFees ?? row.gst ?? 0)}</td>
                         <td className="text-red-400/70 text-sm px-4 py-3 text-right">
                           {formatCurrency(row.adsCostUSD)}
                         </td>
@@ -2206,7 +2211,7 @@ function ProfitSheetTab({
                       <td className="text-green-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.grossRevenue)}</td>
                       <td className="text-red-400 text-sm px-4 py-3 text-right">-{formatCurrency(totals.refundAmount)}</td>
                       <td className="text-green-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.revenue)}</td>
-                      <td className="text-amber-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.gst)}</td>
+                      <td className="text-amber-400 text-sm px-4 py-3 text-right">{formatCurrency(totals.stripeFees)}</td>
                       <td className="text-red-400 text-sm px-4 py-3 text-right">
                         {formatCurrency(totals.adsCostUSD)}
                       </td>
@@ -2383,6 +2388,12 @@ function MetaBreakdownTab({
   }).format(calendarMonthStart);
 
   const applyPresetRange = (preset: string) => {
+    if (preset === "custom") {
+      setDatePreset("custom");
+      setUseCustomDateRange(true);
+      return;
+    }
+
     const presetRange = getPresetCalendarRange(preset);
     setDatePreset(preset);
     setUseCustomDateRange(false);
@@ -2448,6 +2459,7 @@ function MetaBreakdownTab({
               onChange={(e) => applyPresetRange(e.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
             >
+              <option value="custom">Custom Range</option>
               <option value="today">Today</option>
               <option value="yesterday">Yesterday</option>
               <option value="last_3d">Last 3 Days</option>
@@ -2610,8 +2622,8 @@ function MetaBreakdownTab({
               <p className="text-white text-xl font-bold">{firstPartySales}</p>
             </div>
             <div>
-              <p className="text-white/40 text-xs mb-1">GST (5%)</p>
-              <p className="text-amber-400 text-lg font-bold">{formatUSD(data.revenue.gst)}</p>
+              <p className="text-white/40 text-xs mb-1">Stripe Fees</p>
+              <p className="text-amber-400 text-lg font-bold">{formatUSD(data.revenue.stripeFees ?? data.revenue.gst ?? 0)}</p>
             </div>
             <div>
               <p className="text-white/40 text-xs mb-1">Net Revenue</p>
@@ -4090,6 +4102,7 @@ function AnalyticsTab({
             <input
               type="date"
               value={startDate}
+              min={REVENUE_DEFAULT_START_DATE}
               onChange={(e) => setStartDate(e.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
             />
@@ -4099,6 +4112,7 @@ function AnalyticsTab({
             <input
               type="date"
               value={endDate}
+              min={REVENUE_DEFAULT_START_DATE}
               onChange={(e) => setEndDate(e.target.value)}
               className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
             />

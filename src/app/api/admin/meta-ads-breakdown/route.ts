@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { classifyStoredPaymentEvent } from "@/lib/finance-events";
+import { getStripeClient } from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
 
@@ -335,6 +336,42 @@ function normalizeAdAccountId(value: string): string {
   return value.replace(/^act_/i, "").trim();
 }
 
+function encodeMetaTimeRange(startDate: string, endDate: string): string {
+  return `time_range=${encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))}`;
+}
+
+async function fetchStripeFeesForWindow(businessWindow: BusinessWindow): Promise<number> {
+  const stripe = getStripeClient();
+  let startingAfter: string | undefined;
+  let hasMore = true;
+  let fees = 0;
+
+  while (hasMore) {
+    const page = await stripe.balanceTransactions.list({
+      created: {
+        gte: Math.floor(businessWindow.start.getTime() / 1000),
+        lte: Math.floor(businessWindow.end.getTime() / 1000),
+      },
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+
+    for (const txn of page.data) {
+      const feeCents = Number(txn.fee || 0);
+      if (!Number.isFinite(feeCents) || feeCents <= 0) continue;
+      if (String(txn.currency || "").toLowerCase() !== "usd") continue;
+      if (!["charge", "payment", "refund"].includes(String(txn.type || ""))) continue;
+      fees += feeCents / 100;
+    }
+
+    hasMore = page.has_more;
+    startingAfter = page.data.at(-1)?.id;
+    if (!startingAfter) break;
+  }
+
+  return Number(fees.toFixed(2));
+}
+
 function getMetadataString(metadata: unknown, keys: string[]): string | null {
   if (!metadata || typeof metadata !== "object") return null;
   const obj = metadata as Record<string, unknown>;
@@ -367,7 +404,8 @@ function addAttributionValue(
 
 function applyFirstPartyAttribution<T extends AdMetrics>(
   row: T,
-  summary: AttributionSummary | undefined
+  summary: AttributionSummary | undefined,
+  stripeFeeRate: number
 ): T {
   if (!summary) {
     return {
@@ -376,8 +414,8 @@ function applyFirstPartyAttribution<T extends AdMetrics>(
     };
   }
 
-  const gst = summary.revenue * 0.05;
-  const actualProfit = summary.revenue - gst - row.spend;
+  const allocatedStripeFees = Math.max(summary.revenue, 0) * stripeFeeRate;
+  const actualProfit = summary.revenue - allocatedStripeFees - row.spend;
 
   return {
     ...row,
@@ -562,7 +600,9 @@ export async function GET(request: NextRequest) {
     // Build date range params for Meta (date-granular, mapped from IST business window)
     const metaSinceDate = getIstDateTimeParts(businessWindow.start).dayKey;
     const metaUntilDate = getIstDateTimeParts(businessWindow.end).dayKey;
-    const dateParams = `time_range={"since":"${metaSinceDate}","until":"${metaUntilDate}"}`;
+    const dateParams = encodeMetaTimeRange(metaSinceDate, metaUntilDate);
+    const stripeFees = await fetchStripeFeesForWindow(businessWindow);
+    const stripeFeeRate = totalRevenue > 0 ? stripeFees / totalRevenue : 0;
 
     // Fields to fetch for insights
     const insightFields = "spend,impressions,clicks,cpc,cpm,ctr,reach,actions,cost_per_action_type,purchase_roas,website_purchase_roas";
@@ -700,7 +740,7 @@ export async function GET(request: NextRequest) {
             status: ad.status,
             budget: null,
             ...adMetrics,
-          }, adAttributionMap.get(ad.id));
+          }, adAttributionMap.get(ad.id), stripeFeeRate);
         });
 
         return applyFirstPartyAttribution({
@@ -710,7 +750,7 @@ export async function GET(request: NextRequest) {
           budget: adsetBudget,
           ...adsetMetrics,
           ads,
-        }, adsetAttributionMap.get(adset.id));
+        }, adsetAttributionMap.get(adset.id), stripeFeeRate);
       });
 
       return applyFirstPartyAttribution({
@@ -720,7 +760,7 @@ export async function GET(request: NextRequest) {
         budget,
         ...metrics,
         adsets,
-      }, campaignAttributionMap.get(campaign.id));
+      }, campaignAttributionMap.get(campaign.id), stripeFeeRate);
     });
 
     // Sort campaigns by spend (highest first)
@@ -759,8 +799,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate USD spend and profit.
     const totalSpend = totals.spend;
-    const gst = totalRevenue * 0.05; // 5% GST
-    const netRevenue = totalRevenue - gst;
+    const netRevenue = totalRevenue - stripeFees;
     const profit = netRevenue - totalSpend;
     const roas = totalSpend > 0 ? totalRevenue / totalSpend : 0;
 
@@ -797,7 +836,8 @@ export async function GET(request: NextRequest) {
         refundAmountUsd,
         totalSales,
         totalRefunds,
-        gst,
+        gst: stripeFees,
+        stripeFees,
         netRevenue,
         totalSpend,
         totalSpendINR: totalSpend,

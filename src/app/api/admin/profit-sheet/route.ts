@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { classifyStoredPaymentEvent } from "@/lib/finance-events";
+import { getStripeClient } from "@/lib/stripe";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const APP_LAUNCH_DATE = "2026-03-13";
+const APP_LAUNCH_DATE = "2026-04-30";
 const META_API_VERSION = "v21.0";
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 const IST_TIMEZONE = "Asia/Kolkata";
@@ -19,7 +20,8 @@ interface ProfitSheetRow {
   revenue: number;
   grossRevenue: number;
   refundAmount: number;
-  gst: number;
+  stripeFees: number;
+  gst?: number;
   adsCostUSD: number;
   adsCostINR: number;
   netRevenue: number;
@@ -36,6 +38,14 @@ type FinancialRow = {
   kind: "sale" | "refund";
   amountUsd: number;
 };
+
+function normalizeAdAccountId(value: string): string {
+  return String(value || "").trim().replace(/^act_/i, "");
+}
+
+function encodeMetaTimeRange(startDate: string, endDate: string): string {
+  return `time_range=${encodeURIComponent(JSON.stringify({ since: startDate, until: endDate }))}`;
+}
 
 function pad2(value: number): string {
   return String(value).padStart(2, "0");
@@ -54,12 +64,18 @@ async function fetchMetaAdsDailySpend(startDate: string, endDate: string): Promi
   }
 
   try {
-    const dateParams = `time_range={"since":"${startDate}","until":"${endDate}"}`;
-    const dailyUrl = `${META_BASE_URL}/act_${adAccountId}/insights?fields=spend&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
+    const normalizedAdAccountId = normalizeAdAccountId(adAccountId);
+    const dateParams = encodeMetaTimeRange(startDate, endDate);
+    const dailyUrl = `${META_BASE_URL}/act_${normalizedAdAccountId}/insights?fields=spend&time_increment=1&${dateParams}&limit=90&access_token=${metaAccessToken}`;
 
     const response = await fetch(dailyUrl);
     const data = await response.json();
     const spendMap = new Map<string, number>();
+
+    if (data?.error) {
+      console.error("Meta Ads spend fetch error:", data.error);
+      return spendMap;
+    }
 
     if (Array.isArray(data.data)) {
       data.data.forEach((day: { date_start: string; spend: string }) => {
@@ -143,6 +159,44 @@ function getStripeBusinessDayKeyFromDate(date: Date): string {
   return isBeforeBoundary ? addDaysToIsoDate(dayKey, -1) : dayKey;
 }
 
+async function fetchStripeFeesDaily(startDate: string, endDate: string): Promise<Map<string, number>> {
+  const feeMap = new Map<string, number>();
+  const stripe = getStripeClient();
+  const businessWindow = getBusinessWindow(startDate, endDate);
+
+  let startingAfter: string | undefined;
+  let hasMore = true;
+
+  while (hasMore) {
+    const page = await stripe.balanceTransactions.list({
+      created: {
+        gte: Math.floor(businessWindow.start.getTime() / 1000),
+        lte: Math.floor(businessWindow.end.getTime() / 1000),
+      },
+      limit: 100,
+      ...(startingAfter ? { starting_after: startingAfter } : {}),
+    });
+
+    for (const txn of page.data) {
+      const feeCents = Number(txn.fee || 0);
+      if (!Number.isFinite(feeCents) || feeCents <= 0) continue;
+      if (String(txn.currency || "").toLowerCase() !== "usd") continue;
+      if (!["charge", "payment", "refund"].includes(String(txn.type || ""))) continue;
+
+      const dayKey = getStripeBusinessDayKeyFromDate(new Date(txn.created * 1000));
+      if (dayKey < startDate || dayKey > endDate) continue;
+
+      feeMap.set(dayKey, (feeMap.get(dayKey) || 0) + feeCents / 100);
+    }
+
+    hasMore = page.has_more;
+    startingAfter = page.data.at(-1)?.id;
+    if (!startingAfter) break;
+  }
+
+  return feeMap;
+}
+
 export async function GET(request: NextRequest) {
   try {
     const supabase = getSupabaseAdmin();
@@ -173,7 +227,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Session expired" }, { status: 401 });
     }
 
-    const metaSpendMap = await fetchMetaAdsDailySpend(startDate, endDate);
+    const [metaSpendMap, stripeFeeMap] = await Promise.all([
+      fetchMetaAdsDailySpend(startDate, endDate),
+      fetchStripeFeesDaily(startDate, endDate),
+    ]);
     const dates = getDateRange(startDate, endDate);
     const businessWindow = getBusinessWindow(startDate, endDate);
 
@@ -216,9 +273,9 @@ export async function GET(request: NextRequest) {
       const grossRevenue = saleRows.reduce((sum, event) => sum + event.amountUsd, 0);
       const refundAmount = refundRows.reduce((sum, event) => sum + event.amountUsd, 0);
       const revenue = grossRevenue - refundAmount;
-      const gst = Math.max(revenue, 0) * 0.05;
+      const stripeFees = stripeFeeMap.get(date) || 0;
       const adsCostUSD = metaSpendMap.get(date) || 0;
-      const netRevenue = revenue - gst - adsCostUSD;
+      const netRevenue = revenue - stripeFees - adsCostUSD;
       const profitPercent = revenue > 0 ? (netRevenue / revenue) * 100 : 0;
       const roas = adsCostUSD > 0 ? revenue / adsCostUSD : 0;
 
@@ -228,7 +285,8 @@ export async function GET(request: NextRequest) {
         revenue,
         grossRevenue,
         refundAmount,
-        gst,
+        stripeFees,
+        gst: stripeFees,
         adsCostUSD,
         adsCostINR: adsCostUSD,
         netRevenue,
@@ -245,7 +303,8 @@ export async function GET(request: NextRequest) {
         revenue: acc.revenue + row.revenue,
         grossRevenue: acc.grossRevenue + row.grossRevenue,
         refundAmount: acc.refundAmount + row.refundAmount,
-        gst: acc.gst + row.gst,
+        stripeFees: acc.stripeFees + row.stripeFees,
+        gst: acc.gst + row.stripeFees,
         adsCostUSD: acc.adsCostUSD + row.adsCostUSD,
         adsCostINR: acc.adsCostINR + row.adsCostINR,
         netRevenue: acc.netRevenue + row.netRevenue,
@@ -257,6 +316,7 @@ export async function GET(request: NextRequest) {
         revenue: 0,
         grossRevenue: 0,
         refundAmount: 0,
+        stripeFees: 0,
         gst: 0,
         adsCostUSD: 0,
         adsCostINR: 0,
