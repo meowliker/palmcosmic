@@ -188,7 +188,7 @@ interface AnalyticsRouteMetric {
   avgSessionDurationSec: number;
   checkouts: number;
   bounces: number;
-  source: "ga" | "internal";
+  source: "ga" | "internal" | "vercel";
 }
 
 interface AnalyticsSourceStatus {
@@ -3539,7 +3539,12 @@ function AnalyticsTab({
       ]
     : [];
 
-  const trafficSourceBadge = data?.routes?.[0]?.source === "internal" ? "Supabase" : "GA4";
+  const trafficSourceBadge =
+    data?.routes?.[0]?.source === "vercel"
+      ? "Vercel"
+      : data?.routes?.[0]?.source === "internal"
+        ? "Supabase"
+        : "GA4";
   const salesSourceBadge = "Stripe/Supabase";
   const dayModeShortLabel = dayMode === "business_1130_ist" ? "Stripe TZ" : "IST";
   const dayModeDetailLabel =
