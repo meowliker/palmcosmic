@@ -23,6 +23,7 @@ export default function PalmReadingPage() {
   const [loading, setLoading] = useState(true);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [generationMessage, setGenerationMessage] = useState("Generating your palm reading...");
   const [reading, setReading] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("ageTimeline");
@@ -82,19 +83,21 @@ export default function PalmReadingPage() {
         setLoading(false);
         return;
       }
+
+      if (palmData?.palm_image_url) {
+        setCapturedImage(palmData.palm_image_url);
+        setLoading(false);
+        generateSavedPalmReading(userId);
+        return;
+      }
       
       // Check if palm image exists in localStorage (from onboarding)
       const savedPalmImage = localStorage.getItem("astrorekha_palm_image");
       if (savedPalmImage) {
         setCapturedImage(savedPalmImage);
-        // For Flow B users, auto-analyze if they have a palm image but no reading
-        const flow = localStorage.getItem("astrorekha_onboarding_flow");
-        if (flow === "flow-b") {
-          setLoading(false);
-          // Auto-analyze the palm image
-          analyzePalm(savedPalmImage);
-          return;
-        }
+        setLoading(false);
+        generateSavedPalmReading(userId);
+        return;
       }
       
       setLoading(false);
@@ -106,6 +109,41 @@ export default function PalmReadingPage() {
         setCapturedImage(savedPalmImage);
       }
       setLoading(false);
+    }
+  };
+
+  const generateSavedPalmReading = async (userId: string) => {
+    setAnalyzing(true);
+    setGenerationMessage("Preparing your saved palm scan...");
+    setError(null);
+
+    try {
+      const response = await fetch("/api/palm-reading/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId }),
+      });
+
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.success) {
+        throw new Error(result?.error || "Failed to generate palm reading");
+      }
+
+      if (result.reading) {
+        if (result.reading?.meta?.errorMessage?.includes("NOT_A_PALM") || result.reading?.tabs === null) {
+          setError(result.reading?.meta?.errorMessage?.replace("NOT_A_PALM: ", "") || "Please upload a clear photo of your palm.");
+          setReading(null);
+          return;
+        }
+        setReading(result.reading);
+      } else if (result.reason === "missing_palm_image") {
+        setError("Please scan your palm first so we can generate your report.");
+      }
+    } catch (err: any) {
+      console.error("Saved palm generation error:", err);
+      setError(err?.message || "Your report is still being generated. Please refresh in a minute.");
+    } finally {
+      setAnalyzing(false);
     }
   };
 
@@ -159,6 +197,7 @@ export default function PalmReadingPage() {
 
   const analyzePalm = async (imageData: string) => {
     setAnalyzing(true);
+    setGenerationMessage("Our cosmic AI is reading the lines of your destiny");
     setAnalysisProgress(2);
     setError(null);
 
@@ -528,7 +567,7 @@ export default function PalmReadingPage() {
             <Loader2 className="w-10 h-10 text-[#38bdf8] animate-spin mx-auto mb-5" />
             <h2 className="text-white text-xl font-bold mb-2">Analyzing Your Palm...</h2>
             <p className="text-white/60 text-sm mb-4">
-              Our cosmic AI is reading the lines of your destiny
+              {generationMessage}
             </p>
 
             <div className="w-full h-3 rounded-full bg-[#0b2338] overflow-hidden border border-[#173653]">

@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-    await fulfillStripeSession(session);
+    await fulfillStripeSession(session, { generateReports: false });
 
     return NextResponse.json({
       success: session.payment_status === "paid",

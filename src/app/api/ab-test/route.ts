@@ -13,7 +13,10 @@ function clampPercent(value: number): number {
 }
 
 function getNormalizedVariants(testData: any, isOnboardingLayoutTest: boolean) {
-  const defaults = isOnboardingLayoutTest
+  const isPalmReadyTest = String(testData?.id || "").startsWith("palm-reading-ready");
+  const defaults = isPalmReadyTest
+    ? { pageA: "ready-classic", pageB: "ready-scan" }
+    : isOnboardingLayoutTest
     ? { pageA: "bundle-pricing", pageB: "bundle-pricing-b" }
     : { pageA: "step-17", pageB: "a-step-17" };
 
@@ -91,8 +94,9 @@ export async function GET(request: NextRequest) {
     const supabase = getSupabaseAdmin();
     const testId = requestedTestId || await resolveDefaultTestId(supabase);
     const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
+    const isPalmReadyTest = testId.startsWith("palm-reading-ready");
 
-    if (!AB_TESTS_LIVE) {
+    if (!AB_TESTS_LIVE && !isPalmReadyTest) {
       return NextResponse.json({
         testId,
         variant: "A",
@@ -118,10 +122,15 @@ export async function GET(request: NextRequest) {
 
     const defaultTest = {
       id: testId,
-      name: isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test",
+      name: isPalmReadyTest ? "Palm Reading Ready Scan A/B" : isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test",
       status: "active",
       traffic_split: 0.5,
-      variants: isOnboardingLayoutTest
+      variants: isPalmReadyTest
+        ? {
+            A: { weight: 50, page: "ready-classic" },
+            B: { weight: 50, page: "ready-scan" },
+          }
+        : isOnboardingLayoutTest
         ? {
             A: { weight: 50, page: "bundle-pricing" },
             B: { weight: 50, page: "bundle-pricing-b" },
@@ -149,6 +158,9 @@ export async function GET(request: NextRequest) {
       }
       if (isOnboardingLayoutTest) {
         return variant === "A" ? "bundle-pricing" : "bundle-pricing-b";
+      }
+      if (isPalmReadyTest) {
+        return variant === "A" ? "ready-classic" : "ready-scan";
       }
       return variant === "A" ? "step-17" : "a-step-17";
     };

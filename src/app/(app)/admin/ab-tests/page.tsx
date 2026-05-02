@@ -298,6 +298,7 @@ export default function ABTestsPage() {
       setTests(nextTests);
       if (nextTests.length > 0) {
         const onboardingTest =
+          nextTests.find((test: ABTest) => test.id === "palm-reading-ready-scan") ||
           nextTests.find((test: ABTest) => test.id === funnelConfig.testId) ||
           nextTests.find((test: ABTest) => test.id === DEFAULT_ONBOARDING_TEST_ID);
         if (onboardingTest && (!selectedTest || selectedTest.test.id !== onboardingTest.id)) {
@@ -389,14 +390,15 @@ export default function ABTestsPage() {
       setSaving(true);
       const testId = selectedTest.test?.id || funnelConfig.testId || DEFAULT_ONBOARDING_TEST_ID;
       const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
+      const isPalmReadyTest = testId.startsWith("palm-reading-ready");
       await fetch("/api/admin/ab-tests", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           testId,
           variants: {
-            A: { weight: weightA, page: isOnboardingLayoutTest ? "bundle-pricing" : "step-17" },
-            B: { weight: weightB, page: isOnboardingLayoutTest ? "bundle-pricing-b" : "a-step-17" },
+            A: { weight: weightA, page: isPalmReadyTest ? "ready-classic" : isOnboardingLayoutTest ? "bundle-pricing" : "step-17" },
+            B: { weight: weightB, page: isPalmReadyTest ? "ready-scan" : isOnboardingLayoutTest ? "bundle-pricing-b" : "a-step-17" },
           },
         }),
       });
@@ -569,6 +571,23 @@ export default function ABTestsPage() {
       totalRevenueInr: bStats.totalRevenue,
       avgRevenuePerBundleBuyerInr: bStats.avgRevenuePerUser,
     };
+    const isPalmReadyTest = test.id?.startsWith("palm-reading-ready");
+    const variantALabel = isPalmReadyTest ? "Variant A - Classic Ready Page" : "Variant A - Current Plans";
+    const variantBLabel = isPalmReadyTest ? "Variant B - Palm Scan Page" : "Variant B - New Plans";
+    const variantARouteLabel = isPalmReadyTest ? "Ready route" : "Layout A route";
+    const variantBRouteLabel = isPalmReadyTest ? "Ready route" : "Layout B route";
+    const variantADescription = isPalmReadyTest
+      ? "Original ready page. User continues straight to email."
+      : "Current baseline onboarding/paywall experience";
+    const variantBDescription = isPalmReadyTest
+      ? "New scanner/upload page. User must save a palm image before continuing."
+      : "Sketch-focused onboarding + compatibility on upsell";
+    const orderedFlowTitle = isPalmReadyTest
+      ? "Ordered Funnel Flow (Palm Ready -> Checkout)"
+      : "Ordered Funnel Flow (Welcome -> Pre-Dashboard)";
+    const orderedFlowDescription = isPalmReadyTest
+      ? "Palm test flow is shown by real tracked routes. The first step is the shared ready URL, rendered as either the classic page or scan page."
+      : "Routes are shown in exact funnel order for each variant. Drop-off is estimated from visitors who did not continue to the next step.";
 
     const formatDateTime = (value: string) => {
       if (!value) return "—";
@@ -1134,6 +1153,7 @@ export default function ABTestsPage() {
           )}
 
           {/* Layout B Funnel Controls */}
+          {!isPalmReadyTest && (
           <div className="bg-card/50 backdrop-blur-sm border border-border rounded-xl p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Layout B Funnel Controls</h2>
@@ -1178,6 +1198,7 @@ export default function ABTestsPage() {
             </div>
 
           </div>
+          )}
 
           {/* Traffic Split */}
           <div className="bg-card/50 backdrop-blur-sm border border-border rounded-xl p-6 mb-6">
@@ -1204,7 +1225,7 @@ export default function ABTestsPage() {
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
                   <div className="flex-1">
-                    <label className="text-sm text-muted-foreground mb-1 block">Variant A (Current)</label>
+                    <label className="text-sm text-muted-foreground mb-1 block">{isPalmReadyTest ? "Variant A (Classic Ready)" : "Variant A (Current)"}</label>
                     <input
                       type="number"
                       min="0"
@@ -1219,7 +1240,7 @@ export default function ABTestsPage() {
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="text-sm text-muted-foreground mb-1 block">Variant B (New Plans)</label>
+                    <label className="text-sm text-muted-foreground mb-1 block">{isPalmReadyTest ? "Variant B (Palm Scan)" : "Variant B (New Plans)"}</label>
                     <input
                       type="number"
                       min="0"
@@ -1246,9 +1267,9 @@ export default function ABTestsPage() {
                     <span className="text-2xl font-bold text-blue-400">{test.variants?.A?.weight ?? 50}%</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Layout A route: {test.variants?.A?.page || "bundle-pricing"}
+                    {variantARouteLabel}: {test.variants?.A?.page || (isPalmReadyTest ? "ready-classic" : "bundle-pricing")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Current baseline onboarding/paywall experience</p>
+                  <p className="text-xs text-muted-foreground mt-1">{variantADescription}</p>
                 </div>
                 <div className="flex-1 bg-purple-500/10 border border-purple-500/30 rounded-lg p-4">
                   <div className="flex items-center justify-between mb-2">
@@ -1256,9 +1277,9 @@ export default function ABTestsPage() {
                     <span className="text-2xl font-bold text-purple-400">{test.variants?.B?.weight ?? 50}%</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Layout B route: {test.variants?.B?.page || "bundle-pricing-b"}
+                    {variantBRouteLabel}: {test.variants?.B?.page || (isPalmReadyTest ? "ready-scan" : "bundle-pricing-b")}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-1">Sketch-focused onboarding + compatibility on upsell</p>
+                  <p className="text-xs text-muted-foreground mt-1">{variantBDescription}</p>
                 </div>
               </div>
             )}
@@ -1268,7 +1289,7 @@ export default function ABTestsPage() {
           <div className="mb-6">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-blue-500" />
-              Variant A - Current Plans
+              {variantALabel}
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatCard
@@ -1308,7 +1329,7 @@ export default function ABTestsPage() {
           <div className="mb-6">
             <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-purple-500" />
-              Variant B - New Plans
+              {variantBLabel}
             </h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <StatCard
@@ -1406,7 +1427,7 @@ export default function ABTestsPage() {
             <h2 className="text-lg font-semibold mb-4">Funnel Decision Summary</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
-                <p className="text-sm font-semibold text-blue-300 mb-3">Variant A (Layout A)</p>
+                <p className="text-sm font-semibold text-blue-300 mb-3">{isPalmReadyTest ? "Variant A (Classic Ready)" : "Variant A (Layout A)"}</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Assigned</p>
@@ -1436,7 +1457,7 @@ export default function ABTestsPage() {
               </div>
 
               <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
-                <p className="text-sm font-semibold text-purple-300 mb-3">Variant B (Layout B)</p>
+                <p className="text-sm font-semibold text-purple-300 mb-3">{isPalmReadyTest ? "Variant B (Palm Scan)" : "Variant B (Layout B)"}</p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Assigned</p>
@@ -1470,7 +1491,7 @@ export default function ABTestsPage() {
           {/* Ordered Funnel Flow */}
           <div className="bg-card/50 backdrop-blur-sm border border-border rounded-xl p-6 mb-6">
             <div className="flex items-center justify-between gap-3 mb-2">
-              <h2 className="text-lg font-semibold">Ordered Funnel Flow (Welcome → Pre-Dashboard)</h2>
+              <h2 className="text-lg font-semibold">{orderedFlowTitle}</h2>
               <Button
                 variant="outline"
                 size="sm"
@@ -1480,7 +1501,7 @@ export default function ABTestsPage() {
               </Button>
             </div>
             <p className="text-sm text-muted-foreground mb-4">
-              Routes are shown in exact funnel order for each variant. Drop-off is estimated from visitors who did not continue to the next step.
+              {orderedFlowDescription}
             </p>
             <div className={expandOrderedFlow ? "grid grid-cols-1 gap-6" : "grid grid-cols-1 lg:grid-cols-2 gap-6"}>
               {([

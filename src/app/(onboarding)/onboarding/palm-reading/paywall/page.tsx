@@ -15,6 +15,30 @@ import { CouponCodeLink } from "@/components/onboarding/CouponCodeLink";
 import { OnboardingMenuButton } from "@/components/onboarding/OnboardingMenuButton";
 
 const INTRO_SECONDS = 12 * 60 + 45;
+const PALM_READY_TEST_ID = "palm-reading-ready-scan";
+
+function trackPalmReadyCheckoutStarted(userId: string, placement: string) {
+  const variant = localStorage.getItem("palmcosmic_palm_ready_variant");
+  if (variant !== "A" && variant !== "B") return;
+
+  fetch("/api/ab-test/event", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      testId: PALM_READY_TEST_ID,
+      variant,
+      eventType: "checkout_started",
+      visitorId: userId,
+      userId,
+      metadata: {
+        route: "/onboarding/palm-reading/paywall",
+        funnel: "palm_reading",
+        source_route: "/onboarding/palm-reading/ready",
+        placement,
+      },
+    }),
+  }).catch(() => undefined);
+}
 
 const legalLine = (
   <>
@@ -121,11 +145,18 @@ export default function PalmReadingPaywallPage() {
       const userId = localStorage.getItem("astrorekha_user_id") || generateUserId();
       localStorage.setItem("astrorekha_user_id", userId);
 
+      if (localStorage.getItem("palmcosmic_palm_image_saved") !== "true") {
+        router.push("/onboarding/palm-reading/ready");
+        return;
+      }
+
       const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
       if (!email) {
         router.push("/onboarding/palm-reading/email");
         return;
       }
+
+      trackPalmReadyCheckoutStarted(userId, placement);
 
       const demoPayment = await runDemoPaymentBypass({ flow: "palm_reading", email, userId });
       if (demoPayment.bypassed) {

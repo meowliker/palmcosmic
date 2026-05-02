@@ -11,13 +11,15 @@ import type { PalmReadingImageScreen } from "./palmReadingFlow";
 
 interface PalmReadingImagePageProps {
   screen: PalmReadingImageScreen;
+  onContinue?: () => void;
 }
 
-export function PalmReadingImagePage({ screen }: PalmReadingImagePageProps) {
+export function PalmReadingImagePage({ screen, onContinue }: PalmReadingImagePageProps) {
   const router = useRouter();
   const isPalmArtwork = screen.imageSrc?.startsWith("/palm-reading-");
 
   const handleContinue = () => {
+    onContinue?.();
     trackFunnelAction("palm_reading_continue_clicked", {
       funnel: "palm_reading",
       step_id: screen.id,

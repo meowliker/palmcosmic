@@ -17,10 +17,11 @@ async function resolveDefaultTestId(supabase: ReturnType<typeof getSupabaseAdmin
 
 async function ensureTestRowExists(supabase: ReturnType<typeof getSupabaseAdmin>, testId: string) {
   const now = new Date().toISOString();
+  const isPalmReadyTest = testId.startsWith("palm-reading-ready");
   const { error } = await supabase.from("ab_tests").upsert(
     {
       id: testId,
-      name: "Onboarding Layout A/B (QA)",
+      name: isPalmReadyTest ? "Palm Reading Ready Scan A/B" : "Onboarding Layout A/B (QA)",
       status: "active",
       traffic_split: 0.5,
       updated_at: now,

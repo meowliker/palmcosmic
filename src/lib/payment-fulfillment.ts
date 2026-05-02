@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { getStripeClient } from "@/lib/stripe";
 import { randomUUID } from "crypto";
 import { sendMetaConversionEvent } from "@/lib/meta-conversions";
+import { generatePalmReadingForUser } from "@/lib/palm-reading-generation";
 import {
   activateExtraReportPurchase,
   activateTrialPrimaryEntitlements,
@@ -490,7 +491,11 @@ function subscriptionUnix(subscription: Stripe.Subscription, key: string): numbe
   return typeof fromItem === "number" ? fromItem : null;
 }
 
-async function fulfillSubscriptionTrialSession(session: Stripe.Checkout.Session, metadata: Record<string, string>) {
+async function fulfillSubscriptionTrialSession(
+  session: Stripe.Checkout.Session,
+  metadata: Record<string, string>,
+  options: { generateReports?: boolean } = {}
+) {
   const supabase = getSupabaseAdmin();
   const stripeSubscriptionId =
     typeof session.subscription === "string"
@@ -595,6 +600,14 @@ async function fulfillSubscriptionTrialSession(session: Stripe.Checkout.Session,
       trial_end: trialEndsAt.toISOString(),
     },
   });
+
+  if (options.generateReports !== false && reportKey === "palm_reading") {
+    try {
+      await generatePalmReadingForUser(userId);
+    } catch (error) {
+      console.error("[palm-reading] post-payment generation failed:", error);
+    }
+  }
 }
 
 async function upsertPaidPaymentRecord(input: StripeFulfillmentInput, nowIso: string) {
@@ -830,10 +843,13 @@ export async function reconcilePaidPaymentsForRegistration(params: {
   return { linkedRows, fulfilledRows };
 }
 
-export async function fulfillStripeSession(session: Stripe.Checkout.Session): Promise<void> {
+export async function fulfillStripeSession(
+  session: Stripe.Checkout.Session,
+  options: { generateReports?: boolean } = {}
+): Promise<void> {
   const metadata = (session.metadata || {}) as Record<string, string>;
   if (isSubscriptionTrialSession(session, metadata)) {
-    await fulfillSubscriptionTrialSession(session, metadata);
+    await fulfillSubscriptionTrialSession(session, metadata, options);
     return;
   }
 

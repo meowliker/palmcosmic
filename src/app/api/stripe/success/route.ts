@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
   try {
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.retrieve(sessionId);
-    await fulfillStripeSession(session);
+    await fulfillStripeSession(session, { generateReports: false });
 
     const redirectTo = appendParam(appendParam(next, "session_id", sessionId), "payment", "success");
     return NextResponse.redirect(new URL(redirectTo, request.url));

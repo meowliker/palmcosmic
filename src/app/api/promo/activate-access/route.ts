@@ -5,6 +5,7 @@ import {
   FLOW_PRIMARY_REPORTS,
   type FlowKey,
 } from "@/lib/report-entitlements";
+import { generatePalmReadingForUser } from "@/lib/palm-reading-generation";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -174,6 +175,14 @@ export async function POST(request: NextRequest) {
           last_used_at: nowIso,
         })
         .eq("code", promo.id);
+    }
+
+    if (flow === "palm_reading") {
+      try {
+        await generatePalmReadingForUser(userId);
+      } catch (error) {
+        console.error("[promo/activate-access] Palm reading generation failed:", error);
+      }
     }
 
     return NextResponse.json({

@@ -5,6 +5,8 @@ import { DEFAULT_LAYOUT_B_CONFIG, normalizeLayoutBConfig } from "@/lib/layout-b-
 // Admin API for managing A/B tests
 const SETTINGS_KEY = "funnel_layout_b_config";
 const DEFAULT_ONBOARDING_TEST_ID = DEFAULT_LAYOUT_B_CONFIG.testId;
+const PALM_READY_TEST_ID = "palm-reading-ready-scan";
+const PALM_READY_TEST_NAME = "Palm Reading Ready Scan A/B";
 const SUCCESS_PAYMENT_STATUSES = new Set(["paid", "success", "captured"]);
 
 type VariantKey = "A" | "B";
@@ -364,7 +366,10 @@ function getTestVariants(row: Record<string, any> | null | undefined, defaults: 
 
 function normalizeTestForResponse(row: Record<string, any> | null | undefined, testId: string) {
   const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
-  const defaults = isOnboardingLayoutTest
+  const isPalmReadyTest = testId.startsWith("palm-reading-ready");
+  const defaults = isPalmReadyTest
+    ? { pageA: "ready-classic", pageB: "ready-scan" }
+    : isOnboardingLayoutTest
     ? { pageA: "bundle-pricing", pageB: "bundle-pricing-b" }
     : { pageA: "step-17", pageB: "a-step-17" };
   const variants = getTestVariants(row, defaults);
@@ -374,7 +379,7 @@ function normalizeTestForResponse(row: Record<string, any> | null | undefined, t
 
   return {
     id: testId,
-    name: row?.name || (isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test"),
+    name: row?.name || (isPalmReadyTest ? PALM_READY_TEST_NAME : isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test"),
     status: row?.status || "active",
     variants,
     traffic_split: trafficSplit,
@@ -534,7 +539,15 @@ export async function GET(request: NextRequest) {
           : null;
 
       const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
-      const pricingRoutes: Record<VariantKey, string> = isOnboardingLayoutTest
+      const isPalmReadyTest = testId.startsWith("palm-reading-ready");
+      const palmReadyRoute = "/onboarding/palm-reading/ready";
+      const palmPaywallRoute = "/onboarding/palm-reading/paywall";
+      const pricingRoutes: Record<VariantKey, string> = isPalmReadyTest
+        ? {
+            A: palmReadyRoute,
+            B: palmReadyRoute,
+          }
+        : isOnboardingLayoutTest
         ? {
             A: "/onboarding/bundle-pricing",
             B: "/onboarding/bundle-pricing",
@@ -548,7 +561,12 @@ export async function GET(request: NextRequest) {
             ),
           };
 
-      const upsellRoutes: Record<VariantKey, string> = isOnboardingLayoutTest
+      const upsellRoutes: Record<VariantKey, string> = isPalmReadyTest
+        ? {
+            A: palmPaywallRoute,
+            B: palmPaywallRoute,
+          }
+        : isOnboardingLayoutTest
         ? {
             A: "/onboarding/bundle-upsell",
             B: "/onboarding/bundle-upsell-b",
@@ -651,8 +669,14 @@ export async function GET(request: NextRequest) {
           }
         } else if (eventType === "checkout_started") {
           acc.checkoutsStarted += 1;
+          if (isPalmReadyTest && visitorId) {
+            ensureRouteImpressionVisitorSet(variant, route).add(visitorId);
+          }
         } else if (eventType === "conversion") {
           acc.trackedBundleConversions += 1;
+          if (isPalmReadyTest && visitorId) {
+            ensureRouteImpressionVisitorSet(variant, route).add(visitorId);
+          }
           const eventMeta = evt?.metadata ?? evt?.event_data ?? evt?.data ?? {};
           acc.trackedRevenueInr += toInrAmount(eventMeta?.amount, "INR");
         } else if (eventType === "bounce") {
@@ -859,7 +883,11 @@ export async function GET(request: NextRequest) {
 
       const buildWindowStats = (variant: VariantKey) => {
         const rows = Array.from(routeAccumulators[variant].values());
-        const impressions = rows.reduce((sum, row) => sum + row.impressions, 0);
+        const rawImpressions = rows.reduce((sum, row) => sum + row.impressions, 0);
+        const readyAudience = routeImpressionVisitorSets[variant].get(palmReadyRoute)?.size || 0;
+        const impressions = isPalmReadyTest
+          ? Math.max(readyAudience, assignmentsByVariant[variant])
+          : rawImpressions;
         const bounces = rows.reduce((sum, row) => sum + row.bounces, 0);
         const checkoutsStarted = rows.reduce((sum, row) => sum + row.checkoutsStarted, 0);
         const paidOrders = rows.reduce((sum, row) => sum + row.paidOrders, 0);
@@ -907,7 +935,10 @@ export async function GET(request: NextRequest) {
         });
 
         return routes.map((row) => {
-          const impressions = row.impressions;
+          const routeAudienceFromImpressions = routeImpressionVisitorSets[variant].get(row.route)?.size || 0;
+          const impressions = isPalmReadyTest
+            ? Math.max(routeAudienceFromImpressions, row.impressions > 0 && row.visitorIds.size === 0 ? row.impressions : 0)
+            : row.impressions;
           const checkoutRate = impressions > 0 ? (row.checkoutsStarted / impressions) * 100 : 0;
           const conversionRate = impressions > 0 ? (row.trackedBundleConversions / impressions) * 100 : 0;
           const bounceRate = impressions > 0 ? (row.bounces / impressions) * 100 : 0;
@@ -916,7 +947,6 @@ export async function GET(request: NextRequest) {
             : 0;
           const upsellAttachRate = row.paidOrders > 0 ? (row.upsellOrders / row.paidOrders) * 100 : 0;
 
-          const routeAudienceFromImpressions = routeImpressionVisitorSets[variant].get(row.route)?.size || 0;
           return {
             route: row.route,
             assignedUsers: assignmentsByVariant[variant],
@@ -975,7 +1005,9 @@ export async function GET(request: NextRequest) {
         (acc, variant) => {
           const flowRoutes = isOnboardingLayoutTest
             ? ONBOARDING_FLOW_ROUTES[variant]
-            : [pricingRoutes[variant], upsellRoutes[variant]];
+            : isPalmReadyTest
+              ? [palmReadyRoute, palmPaywallRoute]
+              : [pricingRoutes[variant], upsellRoutes[variant]];
 
           const rows: FunnelFlowStepRow[] = [];
           let previousContinued = 0;
@@ -988,7 +1020,10 @@ export async function GET(request: NextRequest) {
             const nextVisitorSet = nextRoute
               ? routeImpressionVisitorSets[variant].get(canonicalizeTrackedRoute(nextRoute)) || new Set<string>()
               : new Set<string>();
-            const impressionCount = routeImpressionCounts[variant].get(canonicalRoute) || routeRow?.impressions || 0;
+            const rawImpressionCount = routeImpressionCounts[variant].get(canonicalRoute) || routeRow?.impressions || 0;
+            const impressionCount = isPalmReadyTest
+              ? Math.max(visitorSet.size, rawImpressionCount > 0 && visitorSet.size === 0 ? rawImpressionCount : 0)
+              : rawImpressionCount;
 
             // Use unique audience (not raw impression count) to avoid inflated late-step audiences.
             const rawAudience = routeRow?.uniqueAudience || visitorSet.size || impressionCount || 0;
@@ -1098,6 +1133,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Get all tests
+    await supabase.from("ab_tests").upsert({
+      id: PALM_READY_TEST_ID,
+      name: PALM_READY_TEST_NAME,
+      status: "active",
+      traffic_split: 0.5,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "id", ignoreDuplicates: true });
+
     const { data: allTests } = await supabase.from("ab_tests").select("*");
     const hydratedTests = [...(allTests || [])];
     if (!hydratedTests.some((test) => test.id === onboardingTestId)) {
