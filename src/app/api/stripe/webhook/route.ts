@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import { getStripeClient } from "@/lib/stripe";
+import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { fulfillStripePayment, fulfillStripeSession, markStripePaymentStatus } from "@/lib/payment-fulfillment";
 import {
   activateSubscriptionAllReports,
@@ -63,10 +64,55 @@ async function handleSubscriptionInvoiceSucceeded(invoice: Stripe.Invoice) {
   const isMonthlyRenewal = amountPaid >= 900 && subscription.status === "active";
   if (!isMonthlyRenewal) return;
 
+  const nowIso = new Date().toISOString();
+  const paidAt = dateFromUnix((invoice.status_transitions as any)?.paid_at) || dateFromUnix(invoice.created) || new Date();
+  const stripeCustomerId = typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id || null;
+  const paymentIntent = (invoice as any).payment_intent;
+  const stripePaymentIntentId =
+    typeof paymentIntent === "string"
+      ? paymentIntent
+      : paymentIntent && typeof paymentIntent === "object" && typeof paymentIntent.id === "string"
+        ? paymentIntent.id
+        : null;
+  const email = metadata.email || invoice.customer_email || null;
+  const renewalMetadata = {
+    ...metadata,
+    type: "subscription_renewal",
+    billingKind: "subscription_renewal",
+    reportKey: "all_reports",
+    stripeInvoiceId: invoice.id,
+  };
+
+  const supabase = getSupabaseAdmin();
+  const { error: paymentError } = await supabase.from("payments").upsert({
+    id: `invoice_${invoice.id}`,
+    user_id: userId,
+    type: "subscription_renewal",
+    bundle_id: null,
+    feature: null,
+    coins: null,
+    customer_email: email,
+    amount: amountPaid,
+    currency: (invoice.currency || "usd").toUpperCase(),
+    payment_status: "paid",
+    fulfilled_at: paidAt.toISOString(),
+    created_at: paidAt.toISOString(),
+    updated_at: nowIso,
+    stripe_session_id: null,
+    stripe_payment_intent_id: stripePaymentIntentId,
+    stripe_customer_id: stripeCustomerId,
+    stripe_subscription_id: subscription.id,
+    report_key: "all_reports",
+    billing_kind: "subscription_renewal",
+    metadata: renewalMetadata,
+  }, { onConflict: "id" });
+
+  if (paymentError) throw paymentError;
+
   await activateSubscriptionAllReports({
     userId,
-    email: metadata.email || invoice.customer_email || null,
-    stripeCustomerId: typeof subscription.customer === "string" ? subscription.customer : subscription.customer?.id || null,
+    email,
+    stripeCustomerId,
     stripeSubscriptionId: subscription.id,
     currentPeriodStart: dateFromUnix(subscriptionUnix(subscription, "current_period_start")),
     currentPeriodEnd: dateFromUnix(subscriptionUnix(subscription, "current_period_end")),

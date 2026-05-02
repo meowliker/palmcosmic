@@ -269,6 +269,12 @@ interface AnalyticsData {
 
 interface RevenueData {
   currency: string;
+  source?: string;
+  dayMode?: string;
+  stripeBusinessDay?: {
+    startTimeIst: string;
+    today: string;
+  };
   totalRevenue: string;
   grossRevenue?: string;
   refundAmount?: string;
@@ -278,13 +284,11 @@ interface RevenueData {
   revenueThisYear: string;
   revenueLastMonth: string;
   momGrowth: string;
+  averageOrderValue?: string;
   revenueByType: { bundle: number; upsell: number; coins: number; report: number };
-  bundleBreakdown: {
-    "palm-reading": { count: number; revenue: number };
-    "palm-birth": { count: number; revenue: number };
-    "palm-birth-compat": { count: number; revenue: number };
-    "palm-birth-sketch": { count: number; revenue: number };
-  };
+  categoryBreakdown?: { id: string; label: string; count: number; revenue: number }[];
+  productBreakdown?: { id: string; label: string; count: number; revenue: number }[];
+  bundleBreakdown: Record<string, { count: number; revenue: number }>;
   arpu: string;
   totalPayments: number;
   successfulPayments: number;
@@ -300,8 +304,15 @@ interface RevenueData {
     userName: string;
     amount: number;
     bundleId: string;
+    productId?: string;
+    productLabel?: string;
     type: string;
+    typeLabel?: string;
     status: string;
+    stripeSessionId?: string;
+    stripePaymentIntentId?: string;
+    stripeSubscriptionId?: string;
+    currency?: string;
   }[];
   totalUsers: number;
   uniquePayingUsers: number;
@@ -315,7 +326,10 @@ interface RevenueData {
     userName: string;
     amount: number;
     bundleId: string;
+    productId?: string;
+    productLabel?: string;
     type: string;
+    typeLabel?: string;
     status: string;
   }[];
   customDateRange?: { start: string; end: string };
@@ -596,9 +610,7 @@ export default function AdminRevenuePage() {
   const [filterDateRange, setFilterDateRange] = useState<string>("all");
 
   // Date picker with time and timezone
-  const [selectedStartDate, setSelectedStartDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const [selectedStartDate, setSelectedStartDate] = useState<string>(REVENUE_DEFAULT_START_DATE);
   const [selectedEndDate, setSelectedEndDate] = useState<string>(
     new Date().toISOString().split("T")[0]
   );
@@ -606,7 +618,6 @@ export default function AdminRevenuePage() {
   const [selectedEndTime, setSelectedEndTime] = useState<string>("11:30");
   const [selectedTimezone, setSelectedTimezone] = useState<string>("ist");
   const [dateLoading, setDateLoading] = useState(false);
-  const [usePayU] = useState<boolean>(false); // Stripe/Supabase is the current PalmCosmic source of truth.
 
   // Sorting
   const [sortField, setSortField] = useState<string>("date");
@@ -709,18 +720,11 @@ export default function AdminRevenuePage() {
         return;
       }
 
-      let url: string;
-      if (usePayU) {
-        url = `/api/admin/revenue-payu?token=${token}&_t=${Date.now()}`;
+      let url = `/api/admin/revenue?token=${token}&_t=${Date.now()}`;
+      if (selectedStartDate) {
         url += `&startDate=${selectedStartDate}&endDate=${selectedEndDate}`;
         url += `&startTime=${selectedStartTime}&endTime=${selectedEndTime}`;
         url += `&timezone=${selectedTimezone}`;
-      } else {
-        url = `/api/admin/revenue?token=${token}&_t=${Date.now()}`;
-        if (selectedStartDate) {
-          url += `&startDate=${selectedStartDate}&endDate=${selectedEndDate}`;
-          url += `&startTime=${selectedStartTime}&endTime=${selectedEndTime}`;
-        }
       }
       const response = await fetch(url, { cache: "no-store" });
 
@@ -907,7 +911,7 @@ export default function AdminRevenuePage() {
   useEffect(() => {
     fetchData();
     fetchMetaAds();
-  }, [router, selectedStartDate, selectedEndDate, selectedStartTime, selectedEndTime, selectedTimezone, usePayU]);
+  }, [router, selectedStartDate, selectedEndDate, selectedStartTime, selectedEndTime, selectedTimezone]);
 
   useEffect(() => {
     fetchMetaAds(metaDatePreset);
@@ -996,7 +1000,7 @@ export default function AdminRevenuePage() {
       filtered = filtered.filter((tx) => tx.type === filterType);
     }
     if (filterBundle !== "all") {
-      filtered = filtered.filter((tx) => tx.bundleId === filterBundle);
+      filtered = filtered.filter((tx) => (tx.productId || tx.bundleId) === filterBundle);
     }
     if (filterStatus !== "all") {
       filtered = filtered.filter((tx) => tx.status === filterStatus);
@@ -1067,14 +1071,16 @@ export default function AdminRevenuePage() {
 
   const maxRevenue = Math.max(...(data.revenueOverTime || []).map((d) => d.revenue), 1);
 
-  // Bundle breakdown
-  const bb = data.bundleBreakdown || { "palm-reading": { count: 0, revenue: 0 }, "palm-birth": { count: 0, revenue: 0 }, "palm-birth-compat": { count: 0, revenue: 0 }, "palm-birth-sketch": { count: 0, revenue: 0 } };
-  const totalBundleRevenue = bb["palm-reading"].revenue + bb["palm-birth"].revenue + bb["palm-birth-compat"].revenue + bb["palm-birth-sketch"].revenue;
-  const totalBundleCount = bb["palm-reading"].count + bb["palm-birth"].count + bb["palm-birth-compat"].count + bb["palm-birth-sketch"].count;
-
-  // Revenue by type
-  const rbt = data.revenueByType || { bundle: 0, upsell: 0, coins: 0, report: 0 };
-  const totalTypeRevenue = rbt.bundle + rbt.upsell + rbt.coins + rbt.report;
+  const productBreakdown = data.productBreakdown || Object.entries(data.bundleBreakdown || {}).map(([id, value]) => ({
+    id,
+    label: id.replace(/[-_]/g, " ").replace(/\b\w/g, (char) => char.toUpperCase()),
+    count: value.count,
+    revenue: value.revenue,
+  }));
+  const categoryBreakdown = data.categoryBreakdown || [];
+  const totalProductRevenue = productBreakdown.reduce((sum, product) => sum + product.revenue, 0);
+  const totalProductCount = productBreakdown.reduce((sum, product) => sum + product.count, 0);
+  const totalCategoryRevenue = categoryBreakdown.reduce((sum, category) => sum + category.revenue, 0);
 
   return (
     <div className="min-h-screen bg-[#0A0E1A] pb-24">
@@ -1228,24 +1234,22 @@ export default function AdminRevenuePage() {
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
                 >
                   <option value="all">All Types</option>
-                  <option value="bundle">Bundle</option>
-                  <option value="upsell">Upsell</option>
-                  <option value="coins">Coins</option>
-                  <option value="report">Report</option>
+                  {categoryBreakdown.map((category) => (
+                    <option key={category.id} value={category.id}>{category.label}</option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className="text-white/50 text-xs mb-2 block">Bundle</label>
+                <label className="text-white/50 text-xs mb-2 block">Product / Report</label>
                 <select
                   value={filterBundle}
                   onChange={(e) => setFilterBundle(e.target.value)}
                   className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
                 >
-                  <option value="all">All Bundles</option>
-                  <option value="palm-reading">Palm Reading</option>
-                  <option value="palm-birth">Palm + Birth Chart</option>
-                  <option value="palm-birth-compat">Palm + Birth + Compatibility + Future Partner</option>
-                  <option value="palm-birth-sketch">Palm + Birth + Soulmate Sketch + Future Partner</option>
+                  <option value="all">All Products</option>
+                  {productBreakdown.map((product) => (
+                    <option key={product.id} value={product.id}>{product.label}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -1308,34 +1312,34 @@ export default function AdminRevenuePage() {
             <KPICard
               title="Total Revenue"
               value={formatCurrency(data.totalRevenue)}
-              subtitle="All time"
+              subtitle="Net after refunds"
               icon={<CreditCard className="w-4 h-4" />}
               color="text-green-400"
-              tooltip="Total revenue from all paid Stripe/Supabase payments."
+              tooltip="Net USD revenue from Stripe/Supabase payments, after refunds."
+            />
+            <KPICard
+              title="AOV"
+              value={formatCurrency(data.averageOrderValue || 0)}
+              subtitle="Avg order value"
+              icon={<Users className="w-4 h-4" />}
+              color="text-purple-400"
+              tooltip="Average successful Stripe order value before refunds."
             />
             <KPICard
               title="ARPU"
               value={formatCurrency(data.arpu)}
-              subtitle="Avg Revenue Per User"
-              icon={<Users className="w-4 h-4" />}
-              color="text-purple-400"
-              tooltip="Average Revenue Per User: Total revenue divided by unique paying users."
-            />
-            <KPICard
-              title="MoM Growth"
-              value={data.momGrowth === "N/A" ? "N/A" : `${data.momGrowth}%`}
-              subtitle="vs last month"
-              icon={parseFloat(data.momGrowth) >= 0 ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
-              color={data.momGrowth === "N/A" ? "text-white/50" : parseFloat(data.momGrowth) >= 0 ? "text-green-400" : "text-red-400"}
-              tooltip="Month-over-Month Growth: Percentage change in revenue compared to the previous month."
-            />
-            <KPICard
-              title="Paying Users"
-              value={data.uniquePayingUsers.toString()}
-              subtitle={`of ${data.totalUsers} total`}
+              subtitle="Avg per paying user"
               icon={<Users className="w-4 h-4" />}
               color="text-blue-400"
-              tooltip="Number of unique users who have made at least one payment."
+              tooltip="Net revenue divided by unique paying users."
+            />
+            <KPICard
+              title="Paid Orders"
+              value={(data.successfulPayments || 0).toString()}
+              subtitle={`${data.uniquePayingUsers} paying users`}
+              icon={<CheckCircle className="w-4 h-4" />}
+              color="text-green-400"
+              tooltip="Successful Stripe/Supabase sale rows."
             />
           </div>
         </section>
@@ -1420,8 +1424,8 @@ export default function AdminRevenuePage() {
                   const today = new Date().toISOString().split("T")[0];
                   setSelectedStartDate(today);
                   setSelectedEndDate(today);
-                  setSelectedStartTime("00:00");
-                  setSelectedEndTime("23:59");
+                  setSelectedStartTime("11:30");
+                  setSelectedEndTime("11:30");
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
               >
@@ -1434,8 +1438,8 @@ export default function AdminRevenuePage() {
                   yesterday.setDate(yesterday.getDate() - 1);
                   setSelectedStartDate(yesterday.toISOString().split("T")[0]);
                   setSelectedEndDate(yesterday.toISOString().split("T")[0]);
-                  setSelectedStartTime("00:00");
-                  setSelectedEndTime("23:59");
+                  setSelectedStartTime("11:30");
+                  setSelectedEndTime("11:30");
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
               >
@@ -1448,8 +1452,8 @@ export default function AdminRevenuePage() {
                   weekAgo.setDate(weekAgo.getDate() - 7);
                   setSelectedStartDate(weekAgo.toISOString().split("T")[0]);
                   setSelectedEndDate(today.toISOString().split("T")[0]);
-                  setSelectedStartTime("00:00");
-                  setSelectedEndTime("23:59");
+                  setSelectedStartTime("11:30");
+                  setSelectedEndTime("11:30");
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
               >
@@ -1459,8 +1463,8 @@ export default function AdminRevenuePage() {
                 onClick={() => {
                   setSelectedStartDate(REVENUE_DEFAULT_START_DATE);
                   setSelectedEndDate(new Date().toISOString().split("T")[0]);
-                  setSelectedStartTime("00:00");
-                  setSelectedEndTime("23:59");
+                  setSelectedStartTime("11:30");
+                  setSelectedEndTime("11:30");
                 }}
                 className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
               >
@@ -1473,9 +1477,16 @@ export default function AdminRevenuePage() {
           {selectedTimezone === "costa_rica" && (
             <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
               <p className="text-blue-400 text-xs">
-                📍 Times are in Costa Rica timezone (UTC-6). IST is 11.5 hours ahead.
+                Times are in Costa Rica timezone (UTC-6). IST is 11.5 hours ahead.
                 <br />
                 Example: 11:30 AM Costa Rica = 11:00 PM IST (same day) → 12:00 AM IST (next day)
+              </p>
+            </div>
+          )}
+          {selectedTimezone === "ist" && (
+            <div className="mt-3 p-2 bg-sky-500/10 border border-sky-500/20 rounded-lg">
+              <p className="text-sky-300 text-xs">
+                Stripe business day is 11:30 AM IST to next day 11:29 AM IST. With 11:30 selected, the end date is included as a full Stripe business day.
               </p>
             </div>
           )}
@@ -1506,9 +1517,9 @@ export default function AdminRevenuePage() {
               <p className="text-white/40 text-xs mt-1">{selectedDatePaymentCount} payments</p>
               <p className="text-white/30 text-xs mt-1">{selectedStartDate} to {selectedEndDate}</p>
             </div>
-            <MetricCard title="This Week" value={formatCurrency(data.revenueThisWeek)} tooltip="Revenue generated this week (Sunday to today)." />
-            <MetricCard title="This Month" value={formatCurrency(data.revenueThisMonth)} tooltip="Revenue generated this month (1st to today)." />
-            <MetricCard title="This Year" value={formatCurrency(data.revenueThisYear)} tooltip="Revenue generated this year (Jan 1st to today)." />
+            <MetricCard title="This Week" value={formatCurrency(data.revenueThisWeek)} tooltip="Revenue generated in the last 7 Stripe business days." />
+            <MetricCard title="This Month" value={formatCurrency(data.revenueThisMonth)} tooltip="Revenue generated this Stripe business month." />
+            <MetricCard title="This Year" value={formatCurrency(data.revenueThisYear)} tooltip="Revenue generated this Stripe business year." />
           </div>
 
           {/* Transactions for selected date */}
@@ -1532,7 +1543,7 @@ export default function AdminRevenuePage() {
                       <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Time</th>
                       <th className="text-left text-white/50 text-xs font-medium px-4 py-2">User</th>
                       <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Type</th>
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Bundle</th>
+                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Product</th>
                       <th className="text-right text-white/50 text-xs font-medium px-4 py-2">Amount</th>
                     </tr>
                   </thead>
@@ -1544,8 +1555,8 @@ export default function AdminRevenuePage() {
                           <p className="text-white/80 text-sm">{tx.userName !== "Unknown" ? tx.userName : tx.userEmail?.split("@")[0] || "Unknown"}</p>
                           <p className="text-white/40 text-xs">{tx.userEmail}</p>
                         </td>
-                        <td className="text-white/70 text-sm px-4 py-2 capitalize">{tx.type || "bundle"}</td>
-                        <td className="text-white/70 text-sm px-4 py-2 capitalize">{(tx.bundleId || "-").replace(/-/g, " ")}</td>
+                        <td className="text-white/70 text-sm px-4 py-2">{tx.typeLabel || tx.type || "Order"}</td>
+                        <td className="text-white/70 text-sm px-4 py-2">{tx.productLabel || (tx.bundleId || "-").replace(/-/g, " ")}</td>
                         <td className="text-white text-sm px-4 py-2 text-right font-medium">{formatCurrency(tx.amount || 0)}</td>
                       </tr>
                     ))}
@@ -1574,56 +1585,71 @@ export default function AdminRevenuePage() {
           onCustomDateRefresh={(startDate, endDate) => fetchMetaAds(undefined, startDate, endDate)}
         />
 
-        {/* Bundle Breakdown */}
+        {/* Product Breakdown */}
         <section>
           <h2 className="text-white/70 text-sm font-medium mb-3 flex items-center gap-2">
-            <Package className="w-4 h-4" /> Bundle Breakdown
+            <Package className="w-4 h-4" /> Product & Order Breakdown
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Revenue by Bundle */}
             <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
-              <h3 className="text-white/60 text-xs mb-3">Revenue by Bundle</h3>
+              <h3 className="text-white/60 text-xs mb-3">Revenue by Product / Report</h3>
               <div className="space-y-3">
-                <PlanBar label="Palm Reading" value={bb["palm-reading"].revenue} total={totalBundleRevenue} color="bg-amber-500" count={bb["palm-reading"].count} />
-                <PlanBar label="Palm + Birth Chart" value={bb["palm-birth"].revenue} total={totalBundleRevenue} color="bg-purple-500" count={bb["palm-birth"].count} />
-                <PlanBar label="Palm + Birth + Compatibility + Future Partner" value={bb["palm-birth-compat"].revenue} total={totalBundleRevenue} color="bg-green-500" count={bb["palm-birth-compat"].count} />
-                <PlanBar label="Palm + Birth + Soulmate Sketch + Future Partner" value={bb["palm-birth-sketch"].revenue} total={totalBundleRevenue} color="bg-pink-500" count={bb["palm-birth-sketch"].count} />
+                {productBreakdown.slice(0, 8).map((product, index) => (
+                  <PlanBar
+                    key={product.id}
+                    label={product.label}
+                    value={product.revenue}
+                    total={totalProductRevenue}
+                    color={["bg-amber-500", "bg-purple-500", "bg-green-500", "bg-pink-500", "bg-cyan-500", "bg-indigo-500", "bg-rose-500", "bg-emerald-500"][index % 8]}
+                    count={product.count}
+                  />
+                ))}
+                {productBreakdown.length === 0 && (
+                  <p className="text-white/40 text-sm">No product revenue yet</p>
+                )}
               </div>
               <div className="mt-3 pt-3 border-t border-white/10 flex justify-between">
                 <span className="text-white/50 text-xs">Total</span>
-                <span className="text-white text-xs font-semibold">{totalBundleCount} sales • {formatCurrency(totalBundleRevenue)}</span>
+                <span className="text-white text-xs font-semibold">{totalProductCount} sales • {formatCurrency(totalProductRevenue)}</span>
               </div>
             </div>
 
-            {/* Revenue by Type */}
             <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
-              <h3 className="text-white/60 text-xs mb-3">Revenue by Type</h3>
+              <h3 className="text-white/60 text-xs mb-3">Revenue by Order Type</h3>
               <div className="space-y-3">
-                <PlanBar label="Bundles" value={rbt.bundle} total={totalTypeRevenue} color="bg-indigo-500" />
-                <PlanBar label="Upsells" value={rbt.upsell} total={totalTypeRevenue} color="bg-cyan-500" />
-                <PlanBar label="Coins" value={rbt.coins} total={totalTypeRevenue} color="bg-amber-500" />
-                <PlanBar label="Reports" value={rbt.report} total={totalTypeRevenue} color="bg-pink-500" />
+                {categoryBreakdown.map((category, index) => (
+                  <PlanBar
+                    key={category.id}
+                    label={category.label}
+                    value={category.revenue}
+                    total={totalCategoryRevenue}
+                    color={["bg-indigo-500", "bg-cyan-500", "bg-amber-500", "bg-pink-500", "bg-green-500", "bg-purple-500"][index % 6]}
+                    count={category.count}
+                  />
+                ))}
+                {categoryBreakdown.length === 0 && (
+                  <p className="text-white/40 text-sm">No paid order types yet</p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* Bundle Distribution Donut */}
+          {/* Product Distribution Donut */}
           <div className="mt-4 bg-[#1A2235] rounded-xl p-4 border border-white/10">
-            <h3 className="text-white/60 text-xs mb-3">Bundle Distribution</h3>
+            <h3 className="text-white/60 text-xs mb-3">Product Distribution</h3>
             <div className="flex items-center justify-center gap-8">
               <div className="relative w-32 h-32">
                 <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
                   {(() => {
-                    if (totalBundleCount === 0) return <circle cx="18" cy="18" r="15.9" fill="none" stroke="#374151" strokeWidth="3" />;
-                    const segments = [
-                      { value: bb["palm-reading"].count, color: "#F59E0B" },
-                      { value: bb["palm-birth"].count, color: "#8B5CF6" },
-                      { value: bb["palm-birth-compat"].count, color: "#22C55E" },
-                      { value: bb["palm-birth-sketch"].count, color: "#EC4899" },
-                    ].filter((s) => s.value > 0);
+                    if (totalProductCount === 0) return <circle cx="18" cy="18" r="15.9" fill="none" stroke="#374151" strokeWidth="3" />;
+                    const colors = ["#F59E0B", "#8B5CF6", "#22C55E", "#EC4899", "#06B6D4", "#6366F1", "#F43F5E", "#10B981"];
+                    const segments = productBreakdown
+                      .filter((product) => product.count > 0)
+                      .slice(0, 8)
+                      .map((product, index) => ({ value: product.count, color: colors[index % colors.length] }));
                     let offset = 0;
                     return segments.map((seg, i) => {
-                      const pct = (seg.value / totalBundleCount) * 100;
+                      const pct = (seg.value / totalProductCount) * 100;
                       const circle = (
                         <circle
                           key={i}
@@ -1641,35 +1667,17 @@ export default function AdminRevenuePage() {
                   })()}
                 </svg>
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-white text-lg font-semibold">{totalBundleCount}</span>
+                  <span className="text-white text-lg font-semibold">{totalProductCount}</span>
                 </div>
               </div>
               <div className="space-y-2">
-                {bb["palm-reading"].count > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-amber-500" />
-                    <span className="text-white/70 text-sm">Palm Reading: {bb["palm-reading"].count}</span>
+                {productBreakdown.filter((product) => product.count > 0).slice(0, 8).map((product, index) => (
+                  <div key={product.id} className="flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${["bg-amber-500", "bg-purple-500", "bg-green-500", "bg-pink-500", "bg-cyan-500", "bg-indigo-500", "bg-rose-500", "bg-emerald-500"][index % 8]}`} />
+                    <span className="text-white/70 text-sm">{product.label}: {product.count}</span>
                   </div>
-                )}
-                {bb["palm-birth"].count > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-purple-500" />
-                    <span className="text-white/70 text-sm">Palm + Birth: {bb["palm-birth"].count}</span>
-                  </div>
-                )}
-                {bb["palm-birth-compat"].count > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-green-500" />
-                    <span className="text-white/70 text-sm">Palm + Birth + Compatibility + Future Partner: {bb["palm-birth-compat"].count}</span>
-                  </div>
-                )}
-                {bb["palm-birth-sketch"].count > 0 && (
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-pink-500" />
-                    <span className="text-white/70 text-sm">Palm + Birth + Soulmate Sketch + Future Partner: {bb["palm-birth-sketch"].count}</span>
-                  </div>
-                )}
-                {totalBundleCount === 0 && (
+                ))}
+                {totalProductCount === 0 && (
                   <span className="text-white/40 text-sm">No sales yet</span>
                 )}
               </div>
@@ -1790,7 +1798,7 @@ export default function AdminRevenuePage() {
                     <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Date</th>
                     <th className="text-left text-white/50 text-xs font-medium px-4 py-3">User</th>
                     <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Type</th>
-                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Bundle</th>
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Product</th>
                     <th className="text-right text-white/50 text-xs font-medium px-4 py-3">Amount</th>
                     <th className="text-center text-white/50 text-xs font-medium px-4 py-3">Status</th>
                   </tr>
@@ -1812,8 +1820,8 @@ export default function AdminRevenuePage() {
                             <p className="text-white/40 text-xs">{tx.userEmail}</p>
                           </div>
                         </td>
-                        <td className="text-white/70 text-sm px-4 py-3 capitalize">{tx.type || "bundle"}</td>
-                        <td className="text-white/70 text-sm px-4 py-3 capitalize">{(tx.bundleId || "-").replace(/-/g, " ")}</td>
+                        <td className="text-white/70 text-sm px-4 py-3">{tx.typeLabel || tx.type || "Order"}</td>
+                        <td className="text-white/70 text-sm px-4 py-3">{tx.productLabel || (tx.bundleId || "-").replace(/-/g, " ")}</td>
                         <td className="text-white text-sm px-4 py-3 text-right font-medium">{formatCurrency(tx.amount || 0)}</td>
                         <td className="px-4 py-3 text-center">
                           <span
