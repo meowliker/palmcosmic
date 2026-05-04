@@ -321,7 +321,60 @@ interface RevenueData {
     subscriptionLockReason?: string | null;
   }[];
   totalUsers: number;
+  registeredUsers?: number;
+  paidUsersFromDB?: number;
   uniquePayingUsers: number;
+  subscriptionKpis?: {
+    totalTrialUsers: number;
+    firstRenewalPaidUsers: number;
+    trialCancelledUsers: number;
+    failedOrDidNotPayAfterTrialUsers: number;
+    retainedAfterFirstRenewalUsers: number;
+    activeSubscribersDueForRenewal: number;
+    churnedBeforeNextRenewalUsers: number;
+    totalSubscriptionUsers: number;
+    activeSubscribers: number;
+    trialingSubscribers: number;
+    cancelledSubscribers: number;
+    lockedSubscribers: number;
+    conversionRate: number;
+    userLossRate: number;
+    retentionRate: number;
+    churnRate: number;
+  };
+  upcomingPayments?: {
+    userId: string;
+    userEmail: string;
+    userName: string;
+    status: string;
+    accessStatus?: string | null;
+    nextBillingAt: string | null;
+    nextBillingDate: string | null;
+    expectedAmount: number;
+    paymentLabel: string;
+    stripeCustomerId?: string | null;
+    stripeSubscriptionId?: string | null;
+    cancelAtPeriodEnd?: boolean;
+    lockReason?: string | null;
+  }[];
+  subscriptionUsers?: {
+    userId: string | null;
+    userEmail: string;
+    userName: string;
+    productId: string;
+    productLabel: string;
+    status: string;
+    trialPaidAt: string;
+    trialEndsAt: string | null;
+    firstRenewalPaidAt: string | null;
+    latestRenewalPaidAt: string | null;
+    renewalCount: number;
+    nextBillingAt: string | null;
+    totalPaid: number;
+    cancelAtPeriodEnd?: boolean;
+    lockReason?: string | null;
+    stripeSubscriptionId?: string | null;
+  }[];
   customDateRevenue?: string;
   customDatePaymentCount?: number;
   customDateTransactions?: {
@@ -620,6 +673,11 @@ export default function AdminRevenuePage() {
   const [filterBundle, setFilterBundle] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterDateRange, setFilterDateRange] = useState<string>("all");
+  const [upcomingStartDate, setUpcomingStartDate] = useState<string>(() => getCurrentBusinessDateIso());
+  const [upcomingEndDate, setUpcomingEndDate] = useState<string>(() => shiftIsoDate(getCurrentBusinessDateIso(), 7));
+  const [upcomingStatusFilter, setUpcomingStatusFilter] = useState<string>("all");
+  const [subscriptionUserStatusFilter, setSubscriptionUserStatusFilter] = useState<string>("all");
+  const [subscriptionUserProductFilter, setSubscriptionUserProductFilter] = useState<string>("all");
 
   // Date picker with time and timezone
   const [selectedStartDate, setSelectedStartDate] = useState<string>(REVENUE_DEFAULT_START_DATE);
@@ -988,6 +1046,8 @@ export default function AdminRevenuePage() {
     }).format(num);
   };
 
+  const formatRate = (value?: number) => `${Number(value || 0).toFixed(2)}%`;
+
   const formatDate = (dateStr: string) => {
     if (!dateStr) return "N/A";
     const date = new Date(dateStr);
@@ -1068,6 +1128,16 @@ export default function AdminRevenuePage() {
         : "-",
       detail: "",
     };
+  };
+
+  const getSubscriptionBadge = (status: string) => {
+    const normalized = String(status || "").toLowerCase();
+    if (normalized === "trialing") return { label: "On trial", className: "bg-blue-500/15 text-blue-300" };
+    if (normalized === "active") return { label: "Active", className: "bg-green-500/15 text-green-300" };
+    if (normalized === "trial_cancelled") return { label: "Trial cancelled", className: "bg-amber-500/15 text-amber-300" };
+    if (normalized === "cancelled") return { label: "Cancelled", className: "bg-amber-500/15 text-amber-300" };
+    if (normalized === "locked") return { label: "Locked", className: "bg-red-500/15 text-red-300" };
+    return { label: normalized ? normalized.replace(/_/g, " ") : "-", className: "bg-gray-500/15 text-gray-300" };
   };
 
   const formatSelectedDate = (dateStr: string) => {
@@ -1151,6 +1221,39 @@ export default function AdminRevenuePage() {
   const selectedDateRevenue = data.customDateRevenue ? parseFloat(data.customDateRevenue) : 0;
   const selectedDateTransactions = data.customDateTransactions || [];
   const selectedDatePaymentCount = data.customDatePaymentCount || 0;
+  const subscriptionKpis = data.subscriptionKpis || {
+    totalTrialUsers: 0,
+    firstRenewalPaidUsers: 0,
+    trialCancelledUsers: 0,
+    failedOrDidNotPayAfterTrialUsers: 0,
+    retainedAfterFirstRenewalUsers: 0,
+    activeSubscribersDueForRenewal: 0,
+    churnedBeforeNextRenewalUsers: 0,
+    totalSubscriptionUsers: 0,
+    activeSubscribers: 0,
+    trialingSubscribers: 0,
+    cancelledSubscribers: 0,
+    lockedSubscribers: 0,
+    conversionRate: 0,
+    userLossRate: 0,
+    retentionRate: 0,
+    churnRate: 0,
+  };
+  const upcomingPayments = (data.upcomingPayments || []).filter((payment) => {
+    if (!payment.nextBillingDate) return false;
+    if (upcomingStatusFilter !== "all" && payment.status !== upcomingStatusFilter) return false;
+    return payment.nextBillingDate >= upcomingStartDate && payment.nextBillingDate <= upcomingEndDate;
+  });
+  const upcomingRevenue = upcomingPayments.reduce((sum, payment) => sum + (payment.expectedAmount || 0), 0);
+  const subscriptionUsers = data.subscriptionUsers || [];
+  const subscriptionUserProductOptions = Array.from(
+    new Map(subscriptionUsers.map((user) => [user.productId, user.productLabel])).entries()
+  );
+  const filteredSubscriptionUsers = subscriptionUsers.filter((user) => {
+    if (subscriptionUserStatusFilter !== "all" && user.status !== subscriptionUserStatusFilter) return false;
+    if (subscriptionUserProductFilter !== "all" && user.productId !== subscriptionUserProductFilter) return false;
+    return true;
+  });
 
   const maxRevenue = Math.max(...(data.revenueOverTime || []).map((d) => d.revenue), 1);
 
@@ -1427,6 +1530,144 @@ export default function AdminRevenuePage() {
           </div>
         </section>
 
+        {/* Subscription KPIs */}
+        <section>
+          <h2 className="text-white/70 text-sm font-medium mb-3 flex items-center gap-2">
+            <Users className="w-4 h-4" /> Subscription Health
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <KPICard
+              title="Total Users"
+              value={subscriptionKpis.totalTrialUsers.toString()}
+              subtitle="Paid $0.99 trial"
+              icon={<CheckCircle className="w-4 h-4" />}
+              color="text-green-400"
+              tooltip="Unique users who paid the $0.99 subscription trial. One-time dashboard/report purchases are excluded."
+            />
+            <KPICard
+              title="Conversion Rate"
+              value={formatRate(subscriptionKpis.conversionRate)}
+              subtitle={`${subscriptionKpis.firstRenewalPaidUsers} first renewals`}
+              icon={<Target className="w-4 h-4" />}
+              color="text-sky-400"
+              tooltip="$9 first renewal paid divided by $0.99 trial users."
+            />
+            <KPICard
+              title="Users Loss Rate"
+              value={formatRate(subscriptionKpis.userLossRate)}
+              subtitle={`${subscriptionKpis.trialCancelledUsers} cancelled • ${subscriptionKpis.failedOrDidNotPayAfterTrialUsers} failed/no pay`}
+              icon={<XCircle className="w-4 h-4" />}
+              color="text-amber-300"
+              tooltip="Cancelled during trial plus users who failed/did not pay after trial, divided by $0.99 trial users."
+            />
+            <KPICard
+              title="Retention Rate"
+              value={formatRate(subscriptionKpis.retentionRate)}
+              subtitle={`${subscriptionKpis.retainedAfterFirstRenewalUsers} next-cycle renewals`}
+              icon={<TrendingUp className="w-4 h-4" />}
+              color="text-blue-400"
+              tooltip="Users who paid the next billing cycle after becoming active, divided by users who became active."
+            />
+            <KPICard
+              title="Churn Rate"
+              value={formatRate(subscriptionKpis.churnRate)}
+              subtitle={`${subscriptionKpis.churnedBeforeNextRenewalUsers} of ${subscriptionKpis.activeSubscribersDueForRenewal} due`}
+              icon={<TrendingDown className="w-4 h-4" />}
+              color="text-red-300"
+              tooltip="Active subscribers who failed/cancelled before the next renewal divided by active subscribers due for renewal."
+            />
+          </div>
+        </section>
+
+        {/* Upcoming Payments */}
+        <section className="bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
+          <div className="flex flex-col gap-3 px-4 py-4 border-b border-white/10 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
+                <Clock className="w-4 h-4" /> Upcoming Payments
+              </h2>
+              <p className="text-white/35 text-xs mt-1">
+                {upcomingPayments.length} payment{upcomingPayments.length !== 1 ? "s" : ""} expected • {formatCurrency(upcomingRevenue)}
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <div>
+                <label className="text-white/40 text-xs mb-1 block">Start</label>
+                <input
+                  type="date"
+                  value={upcomingStartDate}
+                  onChange={(e) => setUpcomingStartDate(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
+                />
+              </div>
+              <div>
+                <label className="text-white/40 text-xs mb-1 block">End</label>
+                <input
+                  type="date"
+                  value={upcomingEndDate}
+                  onChange={(e) => setUpcomingEndDate(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
+                />
+              </div>
+              <div>
+                <label className="text-white/40 text-xs mb-1 block">Status</label>
+                <select
+                  value={upcomingStatusFilter}
+                  onChange={(e) => setUpcomingStatusFilter(e.target.value)}
+                  className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+                >
+                  <option value="all">All billable</option>
+                  <option value="trialing">On trial</option>
+                  <option value="active">Active</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto max-h-[520px] overflow-y-auto">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-[#1A2235]">
+                <tr className="border-b border-white/10">
+                  <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Next Billing</th>
+                  <th className="text-left text-white/50 text-xs font-medium px-4 py-3">User</th>
+                  <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Subscription</th>
+                  <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Payment</th>
+                  <th className="text-right text-white/50 text-xs font-medium px-4 py-3">Expected</th>
+                </tr>
+              </thead>
+              <tbody>
+                {upcomingPayments.map((payment) => {
+                  const badge = getSubscriptionBadge(payment.status);
+                  return (
+                    <tr key={`${payment.userId}-${payment.nextBillingAt}`} className="border-b border-white/5 hover:bg-white/5">
+                      <td className="text-white/75 text-sm px-4 py-3 whitespace-nowrap">{formatDate(payment.nextBillingAt || "")}</td>
+                      <td className="px-4 py-3 min-w-[220px]">
+                        <p className="text-white/80 text-sm">{payment.userName}</p>
+                        <p className="text-white/40 text-xs">{payment.userEmail}</p>
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs capitalize ${badge.className}`}>
+                          {badge.label}
+                        </span>
+                      </td>
+                      <td className="text-white/60 text-sm px-4 py-3 whitespace-nowrap">{payment.paymentLabel}</td>
+                      <td className="text-white text-sm px-4 py-3 text-right font-medium whitespace-nowrap">
+                        {formatCurrency(payment.expectedAmount || 0)}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {upcomingPayments.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-white/40">
+                      No upcoming billable payments match this filter.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
         {/* Date Range Selector with Time & Timezone */}
         <section className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
           <div className="flex items-center justify-between mb-4">
@@ -1605,69 +1846,96 @@ export default function AdminRevenuePage() {
             <MetricCard title="This Year" value={formatCurrency(data.revenueThisYear)} tooltip="Revenue generated this Stripe business year." />
           </div>
 
-          {/* Transactions for selected date */}
-          {dateLoading && (
-            <div className="mt-4 bg-[#1A2235] rounded-xl p-6 border border-white/10 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 text-primary animate-spin" />
-              <p className="text-white/40 text-sm">Loading transactions...</p>
-            </div>
-          )}
-          {!dateLoading && selectedDateTransactions.length > 0 && (
-            <div className="mt-4 bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
-              <div className="px-4 py-3 border-b border-white/10">
-                <p className="text-white/60 text-xs">
-                  {selectedDatePaymentCount} transaction{selectedDatePaymentCount !== 1 ? "s" : ""} from {selectedStartDate} to {selectedEndDate}
+          {/* Subscription Users */}
+          <div className="mt-4 bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
+            <div className="flex flex-col gap-3 px-4 py-3 border-b border-white/10 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="text-white/70 text-sm font-medium">Users</h3>
+                <p className="text-white/35 text-xs mt-1">
+                  Showing {filteredSubscriptionUsers.length} of {subscriptionUsers.length} users who paid the $0.99 trial
                 </p>
               </div>
-              <div className="overflow-x-auto max-h-64 overflow-y-auto">
-                <table className="w-full">
-                  <thead className="sticky top-0 bg-[#1A2235]">
-                    <tr className="border-b border-white/10">
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Time</th>
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">User</th>
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Type</th>
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Product</th>
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Subscription</th>
-                      <th className="text-left text-white/50 text-xs font-medium px-4 py-2">Next Billing</th>
-                      <th className="text-right text-white/50 text-xs font-medium px-4 py-2">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedDateTransactions.map((tx) => {
-                      const subscription = getSubscriptionState(tx);
-
-                      return (
-                        <tr key={tx.id} className="border-b border-white/5 hover:bg-white/5">
-                          <td className="text-white/70 text-sm px-4 py-2 whitespace-nowrap">{formatDate(tx.date)}</td>
-                          <td className="px-4 py-2 min-w-[220px]">
-                            <p className="text-white/80 text-sm">{tx.userName !== "Unknown" ? tx.userName : tx.userEmail?.split("@")[0] || "Unknown"}</p>
-                            <p className="text-white/40 text-xs">{tx.userEmail}</p>
-                          </td>
-                          <td className="text-white/70 text-sm px-4 py-2 whitespace-nowrap">{tx.typeLabel || tx.type || "Order"}</td>
-                          <td className="text-white/70 text-sm px-4 py-2 min-w-[210px]">{tx.productLabel || (tx.bundleId || "-").replace(/-/g, " ")}</td>
-                          <td className="px-4 py-2 whitespace-nowrap">
-                            <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs capitalize ${subscription.className}`}>
-                              {subscription.label}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 min-w-[150px]">
-                            <p className="text-white/75 text-sm whitespace-nowrap">{subscription.nextLabel}</p>
-                            {subscription.detail && <p className="text-white/35 text-xs whitespace-nowrap">{subscription.detail}</p>}
-                          </td>
-                          <td className="text-white text-sm px-4 py-2 text-right font-medium whitespace-nowrap">{formatCurrency(tx.amount || 0)}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2">
+                  <label className="text-white/40 text-xs">Status</label>
+                  <select
+                    value={subscriptionUserStatusFilter}
+                    onChange={(e) => setSubscriptionUserStatusFilter(e.target.value)}
+                    className="min-w-[170px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="trialing">On trial</option>
+                    <option value="active">Active</option>
+                    <option value="trial_cancelled">Trial cancelled</option>
+                    <option value="cancelled">Cancelled</option>
+                    <option value="locked">Locked</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-white/40 text-xs">Product</label>
+                  <select
+                    value={subscriptionUserProductFilter}
+                    onChange={(e) => setSubscriptionUserProductFilter(e.target.value)}
+                    className="min-w-[190px] bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+                  >
+                    <option value="all">All products</option>
+                    {subscriptionUserProductOptions.map(([id, label]) => (
+                      <option key={id} value={id}>{label}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
             </div>
-          )}
-          {!dateLoading && selectedDateTransactions.length === 0 && selectedStartDate && (
-            <div className="mt-4 bg-[#1A2235] rounded-xl p-4 border border-white/10 text-center">
-              <p className="text-white/40 text-sm">No transactions from {selectedStartDate} to {selectedEndDate}</p>
+            <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-[#1A2235]">
+                  <tr className="border-b border-white/10">
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Trial Paid</th>
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">User</th>
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Product</th>
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Status</th>
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">First Renewal</th>
+                    <th className="text-left text-white/50 text-xs font-medium px-4 py-3">Next Billing</th>
+                    <th className="text-right text-white/50 text-xs font-medium px-4 py-3">Total Paid</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredSubscriptionUsers.map((user) => {
+                    const badge = getSubscriptionBadge(user.status);
+                    return (
+                      <tr key={`${user.userId || user.userEmail}-${user.trialPaidAt}`} className="border-b border-white/5 hover:bg-white/5">
+                        <td className="text-white/70 text-sm px-4 py-3 whitespace-nowrap">{formatDate(user.trialPaidAt)}</td>
+                        <td className="px-4 py-3 min-w-[220px]">
+                          <p className="text-white/80 text-sm">{user.userName}</p>
+                          <p className="text-white/40 text-xs">{user.userEmail}</p>
+                        </td>
+                        <td className="text-white/70 text-sm px-4 py-3 min-w-[210px]">{user.productLabel}</td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs capitalize ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                          {user.lockReason && <p className="text-white/35 text-xs mt-1">{user.lockReason}</p>}
+                        </td>
+                        <td className="px-4 py-3 min-w-[150px]">
+                          <p className="text-white/75 text-sm whitespace-nowrap">{user.firstRenewalPaidAt ? formatDate(user.firstRenewalPaidAt) : "-"}</p>
+                          <p className="text-white/35 text-xs">{user.renewalCount} renewal{user.renewalCount !== 1 ? "s" : ""}</p>
+                        </td>
+                        <td className="text-white/75 text-sm px-4 py-3 whitespace-nowrap">{user.nextBillingAt ? formatDate(user.nextBillingAt) : "No billing"}</td>
+                        <td className="text-white text-sm px-4 py-3 text-right font-medium whitespace-nowrap">{formatCurrency(user.totalPaid || 0)}</td>
+                      </tr>
+                    );
+                  })}
+                  {filteredSubscriptionUsers.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-white/40">
+                        No users match this filter.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
-          )}
+          </div>
         </section>
 
         {/* Meta / Facebook Ads */}

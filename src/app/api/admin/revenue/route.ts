@@ -186,6 +186,48 @@ function formatMoneyString(value: number): string {
   return roundMoney(value).toFixed(2);
 }
 
+function dateOnlyFromIso(value?: string | null): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function resolveSubscriptionStatus(user: Record<string, any>): string {
+  const status = String(user.subscription_status || "").toLowerCase();
+  const accessStatus = String(user.access_status || "").toLowerCase();
+
+  if (["locked", "past_due", "unpaid", "incomplete_expired"].includes(status) || accessStatus === "locked") {
+    return "locked";
+  }
+  if (status === "trial_cancelled" || Boolean(user.subscription_cancel_at_period_end)) {
+    return "trial_cancelled";
+  }
+  if (status === "cancelled" || status === "canceled") {
+    return "cancelled";
+  }
+  if (status === "trialing" || accessStatus === "trial_active") {
+    return "trialing";
+  }
+  if (status === "active" || accessStatus === "subscription_active") {
+    return "active";
+  }
+  return status || "none";
+}
+
+function getNextBillingAt(user: Record<string, any>): string | null {
+  const status = resolveSubscriptionStatus(user);
+  if (status === "trialing") return user.trial_ends_at || user.subscription_current_period_end || null;
+  if (status === "active") return user.subscription_current_period_end || null;
+  return null;
+}
+
+function addMonths(date: Date, months: number): Date {
+  const next = new Date(date);
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
 async function verifyAdminSession(supabase: ReturnType<typeof getSupabaseAdmin>, token: string | null) {
   if (!token) return false;
 
@@ -235,7 +277,7 @@ export async function GET(request: NextRequest) {
     const { data: allUsersRaw, error: usersError } = await supabase
       .from("users")
       .select(
-        "id,email,name,payment_status,subscription_status,access_status,trial_ends_at,subscription_current_period_end,subscription_cancel_at_period_end,subscription_lock_reason"
+        "id,email,name,payment_status,subscription_status,access_status,trial_ends_at,subscription_current_period_end,subscription_cancel_at_period_end,subscription_lock_reason,stripe_customer_id,stripe_subscription_id,created_at"
       );
 
     if (usersError) throw usersError;
@@ -405,6 +447,180 @@ export async function GET(request: NextRequest) {
 
     const registeredUsers = users.filter((user: any) => !String(user.id || "").startsWith("anon_"));
     const paidUsers = users.filter((user: any) => user.payment_status === "paid");
+    const uniquePaidUserIds = new Set(sales.map((entry) => entry.user_id).filter(Boolean));
+    const subscribedUsers = users.filter((user: any) => Boolean(user.stripe_subscription_id || user.trial_ends_at || user.subscription_current_period_end));
+    const activeSubscribers = subscribedUsers.filter((user: any) => resolveSubscriptionStatus(user) === "active");
+    const trialingSubscribers = subscribedUsers.filter((user: any) => resolveSubscriptionStatus(user) === "trialing");
+    const cancelledSubscribers = subscribedUsers.filter((user: any) => ["trial_cancelled", "cancelled"].includes(resolveSubscriptionStatus(user)));
+    const lockedSubscribers = subscribedUsers.filter((user: any) => resolveSubscriptionStatus(user) === "locked");
+
+    const trialCohorts = new Map<string, {
+      key: string;
+      userId: string | null;
+      email: string | null;
+      name: string | null;
+      subscriptionId: string | null;
+      productId: string;
+      productLabel: string;
+      trialAmount: number;
+      trialPaidAt: string;
+      trialEndsAt: string | null;
+      currentPeriodEnd: string | null;
+      userStatus: string;
+      lockReason: string | null;
+      cancelAtPeriodEnd: boolean;
+      renewals: LedgerEntry[];
+    }>();
+
+    const subscriptionRenewals = sales.filter((entry) => {
+      const kind = String(entry.billing_kind || metadataValue(entry.metadata, "billingKind") || "").toLowerCase();
+      return entry.categoryId === "subscription_renewal" || kind === "subscription_renewal";
+    });
+
+    sales
+      .filter((entry) => {
+        const kind = String(entry.billing_kind || metadataValue(entry.metadata, "billingKind") || "").toLowerCase();
+        const type = String(entry.type || metadataValue(entry.metadata, "type") || "").toLowerCase();
+        return (
+          entry.categoryId === "subscription_trial" &&
+          (kind === "subscription_trial" || type === "subscription_trial") &&
+          entry.amountUsdAbs >= 0.98 &&
+          entry.amountUsdAbs <= 1
+        );
+      })
+      .forEach((entry) => {
+        const user = userMap.get(entry.user_id) || {};
+        const subscriptionId = entry.stripe_subscription_id || metadataValue(entry.metadata, "stripeSubscriptionId") || "";
+        const key = subscriptionId || entry.user_id || entry.customer_email || entry.id;
+        const existing = trialCohorts.get(key);
+        if (existing && new Date(existing.trialPaidAt) <= new Date(entry.eventAt)) return;
+
+        trialCohorts.set(key, {
+          key,
+          userId: entry.user_id || null,
+          email: user.email || entry.customer_email || null,
+          name: user.name || null,
+          subscriptionId: subscriptionId || null,
+          productId: entry.productId,
+          productLabel: entry.productLabel,
+          trialAmount: entry.amountUsdAbs,
+          trialPaidAt: entry.eventAt,
+          trialEndsAt: user.trialEndsAt || null,
+          currentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
+          userStatus: resolveSubscriptionStatus({
+            subscription_status: user.subscriptionStatus,
+            access_status: user.accessStatus,
+            subscription_cancel_at_period_end: user.subscriptionCancelAtPeriodEnd,
+          }),
+          lockReason: user.subscriptionLockReason || null,
+          cancelAtPeriodEnd: Boolean(user.subscriptionCancelAtPeriodEnd),
+          renewals: [],
+        });
+      });
+
+    for (const renewal of subscriptionRenewals) {
+      const subscriptionId = renewal.stripe_subscription_id || metadataValue(renewal.metadata, "stripeSubscriptionId") || "";
+      const keyCandidates = [
+        subscriptionId,
+        renewal.user_id,
+        renewal.customer_email,
+      ].filter(Boolean);
+      const cohort = keyCandidates.map((key) => trialCohorts.get(String(key))).find(Boolean);
+      if (cohort) cohort.renewals.push(renewal);
+    }
+
+    const trialCohortRows = Array.from(trialCohorts.values()).map((cohort) => {
+      cohort.renewals.sort((a, b) => new Date(a.eventAt).getTime() - new Date(b.eventAt).getTime());
+      return cohort;
+    });
+    const totalTrialUsers = trialCohortRows.length;
+    const firstRenewalPaidUsers = trialCohortRows.filter((cohort) => cohort.renewals.length >= 1).length;
+    const retainedAfterFirstRenewalUsers = trialCohortRows.filter((cohort) => cohort.renewals.length >= 2).length;
+    const trialCancelledUsers = trialCohortRows.filter(
+      (cohort) => cohort.renewals.length === 0 && (cohort.userStatus === "trial_cancelled" || cohort.cancelAtPeriodEnd)
+    ).length;
+    const failedOrDidNotPayAfterTrialUsers = trialCohortRows.filter((cohort) => {
+      if (cohort.renewals.length > 0) return false;
+      const trialEnd = cohort.trialEndsAt ? new Date(cohort.trialEndsAt) : addDays(new Date(cohort.trialPaidAt), 3);
+      return trialEnd <= now && (cohort.userStatus === "locked" || cohort.userStatus === "cancelled" || !cohort.cancelAtPeriodEnd);
+    }).length;
+    const userLossUsers = trialCancelledUsers + failedOrDidNotPayAfterTrialUsers;
+    const activeRenewalCohorts = trialCohortRows.filter((cohort) => cohort.renewals.length >= 1);
+    const activeSubscribersDueForRenewal = activeRenewalCohorts.filter((cohort) => {
+      const latestRenewal = cohort.renewals[cohort.renewals.length - 1];
+      const nextDueAt = addMonths(new Date(latestRenewal.eventAt), 1);
+      return nextDueAt <= now || ["locked", "cancelled"].includes(cohort.userStatus);
+    }).length;
+    const churnedBeforeNextRenewalUsers = activeRenewalCohorts.filter((cohort) => {
+      const latestRenewal = cohort.renewals[cohort.renewals.length - 1];
+      const nextDueAt = addMonths(new Date(latestRenewal.eventAt), 1);
+      return (
+        (nextDueAt <= now || ["locked", "cancelled"].includes(cohort.userStatus)) &&
+        ["locked", "cancelled"].includes(cohort.userStatus)
+      );
+    }).length;
+
+    const conversionRate = totalTrialUsers > 0 ? (firstRenewalPaidUsers / totalTrialUsers) * 100 : 0;
+    const userLossRate = totalTrialUsers > 0 ? (userLossUsers / totalTrialUsers) * 100 : 0;
+    const retentionRate = firstRenewalPaidUsers > 0 ? (retainedAfterFirstRenewalUsers / firstRenewalPaidUsers) * 100 : 0;
+    const churnRate = activeSubscribersDueForRenewal > 0 ? (churnedBeforeNextRenewalUsers / activeSubscribersDueForRenewal) * 100 : 0;
+
+    const subscriptionUsers = trialCohortRows
+      .map((cohort) => {
+        const firstRenewal = cohort.renewals[0] || null;
+        const latestRenewal = cohort.renewals[cohort.renewals.length - 1] || null;
+        const nextBillingAt =
+          cohort.userStatus === "trialing"
+            ? cohort.trialEndsAt
+            : cohort.userStatus === "active"
+              ? cohort.currentPeriodEnd || (latestRenewal ? addMonths(new Date(latestRenewal.eventAt), 1).toISOString() : null)
+              : null;
+
+        return {
+          userId: cohort.userId,
+          userEmail: cohort.email || "Unknown",
+          userName: cohort.name || cohort.email?.split("@")[0] || "Unknown",
+          productId: cohort.productId,
+          productLabel: cohort.productLabel,
+          status: cohort.userStatus,
+          trialPaidAt: cohort.trialPaidAt,
+          trialEndsAt: cohort.trialEndsAt,
+          firstRenewalPaidAt: firstRenewal?.eventAt || null,
+          latestRenewalPaidAt: latestRenewal?.eventAt || null,
+          renewalCount: cohort.renewals.length,
+          nextBillingAt,
+          totalPaid: roundMoney(cohort.trialAmount + cohort.renewals.reduce((sum, renewal) => sum + renewal.amountUsdAbs, 0)),
+          cancelAtPeriodEnd: cohort.cancelAtPeriodEnd,
+          lockReason: cohort.lockReason,
+          stripeSubscriptionId: cohort.subscriptionId,
+        };
+      })
+      .sort((a, b) => new Date(b.trialPaidAt).getTime() - new Date(a.trialPaidAt).getTime());
+
+    const upcomingPayments = subscribedUsers
+      .map((user: any) => {
+        const status = resolveSubscriptionStatus(user);
+        const nextBillingAt = getNextBillingAt(user);
+        const nextBillingDate = dateOnlyFromIso(nextBillingAt);
+        const expectedAmount = status === "trialing" || status === "active" ? 9 : 0;
+        return {
+          userId: user.id,
+          userEmail: user.email || "Unknown",
+          userName: user.name || user.email?.split("@")[0] || "Unknown",
+          status,
+          accessStatus: user.access_status || null,
+          nextBillingAt,
+          nextBillingDate,
+          expectedAmount,
+          paymentLabel: status === "trialing" ? "$9 trial renewal" : status === "active" ? "$9 monthly renewal" : "No billing",
+          stripeCustomerId: user.stripe_customer_id || null,
+          stripeSubscriptionId: user.stripe_subscription_id || null,
+          cancelAtPeriodEnd: Boolean(user.subscription_cancel_at_period_end),
+          lockReason: user.subscription_lock_reason || null,
+        };
+      })
+      .filter((row) => row.nextBillingAt)
+      .sort((a, b) => new Date(a.nextBillingAt || 0).getTime() - new Date(b.nextBillingAt || 0).getTime());
 
     return NextResponse.json({
       currency: "USD",
@@ -445,6 +661,26 @@ export async function GET(request: NextRequest) {
       registeredUsers: registeredUsers.length,
       paidUsersFromDB: paidUsers.length,
       uniquePayingUsers: uniquePayingUsers || paidUsers.length,
+      subscriptionKpis: {
+        totalTrialUsers,
+        firstRenewalPaidUsers,
+        trialCancelledUsers,
+        failedOrDidNotPayAfterTrialUsers,
+        retainedAfterFirstRenewalUsers,
+        activeSubscribersDueForRenewal,
+        churnedBeforeNextRenewalUsers,
+        totalSubscriptionUsers: totalTrialUsers,
+        activeSubscribers: activeSubscribers.length,
+        trialingSubscribers: trialingSubscribers.length,
+        cancelledSubscribers: cancelledSubscribers.length,
+        lockedSubscribers: lockedSubscribers.length,
+        conversionRate: roundMoney(conversionRate),
+        userLossRate: roundMoney(userLossRate),
+        retentionRate: roundMoney(retentionRate),
+        churnRate: roundMoney(churnRate),
+      },
+      subscriptionUsers,
+      upcomingPayments,
 
       customDateRevenue: formatMoneyString(customPayments.reduce((sum, entry) => sum + entry.signedAmountUsd, 0)),
       customDatePaymentCount: customPayments.filter((entry) => entry.financialKind === "sale").length,

@@ -61,20 +61,14 @@ export default function DashboardPage() {
   const [primaryFlow, setPrimaryFlow] = useState<string | null>(null);
   const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
   const [subscriptionAccessLoaded, setSubscriptionAccessLoaded] = useState(false);
+  const [subscriptionPortalLoading, setSubscriptionPortalLoading] = useState(false);
+  const [subscriptionPortalError, setSubscriptionPortalError] = useState<string | null>(null);
 
   // Get sun sign from onboarding store as fallback
   const { birthMonth: storeBirthMonth, birthDay: storeBirthDay, sunSign: storeSunSign } = useOnboardingStore();
 
   // Get unlocked features from user store
   const { unlockedFeatures, birthChartGenerating, birthChartReady, syncFromServer, unlockFeature } = useUserStore();
-
-  const subscriptionPaywallByFlow: Record<string, string> = {
-    future_prediction: "/onboarding/future-prediction/paywall",
-    soulmate_sketch: "/onboarding/soulmate-sketch/paywall",
-    palm_reading: "/onboarding/palm-reading/paywall",
-    future_partner: "/onboarding/future-partner/paywall",
-    compatibility: "/onboarding/compatibility/paywall",
-  };
 
   const isSubscriptionLocked =
     !subscriptionAccessLoaded ||
@@ -89,23 +83,41 @@ export default function DashboardPage() {
       subscription_status: subscriptionStatus || null,
       access_status: accessStatus || null,
     });
+    setSubscriptionPortalError(null);
     setSubscriptionModalOpen(true);
   };
 
-  const goToSubscriptionPayment = () => {
-    const destination = primaryFlow && subscriptionPaywallByFlow[primaryFlow]
-      ? subscriptionPaywallByFlow[primaryFlow]
-      : "/manage-subscription";
-
+  const goToSubscriptionPayment = async () => {
+    setSubscriptionPortalLoading(true);
+    setSubscriptionPortalError(null);
     trackAnalyticsEvent("ReportsDashboardAction", {
       action: "subscription_reactivation_clicked",
       route: "/reports",
-      destination,
+      destination: "stripe_billing_portal",
       primary_flow: primaryFlow || null,
       subscription_status: subscriptionStatus || null,
       access_status: accessStatus || null,
     });
-    router.push(destination);
+
+    try {
+      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
+      const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
+      const response = await fetch("/api/stripe/billing-portal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, email, returnPath: "/reports" }),
+      });
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data?.url) {
+        throw new Error(data?.error || "Unable to open Stripe payment portal");
+      }
+
+      window.location.href = data.url;
+    } catch (error: any) {
+      setSubscriptionPortalError(error?.message || "Unable to open Stripe payment portal");
+      setSubscriptionPortalLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -370,6 +382,11 @@ export default function DashboardPage() {
     }
 
     trackReportAction("locked_report_selected", params);
+    if (isSubscriptionLocked) {
+      openSubscriptionModal(`report_${params.reportKey}`);
+      return;
+    }
+
     setUpsellPopup({ isOpen: true, feature: params.feature });
   };
 
@@ -854,6 +871,10 @@ export default function DashboardPage() {
                           destination: "/birth-chart",
                           unlocked: false,
                         });
+                        if (isSubscriptionLocked) {
+                          openSubscriptionModal("report_birth_chart");
+                          return;
+                        }
                         setUpsellPopup({ isOpen: true, feature: "birthChart" });
                       }
                     }}
@@ -1095,10 +1116,18 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={goToSubscriptionPayment}
-                className="mt-6 h-13 w-full rounded-lg bg-[#38bdf8] px-4 py-3 text-base font-bold text-[#03111f] transition-colors hover:bg-[#7dd3fc]"
+                disabled={subscriptionPortalLoading}
+                className="mt-6 flex h-13 w-full items-center justify-center gap-2 rounded-lg bg-[#38bdf8] px-4 py-3 text-base font-bold text-[#03111f] transition-colors hover:bg-[#7dd3fc] disabled:cursor-not-allowed disabled:opacity-70"
               >
-                Pay for Subscription
+                {subscriptionPortalLoading && <Loader2 className="h-5 w-5 animate-spin" />}
+                {subscriptionPortalLoading ? "Opening Stripe..." : "Pay for Subscription"}
               </button>
+
+              {subscriptionPortalError && (
+                <p className="mt-3 text-center text-xs leading-5 text-[#ff8b8b]">
+                  {subscriptionPortalError}
+                </p>
+              )}
 
               <button
                 type="button"
