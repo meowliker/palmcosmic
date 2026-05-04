@@ -670,10 +670,15 @@ async function fetchGoogleAnalyticsData(
   sourceStatus: SourceStatus;
 }> {
   const propertyId = process.env.GA4_PROPERTY_ID || process.env.GOOGLE_ANALYTICS_PROPERTY_ID;
+  const oauthClientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const oauthClientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  const oauthRefreshToken = process.env.GOOGLE_OAUTH_REFRESH_TOKEN;
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
   const privateKey = process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const hasOauthCreds = Boolean(oauthClientId && oauthClientSecret && oauthRefreshToken);
+  const hasServiceAccountCreds = Boolean(clientEmail && privateKey);
 
-  if (!propertyId || !clientEmail || !privateKey) {
+  if (!propertyId || (!hasOauthCreds && !hasServiceAccountCreds)) {
     return {
       routeMetrics: [],
       peakTrafficHour: { label: "N/A", sessions: 0 },
@@ -688,19 +693,25 @@ async function fetchGoogleAnalyticsData(
       sourceStatus: {
         configured: false,
         connected: false,
-        message: "GA server API not configured. Add GA4_PROPERTY_ID + service account creds.",
+        message: "GA server API not configured. Add GA4_PROPERTY_ID plus OAuth refresh-token or service-account credentials.",
       },
     };
   }
 
   try {
-    const auth = new google.auth.GoogleAuth({
-      credentials: {
-        client_email: clientEmail,
-        private_key: privateKey,
-      },
-      scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
-    });
+    const auth = hasOauthCreds
+      ? new google.auth.OAuth2(oauthClientId, oauthClientSecret)
+      : new google.auth.GoogleAuth({
+          credentials: {
+            client_email: clientEmail,
+            private_key: privateKey,
+          },
+          scopes: ["https://www.googleapis.com/auth/analytics.readonly"],
+        });
+
+    if (hasOauthCreds && "setCredentials" in auth) {
+      auth.setCredentials({ refresh_token: oauthRefreshToken });
+    }
 
     const analyticsData = google.analyticsdata({ version: "v1beta", auth });
 
@@ -813,11 +824,12 @@ async function fetchGoogleAnalyticsData(
         configured: true,
         connected: true,
         message: dayMode === "business_1130_ist"
-          ? "Connected to GA4 Data API (Stripe day mode uses shifted hour/day aggregation)."
-          : "Connected to GA4 Data API.",
+          ? `Connected to GA4 Data API via ${hasOauthCreds ? "OAuth" : "service account"} (Stripe day mode uses shifted hour/day aggregation).`
+          : `Connected to GA4 Data API via ${hasOauthCreds ? "OAuth" : "service account"}.`,
       },
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : "unknown error";
     return {
       routeMetrics: [],
       peakTrafficHour: { label: "N/A", sessions: 0 },
@@ -832,7 +844,7 @@ async function fetchGoogleAnalyticsData(
       sourceStatus: {
         configured: true,
         connected: false,
-        message: `GA connection failed: ${error?.message || "unknown error"}`,
+        message: `GA connection failed: ${message}`,
       },
     };
   }
@@ -1521,25 +1533,28 @@ export async function GET(request: NextRequest) {
 
     const useVercelRouteData = vercelData.totalSessions > 0 || vercelData.routeMetrics.some((row) => row.pageViews > 0);
     const useInternalRouteData = internalRouteData.totalSessions > 0 || internalRouteData.routeMetrics.length > 0;
+    const useGaRouteData = gaData.sourceStatus.connected && (gaData.totalSessions > 0 || gaData.routeMetrics.length > 0);
     const internalHasBetterRouteCoverage =
       useInternalRouteData &&
       (!useVercelRouteData || internalRouteData.totalPageViews >= vercelData.totalPageViews);
 
-    const selectedRouteData = internalHasBetterRouteCoverage
-      ? {
-          ...internalRouteData,
-          sourceStatus: {
-            configured: true,
-            connected: true,
-            message:
-              useVercelRouteData && vercelData.totalPageViews < internalRouteData.totalPageViews
-                ? "Using first-party route analytics because the Vercel drain copy is incomplete for this range."
-                : "Using first-party Supabase analytics events for route traffic.",
-          } as SourceStatus,
-        }
-      : useVercelRouteData
-        ? vercelData
-        : gaData;
+    const selectedRouteData = useGaRouteData
+      ? gaData
+      : internalHasBetterRouteCoverage
+        ? {
+            ...internalRouteData,
+            sourceStatus: {
+              configured: true,
+              connected: true,
+              message:
+                useVercelRouteData && vercelData.totalPageViews < internalRouteData.totalPageViews
+                  ? "Using first-party route analytics because GA4 is unavailable and the Vercel drain copy is incomplete for this range."
+                  : "Using first-party Supabase analytics events because GA4 is unavailable.",
+            } as SourceStatus,
+          }
+        : useVercelRouteData
+          ? vercelData
+          : gaData;
 
     const paymentStarts = selectedPaymentRows.length;
     const paywallSignal = inferPaywallVisitors(selectedRouteData.routeMetrics);
@@ -1670,10 +1685,11 @@ export async function GET(request: NextRequest) {
         Expires: "0",
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Admin analytics API error:", error);
+    const message = error instanceof Error ? error.message : "Failed to fetch analytics data";
     return NextResponse.json(
-      { error: error.message || "Failed to fetch analytics data" },
+      { error: message },
       { status: 500 }
     );
   }
