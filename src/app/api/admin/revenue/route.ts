@@ -234,13 +234,33 @@ export async function GET(request: NextRequest) {
 
     const { data: allUsersRaw, error: usersError } = await supabase
       .from("users")
-      .select("id,email,name,payment_status");
+      .select(
+        "id,email,name,payment_status,subscription_status,access_status,trial_ends_at,subscription_current_period_end,subscription_cancel_at_period_end,subscription_lock_reason"
+      );
 
     if (usersError) throw usersError;
 
     const users = allUsersRaw || [];
-    const userMap = new Map<string, { email?: string; name?: string }>();
-    users.forEach((user: any) => userMap.set(user.id, { email: user.email, name: user.name }));
+    const userMap = new Map<string, {
+      email?: string;
+      name?: string;
+      subscriptionStatus?: string | null;
+      accessStatus?: string | null;
+      trialEndsAt?: string | null;
+      subscriptionCurrentPeriodEnd?: string | null;
+      subscriptionCancelAtPeriodEnd?: boolean;
+      subscriptionLockReason?: string | null;
+    }>();
+    users.forEach((user: any) => userMap.set(user.id, {
+      email: user.email,
+      name: user.name,
+      subscriptionStatus: user.subscription_status || null,
+      accessStatus: user.access_status || null,
+      trialEndsAt: user.trial_ends_at || null,
+      subscriptionCurrentPeriodEnd: user.subscription_current_period_end || null,
+      subscriptionCancelAtPeriodEnd: Boolean(user.subscription_cancel_at_period_end),
+      subscriptionLockReason: user.subscription_lock_reason || null,
+    }));
 
     const ledgerEntries: LedgerEntry[] = (allPaymentsRaw || []).map((payment: any) => {
       const financial = classifyStoredPaymentEvent(payment.payment_status, payment.amount);
@@ -249,7 +269,7 @@ export async function GET(request: NextRequest) {
 
       return {
         ...payment,
-        eventAt: payment.fulfilled_at || payment.created_at,
+        eventAt: payment.created_at || payment.fulfilled_at,
         normalizedStatus: normalizeFinanceStatus(payment.payment_status),
         financialKind: financial.kind,
         amountUsdAbs: financial.amount,
@@ -363,6 +383,12 @@ export async function GET(request: NextRequest) {
         stripePaymentIntentId: entry.stripe_payment_intent_id,
         stripeSubscriptionId: entry.stripe_subscription_id,
         currency: entry.currency || "USD",
+        subscriptionStatus: user.subscriptionStatus || null,
+        accessStatus: user.accessStatus || null,
+        trialEndsAt: user.trialEndsAt || null,
+        subscriptionCurrentPeriodEnd: user.subscriptionCurrentPeriodEnd || null,
+        subscriptionCancelAtPeriodEnd: Boolean(user.subscriptionCancelAtPeriodEnd),
+        subscriptionLockReason: user.subscriptionLockReason || null,
       };
     };
 

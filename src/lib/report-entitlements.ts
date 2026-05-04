@@ -61,6 +61,47 @@ function mergeFeatureUnlocks(current: unknown, reportKeys: ReportKey[]) {
   return next;
 }
 
+async function syncLegacyUnlockedFeaturesForUsers(supabase: any, userIds: string[]) {
+  const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniqueUserIds.length === 0) return;
+
+  const nowIso = new Date().toISOString();
+  const { data: entitlements, error } = await supabase
+    .from("user_entitlements")
+    .select("user_id,report_key")
+    .in("user_id", uniqueUserIds)
+    .eq("status", "active")
+    .or(`starts_at.is.null,starts_at.lte.${nowIso}`)
+    .or(`ends_at.is.null,ends_at.gt.${nowIso}`);
+
+  if (error) throw error;
+
+  const featuresByUser = new Map<string, ReturnType<typeof normalizeUnlockedFeatures>>();
+  for (const userId of uniqueUserIds) {
+    featuresByUser.set(userId, normalizeUnlockedFeatures({}));
+  }
+
+  for (const entitlement of entitlements || []) {
+    const featureKey = REPORT_TO_UNLOCKED_FEATURE[entitlement.report_key as ReportKey];
+    const features = featuresByUser.get(entitlement.user_id);
+    if (featureKey && features) {
+      (features as any)[featureKey] = true;
+    }
+  }
+
+  for (const [userId, unlockedFeatures] of featuresByUser.entries()) {
+    const { error: updateError } = await supabase
+      .from("users")
+      .update({
+        unlocked_features: unlockedFeatures,
+        updated_at: nowIso,
+      })
+      .eq("id", userId);
+
+    if (updateError) throw updateError;
+  }
+}
+
 export async function activateTrialPrimaryEntitlements(params: {
   userId: string;
   email?: string | null;
@@ -262,6 +303,14 @@ export async function markSubscriptionLocked(params: {
 }) {
   const supabase = getSupabaseAdmin();
   const lockAtIso = (params.lockAt || new Date()).toISOString();
+  const nowIso = new Date().toISOString();
+
+  const { data: affectedUsers, error: affectedUsersError } = await supabase
+    .from("users")
+    .select("id")
+    .eq("stripe_subscription_id", params.stripeSubscriptionId);
+
+  if (affectedUsersError) throw affectedUsersError;
 
   const { error: userError } = await supabase
     .from("users")
@@ -271,7 +320,7 @@ export async function markSubscriptionLocked(params: {
       is_subscribed: false,
       subscription_locked_at: lockAtIso,
       subscription_lock_reason: params.reason,
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     })
     .eq("stripe_subscription_id", params.stripeSubscriptionId);
 
@@ -281,12 +330,17 @@ export async function markSubscriptionLocked(params: {
     .from("user_entitlements")
     .update({
       status: "locked",
-      updated_at: new Date().toISOString(),
+      updated_at: nowIso,
     })
     .eq("stripe_subscription_id", params.stripeSubscriptionId)
     .eq("source", "subscription_all");
 
   if (entitlementError) throw entitlementError;
+
+  await syncLegacyUnlockedFeaturesForUsers(
+    supabase,
+    (affectedUsers || []).map((user: { id: string }) => user.id)
+  );
 }
 
 export async function markSubscriptionCanceledOrLocked(params: {
