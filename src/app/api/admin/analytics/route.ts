@@ -53,6 +53,8 @@ interface RouteMetric {
   source: "ga" | "internal" | "vercel";
 }
 
+type RouteMetricAccumulator = RouteMetric & { sessions: Set<string>; durationSamples: number[] };
+
 interface SourceStatus {
   configured: boolean;
   connected: boolean;
@@ -165,7 +167,7 @@ function isContinuationEvent(event: { event_name?: unknown; action?: unknown; me
 }
 
 function ensureRouteMetric(
-  map: Map<string, RouteMetric & { sessions: Set<string>; durationSamples: number[] }>,
+  map: Map<string, RouteMetricAccumulator>,
   route: string,
   source: RouteMetric["source"] = "internal"
 ) {
@@ -184,6 +186,52 @@ function ensureRouteMetric(
     });
   }
   return map.get(route)!;
+}
+
+function countSessionIntersection(left: Set<string>, right: Set<string>): number {
+  let count = 0;
+  left.forEach((value) => {
+    if (right.has(value)) count += 1;
+  });
+  return count;
+}
+
+function getWorkflowContinuationRoutes(route: string): string[] {
+  const normalized = route.trim();
+  if (normalized === "/") return ["/welcome", "/onboarding"];
+  if (normalized === "/welcome") return ["/onboarding"];
+  if (normalized === "/onboarding/step-7") {
+    return [
+      "/onboarding/future-prediction/intro",
+      "/onboarding/soulmate-sketch/intro",
+      "/onboarding/palm-reading/intro",
+      "/onboarding/future-partner/intro",
+      "/onboarding/compatibility/intro",
+    ];
+  }
+
+  const index = WORKFLOW_ROUTES.indexOf(normalized);
+  if (index < 0 || index >= WORKFLOW_ROUTES.length - 1) return [];
+  return [WORKFLOW_ROUTES[index + 1]];
+}
+
+function applyWorkflowDropOffBounces(routeMap: Map<string, RouteMetricAccumulator>) {
+  for (const route of WORKFLOW_ROUTES) {
+    const current = routeMap.get(route);
+    if (!current || current.sessions.size === 0) continue;
+
+    const continuationSessions = new Set<string>();
+    for (const nextRoute of getWorkflowContinuationRoutes(route)) {
+      const next = routeMap.get(nextRoute);
+      if (!next) continue;
+      next.sessions.forEach((sessionId) => continuationSessions.add(sessionId));
+    }
+
+    if (continuationSessions.size === 0) continue;
+
+    const continued = countSessionIntersection(current.sessions, continuationSessions);
+    current.bounces = Math.max(current.sessions.size - continued, 0);
+  }
 }
 
 function toNumber(value: unknown): number {
@@ -428,6 +476,33 @@ function getRouteFromMetadata(metadata: unknown, fallback: string): string {
   const normalized = candidate.trim();
   if (!normalized) return fallback;
   return normalized.startsWith("/") ? normalized.split("?")[0] : `/${normalized.split("?")[0]}`;
+}
+
+function isUsableAnalyticsId(value: unknown): boolean {
+  const text = String(value ?? "").trim();
+  return Boolean(text && text !== "0" && text.toLowerCase() !== "null" && text.toLowerCase() !== "undefined");
+}
+
+function getVercelVisitorKey(row: {
+  session_id?: unknown;
+  device_id?: unknown;
+  path?: unknown;
+  event_timestamp?: unknown;
+}): string {
+  if (isUsableAnalyticsId(row.session_id)) return `session:${String(row.session_id).trim()}`;
+  if (isUsableAnalyticsId(row.device_id)) return `device:${String(row.device_id).trim()}`;
+  return `pageview:${String(row.path || "/")}:${String(row.event_timestamp || "")}`;
+}
+
+function shouldExcludeAnalyticsRoute(route: string): boolean {
+  const normalized = route.trim().toLowerCase();
+  return (
+    normalized === "/test-page" ||
+    normalized === "/api" ||
+    normalized.startsWith("/api/") ||
+    normalized === "/admin" ||
+    normalized.startsWith("/admin/")
+  );
 }
 
 function inferPaywallVisitors(routeMetrics: RouteMetric[]): { visitors: number; matchedRoute: string | null } {
@@ -833,7 +908,7 @@ async function fetchVercelAnalyticsData(
     };
   }
 
-  const routeMap = new Map<string, RouteMetric & { sessions: Set<string>; durationSamples: number[] }>();
+  const routeMap = new Map<string, RouteMetricAccumulator>();
   const hourlySessions = new Map<string, Set<string>>();
   const dailySessions = new Map<string, Set<string>>();
   const weekdaySessions = new Map<string, Set<string>>();
@@ -858,17 +933,18 @@ async function fetchVercelAnalyticsData(
     if (grouped.dayKey < startDate || grouped.dayKey > endDate) continue;
 
     const route = getRouteFromMetadata({ route: row.path || row.route }, "/unknown");
-    const sessionKey = String(row.session_id || row.device_id || `${route}_${row.event_timestamp}`);
-    allSessions.add(sessionKey);
+    if (shouldExcludeAnalyticsRoute(route)) continue;
+    const visitorKey = getVercelVisitorKey(row);
+    allSessions.add(visitorKey);
 
     const item = ensureRouteMetric(routeMap, route, "vercel");
-    item.sessions.add(sessionKey);
+    item.sessions.add(visitorKey);
     item.pageViews += 1;
 
-    if (!sessionPageViews.has(sessionKey)) {
-      sessionPageViews.set(sessionKey, []);
+    if (!sessionPageViews.has(visitorKey)) {
+      sessionPageViews.set(visitorKey, []);
     }
-    sessionPageViews.get(sessionKey)!.push({
+    sessionPageViews.get(visitorKey)!.push({
       route,
       timestamp: createdAt.getTime(),
     });
@@ -877,9 +953,9 @@ async function fetchVercelAnalyticsData(
     if (!hourlySessions.has(hourLabel)) hourlySessions.set(hourLabel, new Set());
     if (!dailySessions.has(grouped.dayKey)) dailySessions.set(grouped.dayKey, new Set());
     if (!weekdaySessions.has(grouped.weekday)) weekdaySessions.set(grouped.weekday, new Set());
-    hourlySessions.get(hourLabel)!.add(sessionKey);
-    dailySessions.get(grouped.dayKey)!.add(sessionKey);
-    weekdaySessions.get(grouped.weekday)!.add(sessionKey);
+    hourlySessions.get(hourLabel)!.add(visitorKey);
+    dailySessions.get(grouped.dayKey)!.add(visitorKey);
+    weekdaySessions.get(grouped.weekday)!.add(visitorKey);
   }
 
   for (const pageViews of sessionPageViews.values()) {
@@ -908,6 +984,8 @@ async function fetchVercelAnalyticsData(
       }
     }
   }
+
+  applyWorkflowDropOffBounces(routeMap);
 
   const hourlyMap = new Map<string, number>();
   const dailyMap = new Map<string, number>();
@@ -990,7 +1068,7 @@ async function fetchInternalRouteAnalytics(
     .limit(30000);
 
   if (!firstPartyError && firstPartyEvents && firstPartyEvents.length > 0) {
-    const routeMap = new Map<string, RouteMetric & { sessions: Set<string>; durationSamples: number[] }>();
+    const routeMap = new Map<string, RouteMetricAccumulator>();
     const hourlySessions = new Map<string, Set<string>>();
     const dailySessions = new Map<string, Set<string>>();
     const weekdaySessions = new Map<string, Set<string>>();
@@ -1017,6 +1095,7 @@ async function fetchInternalRouteAnalytics(
       if (grouped.dayKey < startDate || grouped.dayKey > endDate) continue;
 
       const route = getRouteFromMetadata({ route: evt.route }, "/unknown");
+      if (shouldExcludeAnalyticsRoute(route)) continue;
       const sessionKey = String(evt.session_id || evt.user_id || `${route}_${evt.created_at}`);
       const eventName = String(evt.event_name || "");
       const eventTimestamp = new Date(evt.created_at).getTime();
@@ -1086,6 +1165,8 @@ async function fetchInternalRouteAnalytics(
         }
       }
     }
+
+    applyWorkflowDropOffBounces(routeMap);
 
     const hourlyMap = new Map<string, number>();
     const dailyMap = new Map<string, number>();
@@ -1440,18 +1521,24 @@ export async function GET(request: NextRequest) {
 
     const useVercelRouteData = vercelData.totalSessions > 0 || vercelData.routeMetrics.some((row) => row.pageViews > 0);
     const useInternalRouteData = internalRouteData.totalSessions > 0 || internalRouteData.routeMetrics.length > 0;
+    const internalHasBetterRouteCoverage =
+      useInternalRouteData &&
+      (!useVercelRouteData || internalRouteData.totalPageViews >= vercelData.totalPageViews);
 
-    const selectedRouteData = useVercelRouteData
-      ? vercelData
-      : useInternalRouteData
-        ? {
-            ...internalRouteData,
-            sourceStatus: {
-              configured: true,
-              connected: true,
-              message: "Using first-party Supabase analytics events for traffic buckets.",
-            } as SourceStatus,
-          }
+    const selectedRouteData = internalHasBetterRouteCoverage
+      ? {
+          ...internalRouteData,
+          sourceStatus: {
+            configured: true,
+            connected: true,
+            message:
+              useVercelRouteData && vercelData.totalPageViews < internalRouteData.totalPageViews
+                ? "Using first-party route analytics because the Vercel drain copy is incomplete for this range."
+                : "Using first-party Supabase analytics events for route traffic.",
+          } as SourceStatus,
+        }
+      : useVercelRouteData
+        ? vercelData
         : gaData;
 
     const paymentStarts = selectedPaymentRows.length;

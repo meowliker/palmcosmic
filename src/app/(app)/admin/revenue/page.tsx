@@ -326,6 +326,7 @@ interface RevenueData {
   uniquePayingUsers: number;
   subscriptionKpis?: {
     totalTrialUsers: number;
+    endedTrialUsers: number;
     firstRenewalPaidUsers: number;
     trialCancelledUsers: number;
     failedOrDidNotPayAfterTrialUsers: number;
@@ -660,6 +661,329 @@ function formatCalendarDateShort(isoDate: string): string {
   }).format(new Date(`${isoDate}T12:00:00.000Z`));
 }
 
+interface RevenueDateRangeControlsProps {
+  title?: string;
+  badge?: string;
+  note?: string;
+  startDate: string;
+  endDate: string;
+  datePreset: string;
+  useCustomDateRange: boolean;
+  loading: boolean;
+  onPresetChange: (preset: string) => void;
+  onCustomModeChange: (enabled: boolean) => void;
+  onApplyRange: (startDate: string, endDate: string) => void;
+  onRefresh: () => void;
+}
+
+function RevenueDateRangeControls({
+  title = "Date Range & Data Source",
+  badge = "Stripe / Supabase",
+  note = "Each selected date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. The range picker always uses the full selected Stripe business days.",
+  startDate,
+  endDate,
+  datePreset,
+  useCustomDateRange,
+  loading,
+  onPresetChange,
+  onCustomModeChange,
+  onApplyRange,
+  onRefresh,
+}: RevenueDateRangeControlsProps) {
+  const [pickerStartDate, setPickerStartDate] = useState<string>(startDate);
+  const [pickerEndDate, setPickerEndDate] = useState<string>(endDate);
+  const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const calendarDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [calendarMonthStart, setCalendarMonthStart] = useState<Date>(() => {
+    const focusDate = endDate || startDate || getCurrentBusinessDateIso();
+    return getMonthStartUtcDate(focusDate);
+  });
+
+  useEffect(() => {
+    setPickerStartDate(startDate);
+    setPickerEndDate(endDate);
+  }, [startDate, endDate]);
+
+  useEffect(() => {
+    if (!isCalendarOpen) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (calendarDropdownRef.current && target && !calendarDropdownRef.current.contains(target)) {
+        setIsCalendarOpen(false);
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setIsCalendarOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isCalendarOpen]);
+
+  const maxSelectableBusinessDate = getCurrentBusinessDateIso();
+  const maxMonthStart = getMonthStartUtcDate(maxSelectableBusinessDate);
+  const calendarCells = useMemo(() => buildMonthGrid(calendarMonthStart), [calendarMonthStart]);
+  const monthLabel = new Intl.DateTimeFormat("en-IN", {
+    timeZone: META_IST_TIMEZONE,
+    month: "long",
+    year: "numeric",
+  }).format(calendarMonthStart);
+
+  const applyPresetRange = (preset: string) => {
+    if (preset === "custom") {
+      onPresetChange("custom");
+      onCustomModeChange(true);
+      return;
+    }
+
+    const presetRange = getPresetCalendarRange(preset);
+    const boundedStartDate =
+      presetRange.startDate < REVENUE_DEFAULT_START_DATE ? REVENUE_DEFAULT_START_DATE : presetRange.startDate;
+    const boundedEndDate =
+      presetRange.endDate < boundedStartDate ? boundedStartDate : presetRange.endDate;
+
+    onPresetChange(preset);
+    onCustomModeChange(false);
+    setPickerStartDate(boundedStartDate);
+    setPickerEndDate(boundedEndDate);
+    setCalendarMonthStart(getMonthStartUtcDate(boundedEndDate));
+    onApplyRange(boundedStartDate, boundedEndDate);
+    setIsCalendarOpen(false);
+  };
+
+  const handleCalendarDateSelect = (isoDate: string) => {
+    if (isoDate < REVENUE_DEFAULT_START_DATE || isoDate > maxSelectableBusinessDate) {
+      return;
+    }
+    if (!pickerStartDate || (pickerStartDate && pickerEndDate)) {
+      setPickerStartDate(isoDate);
+      setPickerEndDate("");
+      return;
+    }
+    if (isoDate < pickerStartDate) {
+      setPickerStartDate(isoDate);
+      setPickerEndDate("");
+      return;
+    }
+    setPickerEndDate(isoDate);
+  };
+
+  const applyCustomRange = () => {
+    if (!pickerStartDate) return;
+    const finalEndDate = pickerEndDate || pickerStartDate;
+    onPresetChange("custom");
+    onCustomModeChange(true);
+    onApplyRange(pickerStartDate, finalEndDate);
+    setIsCalendarOpen(false);
+  };
+
+  const selectedRangeLabel = pickerStartDate
+    ? `${formatCalendarDateLabel(pickerStartDate)}${
+        pickerEndDate ? ` → ${formatCalendarDateLabel(pickerEndDate)}` : ""
+      }`
+    : "No date selected";
+
+  const activeRangeStart = startDate || pickerStartDate;
+  const activeRangeEnd = endDate || pickerEndDate || activeRangeStart;
+  const activeRangeButtonLabel =
+    activeRangeStart && activeRangeEnd
+      ? activeRangeStart === activeRangeEnd
+        ? formatCalendarDateShort(activeRangeStart)
+        : `${formatCalendarDateShort(activeRangeStart)} - ${formatCalendarDateShort(activeRangeEnd)}`
+      : "Select Range";
+
+  return (
+    <section className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
+          <Calendar className="w-4 h-4" /> {title}
+        </h2>
+        <div className="cursor-default rounded-lg bg-[#38bdf8]/15 px-3 py-1.5 text-xs text-[#38bdf8]">
+          {badge}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-4">
+        <div>
+          <label className="text-white/50 text-xs mb-1 block">Quick Select</label>
+          <select
+            value={datePreset}
+            onChange={(event) => applyPresetRange(event.target.value)}
+            className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+          >
+            <option value="custom">Custom Range</option>
+            <option value="today">Today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="last_3d">Last 3 Days</option>
+            <option value="last_7d">Last 7 Days</option>
+            <option value="last_14d">Last 14 Days</option>
+            <option value="last_30d">Last 30 Days</option>
+            <option value="last_60d">Last 60 Days</option>
+            <option value="last_90d">Last 90 Days</option>
+            <option value="this_week">This Week</option>
+            <option value="last_week">Last Week</option>
+            <option value="this_month">This Month</option>
+            <option value="last_month">Last Month</option>
+            <option value="this_quarter">This Quarter</option>
+            <option value="last_quarter">Last Quarter</option>
+            <option value="this_year">This Year</option>
+            <option value="last_year">Last Year</option>
+            <option value="maximum">All Time</option>
+          </select>
+        </div>
+
+        <div ref={calendarDropdownRef} className="relative">
+          <label className="text-white/50 text-xs mb-1 block">Custom Range</label>
+          <button
+            type="button"
+            onClick={() => setIsCalendarOpen((prev) => !prev)}
+            className={`px-3 py-2 rounded-lg text-sm border transition-colors ${
+              useCustomDateRange
+                ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+                : "bg-white/5 border-white/10 text-white/70 hover:bg-white/10"
+            }`}
+          >
+            {activeRangeButtonLabel}
+          </button>
+
+          {isCalendarOpen && (
+            <div className="absolute left-0 top-[calc(100%+8px)] z-50 w-[92vw] sm:w-[680px] max-w-[92vw] rounded-2xl border border-white/15 bg-[#1A2235] shadow-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-white/80 text-sm font-medium">Custom Range</p>
+                <button
+                  type="button"
+                  onClick={() => setIsCalendarOpen(false)}
+                  className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  aria-label="Close custom range picker"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="flex items-center justify-between mb-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCalendarMonthStart(
+                      (prev) => new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth() - 1, 1))
+                    )
+                  }
+                  className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors"
+                  aria-label="Previous month"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <p className="text-white text-sm font-medium">{monthLabel}</p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setCalendarMonthStart(
+                      (prev) => new Date(Date.UTC(prev.getUTCFullYear(), prev.getUTCMonth() + 1, 1))
+                    )
+                  }
+                  disabled={calendarMonthStart.getTime() >= maxMonthStart.getTime()}
+                  className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Next month"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-7 gap-1 text-[11px] text-white/50 mb-2">
+                {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((weekday) => (
+                  <div key={weekday} className="text-center py-1">
+                    {weekday}
+                  </div>
+                ))}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {calendarCells.map((cell) => {
+                  const isDisabled =
+                    cell.isoDate < REVENUE_DEFAULT_START_DATE || cell.isoDate > maxSelectableBusinessDate;
+                  const isStart = pickerStartDate === cell.isoDate;
+                  const isEnd = pickerEndDate === cell.isoDate;
+                  const isInRange =
+                    !!pickerStartDate &&
+                    !!pickerEndDate &&
+                    cell.isoDate >= pickerStartDate &&
+                    cell.isoDate <= pickerEndDate;
+                  return (
+                    <button
+                      key={cell.isoDate}
+                      type="button"
+                      onClick={() => handleCalendarDateSelect(cell.isoDate)}
+                      disabled={isDisabled}
+                      className={`h-9 rounded-md text-sm transition-colors ${
+                        isStart || isEnd
+                          ? "bg-primary text-white"
+                          : isInRange
+                          ? "bg-primary/25 text-white"
+                          : cell.inCurrentMonth
+                          ? "bg-white/5 text-white hover:bg-white/15"
+                          : "bg-white/[0.02] text-white/45 hover:bg-white/10"
+                      } ${isDisabled ? "opacity-30 cursor-not-allowed" : ""}`}
+                      title={formatCalendarDateLabel(cell.isoDate)}
+                    >
+                      {cell.day}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-white/60">
+                  Selected: <span className="text-white/90">{selectedRangeLabel}</span>
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPickerStartDate(startDate);
+                      setPickerEndDate(endDate);
+                    }}
+                    className="px-3 py-1.5 text-xs rounded-md bg-white/10 hover:bg-white/20 text-white/80 transition-colors"
+                  >
+                    Reset
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyCustomRange}
+                    disabled={loading || !pickerStartDate}
+                    className="px-3 py-1.5 text-xs rounded-md bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 transition-colors disabled:opacity-50"
+                  >
+                    Apply Range
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="px-4 py-2 bg-primary hover:bg-primary/80 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="mt-3 p-2 bg-sky-500/10 border border-sky-500/20 rounded-lg">
+        <p className="text-sky-300 text-xs">
+          {note}
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export default function AdminRevenuePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -681,12 +1005,12 @@ export default function AdminRevenuePage() {
 
   // Date picker with time and timezone
   const [selectedStartDate, setSelectedStartDate] = useState<string>(REVENUE_DEFAULT_START_DATE);
-  const [selectedEndDate, setSelectedEndDate] = useState<string>(
-    new Date().toISOString().split("T")[0]
-  );
+  const [selectedEndDate, setSelectedEndDate] = useState<string>(() => getCurrentBusinessDateIso());
   const [selectedStartTime, setSelectedStartTime] = useState<string>("11:30");
   const [selectedEndTime, setSelectedEndTime] = useState<string>("11:30");
   const [selectedTimezone, setSelectedTimezone] = useState<string>("ist");
+  const [revenueDatePreset, setRevenueDatePreset] = useState<string>("maximum");
+  const [revenueUseCustomDateRange, setRevenueUseCustomDateRange] = useState(false);
   const [dateLoading, setDateLoading] = useState(false);
 
   // Sorting
@@ -1223,6 +1547,7 @@ export default function AdminRevenuePage() {
   const selectedDatePaymentCount = data.customDatePaymentCount || 0;
   const subscriptionKpis = data.subscriptionKpis || {
     totalTrialUsers: 0,
+    endedTrialUsers: 0,
     firstRenewalPaidUsers: 0,
     trialCancelledUsers: 0,
     failedOrDidNotPayAfterTrialUsers: 0,
@@ -1547,10 +1872,10 @@ export default function AdminRevenuePage() {
             <KPICard
               title="Conversion Rate"
               value={formatRate(subscriptionKpis.conversionRate)}
-              subtitle={`${subscriptionKpis.firstRenewalPaidUsers} first renewals`}
+              subtitle={`${subscriptionKpis.firstRenewalPaidUsers} of ${subscriptionKpis.endedTrialUsers} ended trials`}
               icon={<Target className="w-4 h-4" />}
               color="text-sky-400"
-              tooltip="$9 first renewal paid divided by $0.99 trial users."
+              tooltip="$9 first renewal paid divided by $0.99 trial users whose trial end time has already passed. Users still on trial are excluded."
             />
             <KPICard
               title="Users Loss Rate"
@@ -1558,7 +1883,7 @@ export default function AdminRevenuePage() {
               subtitle={`${subscriptionKpis.trialCancelledUsers} cancelled • ${subscriptionKpis.failedOrDidNotPayAfterTrialUsers} failed/no pay`}
               icon={<XCircle className="w-4 h-4" />}
               color="text-amber-300"
-              tooltip="Cancelled during trial plus users who failed/did not pay after trial, divided by $0.99 trial users."
+              tooltip="Cancelled during trial plus users who failed/did not pay after trial, divided by $0.99 trial users whose trial end time has already passed."
             />
             <KPICard
               title="Retention Rate"
@@ -1668,153 +1993,23 @@ export default function AdminRevenuePage() {
           </div>
         </section>
 
-        {/* Date Range Selector with Time & Timezone */}
-        <section className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-white/70 text-sm font-medium flex items-center gap-2">
-              <Calendar className="w-4 h-4" /> Date Range & Data Source
-            </h2>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                className="cursor-default rounded-lg bg-[#38bdf8]/15 px-3 py-1.5 text-xs text-[#38bdf8]"
-              >
-                Stripe / Supabase
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Start Date & Time */}
-            <div>
-              <label className="text-white/50 text-xs mb-2 block">Start Date</label>
-              <input
-                type="date"
-                value={selectedStartDate}
-                min={REVENUE_DEFAULT_START_DATE}
-                onChange={(e) => setSelectedStartDate(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-              />
-            </div>
-            <div>
-              <label className="text-white/50 text-xs mb-2 block">Start Time</label>
-              <input
-                type="time"
-                value={selectedStartTime}
-                onChange={(e) => setSelectedStartTime(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-              />
-            </div>
-
-            {/* End Date & Time */}
-            <div>
-              <label className="text-white/50 text-xs mb-2 block">End Date</label>
-              <input
-                type="date"
-                value={selectedEndDate}
-                min={REVENUE_DEFAULT_START_DATE}
-                onChange={(e) => setSelectedEndDate(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-              />
-            </div>
-            <div>
-              <label className="text-white/50 text-xs mb-2 block">End Time</label>
-              <input
-                type="time"
-                value={selectedEndTime}
-                onChange={(e) => setSelectedEndTime(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-              />
-            </div>
-          </div>
-
-          {/* Timezone & Quick Presets */}
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2">
-              <label className="text-white/50 text-xs">Timezone:</label>
-              <select
-                value={selectedTimezone}
-                onChange={(e) => setSelectedTimezone(e.target.value)}
-                className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-primary/50"
-              >
-                <option value="costa_rica">Costa Rica (UTC-6)</option>
-                <option value="ist">India (IST UTC+5:30)</option>
-              </select>
-            </div>
-
-            <div className="flex items-center gap-2 ml-auto">
-              <button
-                onClick={() => {
-                  const today = new Date().toISOString().split("T")[0];
-                  setSelectedStartDate(today);
-                  setSelectedEndDate(today);
-                  setSelectedStartTime("11:30");
-                  setSelectedEndTime("11:30");
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
-              >
-                Today
-              </button>
-              <button
-                onClick={() => {
-                  const today = new Date();
-                  const yesterday = new Date(today);
-                  yesterday.setDate(yesterday.getDate() - 1);
-                  setSelectedStartDate(yesterday.toISOString().split("T")[0]);
-                  setSelectedEndDate(yesterday.toISOString().split("T")[0]);
-                  setSelectedStartTime("11:30");
-                  setSelectedEndTime("11:30");
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
-              >
-                Yesterday
-              </button>
-              <button
-                onClick={() => {
-                  const today = new Date();
-                  const weekAgo = new Date(today);
-                  weekAgo.setDate(weekAgo.getDate() - 7);
-                  setSelectedStartDate(weekAgo.toISOString().split("T")[0]);
-                  setSelectedEndDate(today.toISOString().split("T")[0]);
-                  setSelectedStartTime("11:30");
-                  setSelectedEndTime("11:30");
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
-              >
-                Last 7 Days
-              </button>
-              <button
-                onClick={() => {
-                  setSelectedStartDate(REVENUE_DEFAULT_START_DATE);
-                  setSelectedEndDate(new Date().toISOString().split("T")[0]);
-                  setSelectedStartTime("11:30");
-                  setSelectedEndTime("11:30");
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs text-white/60 bg-white/10 hover:bg-white/20 transition-colors"
-              >
-                All Time
-              </button>
-            </div>
-          </div>
-
-          {/* Info about timezone */}
-          {selectedTimezone === "costa_rica" && (
-            <div className="mt-3 p-2 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-              <p className="text-blue-400 text-xs">
-                Times are in Costa Rica timezone (UTC-6). IST is 11.5 hours ahead.
-                <br />
-                Example: 11:30 AM Costa Rica = 11:00 PM IST (same day) → 12:00 AM IST (next day)
-              </p>
-            </div>
-          )}
-          {selectedTimezone === "ist" && (
-            <div className="mt-3 p-2 bg-sky-500/10 border border-sky-500/20 rounded-lg">
-              <p className="text-sky-300 text-xs">
-                Stripe business day is 11:30 AM IST to next day 11:29 AM IST. With 11:30 selected, the end date is included as a full Stripe business day.
-              </p>
-            </div>
-          )}
-        </section>
+        <RevenueDateRangeControls
+          startDate={selectedStartDate}
+          endDate={selectedEndDate}
+          datePreset={revenueDatePreset}
+          useCustomDateRange={revenueUseCustomDateRange}
+          loading={dateLoading || refreshing}
+          onPresetChange={setRevenueDatePreset}
+          onCustomModeChange={setRevenueUseCustomDateRange}
+          onApplyRange={(startDate, endDate) => {
+            setSelectedStartDate(startDate);
+            setSelectedEndDate(endDate);
+            setSelectedStartTime("11:30");
+            setSelectedEndTime("11:30");
+            setSelectedTimezone("ist");
+          }}
+          onRefresh={fetchData}
+        />
 
         {/* Revenue by Period */}
         <section>
@@ -2408,70 +2603,42 @@ function ProfitSheetTab({
   );
   const overallRoas = totals.adsCostUSD > 0 ? totals.revenue / totals.adsCostUSD : 0;
   const overallProfitPercent = totals.revenue > 0 ? (totals.netRevenue / totals.revenue) * 100 : 0;
+  const [profitDatePreset, setProfitDatePreset] = useState<string>("maximum");
+  const [profitUseCustomDateRange, setProfitUseCustomDateRange] = useState(false);
 
   return (
     <div className="space-y-4">
-      {/* Filters */}
+      <RevenueDateRangeControls
+        title="Profit Sheet Range"
+        badge="Stripe + Meta"
+        startDate={startDate}
+        endDate={endDate}
+        datePreset={profitDatePreset}
+        useCustomDateRange={profitUseCustomDateRange}
+        loading={loading}
+        onPresetChange={setProfitDatePreset}
+        onCustomModeChange={setProfitUseCustomDateRange}
+        onApplyRange={(nextStartDate, nextEndDate) => {
+          setPeriodFilter("all");
+          setStartDate(nextStartDate);
+          setEndDate(nextEndDate);
+        }}
+        onRefresh={onRefresh}
+        note="Each selected date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue, Stripe fees, and Meta spend are shown in USD."
+      />
+
       <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
-        <div className="flex flex-wrap items-end gap-4">
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              min={REVENUE_DEFAULT_START_DATE}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-            />
-          </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              min={REVENUE_DEFAULT_START_DATE}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-            />
-          </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">Period</label>
-            <select
-              value={periodFilter}
-              onChange={(e) => setPeriodFilter(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-            >
-              <option value="all">All Time</option>
-              <option value="last7">Last 7 Days</option>
-              <option value="last14">Last 14 Days</option>
-              <option value="last30">Last 30 Days</option>
-            </select>
-          </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">ROAS Filter</label>
-            <select
-              value={roasFilter}
-              onChange={(e) => setRoasFilter(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-            >
-              <option value="all">All</option>
-              <option value="positive">Profitable (ROAS &gt; 1)</option>
-              <option value="negative">Loss (ROAS ≤ 1)</option>
-              <option value="noads">No Ads</option>
-            </select>
-          </div>
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="px-4 py-2 bg-primary hover:bg-primary/80 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
-        <p className="text-white/30 text-xs mt-3">
-          Note: Each date is a Stripe business day: 11:30 AM IST to next day 11:29 AM IST. Stripe revenue, Stripe fees, and Meta spend are shown in USD.
-        </p>
+        <label className="text-white/50 text-xs mb-1 block">ROAS Filter</label>
+        <select
+          value={roasFilter}
+          onChange={(e) => setRoasFilter(e.target.value)}
+          className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
+        >
+          <option value="all">All</option>
+          <option value="positive">Profitable (ROAS &gt; 1)</option>
+          <option value="negative">Loss (ROAS ≤ 1)</option>
+          <option value="noads">No Ads</option>
+        </select>
       </div>
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-300">
@@ -3341,23 +3508,18 @@ function AnalyticsTab({
   const [expandedChart, setExpandedChart] = useState<AnalyticsChartKey | null>(null);
   const [profitMetric, setProfitMetric] = useState<ProfitMetric>("profit");
   const [profitView, setProfitView] = useState<ProfitView>("table");
-  const [profitPeriodDays, setProfitPeriodDays] = useState<7 | 14 | 28>(14);
   const [matrixStartDate, setMatrixStartDate] = useState<string>(() => {
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(end.getDate() - 13);
-    const local = new Date(start.getTime() - start.getTimezoneOffset() * 60000);
-    return local.toISOString().split("T")[0];
+    return shiftIsoDate(getCurrentBusinessDateIso(), -13);
   });
-  const [matrixEndDate, setMatrixEndDate] = useState<string>(() => {
-    const end = new Date();
-    const local = new Date(end.getTime() - end.getTimezoneOffset() * 60000);
-    return local.toISOString().split("T")[0];
-  });
+  const [matrixEndDate, setMatrixEndDate] = useState<string>(() => getCurrentBusinessDateIso());
   const [matrixLoading, setMatrixLoading] = useState(false);
   const [matrixRows, setMatrixRows] = useState<AnalyticsHourlyProfitabilityPoint[]>(() => data?.hourlyProfitability?.rows || []);
   const [matrixAdsSource, setMatrixAdsSource] = useState<"meta" | "none">(() => data?.hourlyProfitability?.adsSource || "none");
   const matrixFetchSeq = useRef(0);
+  const [analyticsDatePreset, setAnalyticsDatePreset] = useState<string>("maximum");
+  const [analyticsUseCustomDateRange, setAnalyticsUseCustomDateRange] = useState(false);
+  const [matrixDatePreset, setMatrixDatePreset] = useState<string>("last_14d");
+  const [matrixUseCustomDateRange, setMatrixUseCustomDateRange] = useState(false);
   const [chartStyleByKey, setChartStyleByKey] = useState<Record<string, ChartStyle>>({
     "traffic-hourly": "bar",
     "sales-hourly": "bar",
@@ -4233,16 +4395,6 @@ function AnalyticsTab({
     );
   }, [routeOptions.join("|"), customViews.length]);
 
-  useEffect(() => {
-    const start = new Date(`${matrixStartDate}T00:00:00`);
-    const end = new Date(`${matrixEndDate}T00:00:00`);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return;
-    const diffDays = Math.floor((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1;
-    if (diffDays === 7 || diffDays === 14 || diffDays === 28) {
-      setProfitPeriodDays(diffDays as 7 | 14 | 28);
-    }
-  }, [matrixStartDate, matrixEndDate]);
-
   const filteredRoutes = data
     ? data.routes.filter((row) => {
         const matchesSearch = row.route.toLowerCase().includes(routeSearch.toLowerCase());
@@ -4305,11 +4457,6 @@ function AnalyticsTab({
     return { backgroundColor: `rgba(74, 222, 128, ${alpha.toFixed(3)})` };
   };
 
-  const toInputDate = (date: Date) => {
-    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-    return local.toISOString().split("T")[0];
-  };
-
   const fetchProfitabilityMatrix = async (
     customStartDate?: string,
     customEndDate?: string,
@@ -4340,34 +4487,6 @@ function AnalyticsTab({
     } finally {
       setMatrixLoading(false);
     }
-  };
-
-  const applyProfitPeriod = (days: 7 | 14 | 28) => {
-    setProfitPeriodDays(days);
-    const end = new Date();
-    const start = new Date(end);
-    start.setDate(end.getDate() - (days - 1));
-    const nextStart = toInputDate(start);
-    const nextEnd = toInputDate(end);
-    setMatrixStartDate(nextStart);
-    setMatrixEndDate(nextEnd);
-    fetchProfitabilityMatrix(nextStart, nextEnd, dayMode);
-  };
-
-  const handleMatrixStartDateChange = (nextStart: string) => {
-    if (!nextStart) return;
-    const adjustedEnd = nextStart > matrixEndDate ? nextStart : matrixEndDate;
-    setMatrixStartDate(nextStart);
-    if (adjustedEnd !== matrixEndDate) setMatrixEndDate(adjustedEnd);
-    fetchProfitabilityMatrix(nextStart, adjustedEnd, dayMode);
-  };
-
-  const handleMatrixEndDateChange = (nextEnd: string) => {
-    if (!nextEnd) return;
-    const adjustedStart = nextEnd < matrixStartDate ? nextEnd : matrixStartDate;
-    setMatrixEndDate(nextEnd);
-    if (adjustedStart !== matrixStartDate) setMatrixStartDate(adjustedStart);
-    fetchProfitabilityMatrix(adjustedStart, nextEnd, dayMode);
   };
 
   const handleMatrixDayModeChange = (mode: MatrixDayMode) => {
@@ -4489,58 +4608,29 @@ function AnalyticsTab({
 
   return (
     <div className="space-y-4">
-      <div className="bg-[#1A2235] rounded-xl p-4 border border-white/10">
-        <div className="flex flex-wrap items-end gap-4">
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              min={REVENUE_DEFAULT_START_DATE}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-            />
-          </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              min={REVENUE_DEFAULT_START_DATE}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-            />
-          </div>
-          <div>
-            <label className="text-white/50 text-xs mb-1 block">Day Mode</label>
-            <select
-              value={dayMode}
-              onChange={(e) => {
-                const mode = e.target.value as MatrixDayMode;
-                setDayMode(mode);
-                fetchProfitabilityMatrix(matrixStartDate, matrixEndDate, mode);
-              }}
-              className="bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-primary/50"
-            >
-              <option value="calendar_ist">IST (00:00 - 23:59)</option>
-              <option value="business_1130_ist">Stripe day (11:30 IST - next 11:29)</option>
-            </select>
-          </div>
-          <button
-            onClick={onRefresh}
-            disabled={loading}
-            className="px-4 py-2 bg-primary hover:bg-primary/80 text-white text-sm rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
-        {data?.range && (
-          <p className="text-white/30 text-xs mt-3">
-            Timezone: {data.range.timezone} | Day Mode: {dayModeDetailLabel} | Range: {data.range.startDate} to {data.range.endDate}
-          </p>
-        )}
-      </div>
+      <RevenueDateRangeControls
+        title="Analytics Range"
+        badge="Vercel + Stripe"
+        startDate={startDate}
+        endDate={endDate}
+        datePreset={analyticsDatePreset}
+        useCustomDateRange={analyticsUseCustomDateRange}
+        loading={loading}
+        onPresetChange={setAnalyticsDatePreset}
+        onCustomModeChange={setAnalyticsUseCustomDateRange}
+        onApplyRange={(nextStartDate, nextEndDate) => {
+          setDayMode("business_1130_ist");
+          setStartDate(nextStartDate);
+          setEndDate(nextEndDate);
+        }}
+        onRefresh={onRefresh}
+        note="Analytics uses Stripe business days for date ranges: 11:30 AM IST to next day 11:29 AM IST. Traffic and sales charts use the same selected business-day window."
+      />
+      {data?.range && (
+        <p className="text-white/30 text-xs -mt-2">
+          Timezone: {data.range.timezone} | Day Mode: {dayModeDetailLabel} | Range: {data.range.startDate} to {data.range.endDate}
+        </p>
+      )}
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 text-sm text-red-300">
           {error}
@@ -4702,6 +4792,26 @@ function AnalyticsTab({
             </div>
           )}
 
+          <RevenueDateRangeControls
+            title="Hourly Matrix Range"
+            badge="Stripe / Supabase"
+            startDate={matrixStartDate}
+            endDate={matrixEndDate}
+            datePreset={matrixDatePreset}
+            useCustomDateRange={matrixUseCustomDateRange}
+            loading={matrixLoading}
+            onPresetChange={setMatrixDatePreset}
+            onCustomModeChange={setMatrixUseCustomDateRange}
+            onApplyRange={(nextStartDate, nextEndDate) => {
+              setMatrixStartDate(nextStartDate);
+              setMatrixEndDate(nextEndDate);
+              setDayMode("business_1130_ist");
+              fetchProfitabilityMatrix(nextStartDate, nextEndDate, "business_1130_ist");
+            }}
+            onRefresh={() => fetchProfitabilityMatrix(matrixStartDate, matrixEndDate, dayMode)}
+            note="The matrix uses the selected Stripe business-day range. Single date shows that day; multi-date ranges show weekday averages."
+          />
+
           <div className="bg-[#1A2235] rounded-xl border border-white/10 overflow-hidden">
             <div className="px-4 py-3 border-b border-white/10 flex flex-wrap items-end justify-between gap-3">
               <div>
@@ -4714,18 +4824,6 @@ function AnalyticsTab({
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="date"
-                  value={matrixStartDate}
-                  onChange={(e) => handleMatrixStartDateChange(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-                />
-                <input
-                  type="date"
-                  value={matrixEndDate}
-                  onChange={(e) => handleMatrixEndDateChange(e.target.value)}
-                  className="bg-white/5 border border-white/10 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:border-primary/50 [color-scheme:dark]"
-                />
                 <button
                   type="button"
                   onClick={() => fetchProfitabilityMatrix(matrixStartDate, matrixEndDate, dayMode)}
@@ -4743,20 +4841,6 @@ function AnalyticsTab({
                   <option value="calendar_ist">Day Mode: IST (00:00-23:59)</option>
                   <option value="business_1130_ist">Day Mode: Stripe day (11:30 IST → next 11:29)</option>
                 </select>
-                <div className="flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg p-1">
-                  {[7, 14, 28].map((days) => (
-                    <button
-                      type="button"
-                      key={days}
-                      onClick={() => applyProfitPeriod(days as 7 | 14 | 28)}
-                      className={`px-2 py-1 text-xs rounded transition-colors ${
-                        profitPeriodDays === days ? "bg-primary text-white" : "text-white/70 hover:bg-white/10"
-                      }`}
-                    >
-                      Last {days}d
-                    </button>
-                  ))}
-                </div>
                 <select
                   value={profitMetric}
                   onChange={(e) => setProfitMetric(e.target.value as ProfitMetric)}

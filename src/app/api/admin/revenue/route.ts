@@ -534,12 +534,18 @@ export async function GET(request: NextRequest) {
       return cohort;
     });
     const totalTrialUsers = trialCohortRows.length;
-    const firstRenewalPaidUsers = trialCohortRows.filter((cohort) => cohort.renewals.length >= 1).length;
+    const trialEndedCohortRows = trialCohortRows.filter((cohort) => {
+      if (cohort.renewals.length > 0) return true;
+      const trialEnd = cohort.trialEndsAt ? new Date(cohort.trialEndsAt) : addDays(new Date(cohort.trialPaidAt), 3);
+      return trialEnd <= now;
+    });
+    const endedTrialUsers = trialEndedCohortRows.length;
+    const firstRenewalPaidUsers = trialEndedCohortRows.filter((cohort) => cohort.renewals.length >= 1).length;
     const retainedAfterFirstRenewalUsers = trialCohortRows.filter((cohort) => cohort.renewals.length >= 2).length;
-    const trialCancelledUsers = trialCohortRows.filter(
+    const trialCancelledUsers = trialEndedCohortRows.filter(
       (cohort) => cohort.renewals.length === 0 && (cohort.userStatus === "trial_cancelled" || cohort.cancelAtPeriodEnd)
     ).length;
-    const failedOrDidNotPayAfterTrialUsers = trialCohortRows.filter((cohort) => {
+    const failedOrDidNotPayAfterTrialUsers = trialEndedCohortRows.filter((cohort) => {
       if (cohort.renewals.length > 0) return false;
       const trialEnd = cohort.trialEndsAt ? new Date(cohort.trialEndsAt) : addDays(new Date(cohort.trialPaidAt), 3);
       return trialEnd <= now && (cohort.userStatus === "locked" || cohort.userStatus === "cancelled" || !cohort.cancelAtPeriodEnd);
@@ -560,8 +566,8 @@ export async function GET(request: NextRequest) {
       );
     }).length;
 
-    const conversionRate = totalTrialUsers > 0 ? (firstRenewalPaidUsers / totalTrialUsers) * 100 : 0;
-    const userLossRate = totalTrialUsers > 0 ? (userLossUsers / totalTrialUsers) * 100 : 0;
+    const conversionRate = endedTrialUsers > 0 ? (firstRenewalPaidUsers / endedTrialUsers) * 100 : 0;
+    const userLossRate = endedTrialUsers > 0 ? (userLossUsers / endedTrialUsers) * 100 : 0;
     const retentionRate = firstRenewalPaidUsers > 0 ? (retainedAfterFirstRenewalUsers / firstRenewalPaidUsers) * 100 : 0;
     const churnRate = activeSubscribersDueForRenewal > 0 ? (churnedBeforeNextRenewalUsers / activeSubscribersDueForRenewal) * 100 : 0;
 
@@ -663,6 +669,7 @@ export async function GET(request: NextRequest) {
       uniquePayingUsers: uniquePayingUsers || paidUsers.length,
       subscriptionKpis: {
         totalTrialUsers,
+        endedTrialUsers,
         firstRenewalPaidUsers,
         trialCancelledUsers,
         failedOrDidNotPayAfterTrialUsers,
