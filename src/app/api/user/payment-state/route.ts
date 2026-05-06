@@ -24,9 +24,11 @@ export async function GET(request: NextRequest) {
 
     const { data: paidPayments, error: paymentError } = await supabase
       .from("payments")
-      .select("id,user_id,payment_status,created_at")
+      .select("id,user_id,payment_status,type,amount,created_at")
       .eq("customer_email", normalizedEmail)
       .eq("payment_status", "paid")
+      .in("type", ["bundle", "upsell", "report", "coins"])
+      .gte("amount", 0)
       .order("created_at", { ascending: false })
       .limit(1);
 
@@ -68,6 +70,8 @@ export async function GET(request: NextRequest) {
             id: latestPaidPayment.id,
             userId: latestPaidPayment.user_id,
             status: latestPaidPayment.payment_status,
+            type: latestPaidPayment.type,
+            amount: latestPaidPayment.amount,
             createdAt: latestPaidPayment.created_at,
           }
         : null,

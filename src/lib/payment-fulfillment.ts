@@ -1053,7 +1053,10 @@ export async function fulfillStripeSession(
     return;
   }
 
-  const sessionStatus: PaymentStatus = session.payment_status === "paid" ? "paid" : "created";
+  const sessionStatus: PaymentStatus =
+    session.payment_status === "paid" || session.payment_status === "no_payment_required"
+      ? "paid"
+      : "created";
 
   await fulfillStripePayment({
     stripeSessionId: session.id,

@@ -166,6 +166,7 @@ export async function POST(request: NextRequest) {
     const stripe = getStripeClient();
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
+      allow_promotion_codes: true,
       customer_email: normalizedEmail || undefined,
       success_url: `${appUrl}/api/stripe/success?session_id={CHECKOUT_SESSION_ID}&next=${encodeURIComponent(successRedirectPath)}`,
       cancel_url: `${appUrl}${cancelRedirectPath}`,
