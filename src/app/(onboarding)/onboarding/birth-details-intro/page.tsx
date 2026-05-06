@@ -34,7 +34,7 @@ export default function BirthDetailsIntroPage() {
         </div>
       </div>
 
-      <div className="mt-auto px-6 pb-6">
+      <div className="onboarding-cta mt-auto">
         <Button
           onClick={() => {
             trackFunnelAction("continue_clicked", {

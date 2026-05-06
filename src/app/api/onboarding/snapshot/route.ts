@@ -31,6 +31,18 @@ function parseAge(birthYear: unknown): number | null {
   return new Date().getFullYear() - year;
 }
 
+function hasValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "string") return value.trim().length > 0;
+  return value !== undefined && value !== null;
+}
+
+function setIfPresent(payload: Record<string, unknown>, key: string, value: unknown) {
+  if (hasValue(value)) {
+    payload[key] = value;
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = (await request.json()) as SnapshotBody;
@@ -51,51 +63,53 @@ export async function POST(request: NextRequest) {
 
     const userPayload: Record<string, unknown> = {
       id: userId,
-      email,
-      gender: onboardingData.gender || null,
-      age,
-      relationship_status: onboardingData.relationshipStatus || null,
-      goals,
-      birth_month: onboardingData.birthMonth || null,
-      birth_day: onboardingData.birthDay || null,
-      birth_year: onboardingData.birthYear || null,
-      birth_hour: onboardingData.birthHour || null,
-      birth_minute: onboardingData.birthMinute || null,
-      birth_period: onboardingData.birthPeriod || null,
-      birth_place: onboardingData.birthPlace || null,
-      knows_birth_time: onboardingData.knowsBirthTime ?? true,
-      sun_sign: onboardingData.sunSign || null,
-      moon_sign: onboardingData.moonSign || null,
-      ascendant_sign: onboardingData.ascendantSign || null,
-      modality: onboardingData.modality || null,
-      polarity: onboardingData.polarity || null,
       updated_at: now,
     };
 
     const profilePayload: Record<string, unknown> = {
       id: userId,
-      email,
-      gender: onboardingData.gender || null,
-      birth_month: onboardingData.birthMonth || null,
-      birth_day: onboardingData.birthDay || null,
-      birth_year: onboardingData.birthYear || null,
-      birth_hour: onboardingData.birthHour || null,
-      birth_minute: onboardingData.birthMinute || null,
-      birth_period: onboardingData.birthPeriod || null,
-      birth_place: onboardingData.birthPlace || null,
-      knows_birth_time: onboardingData.knowsBirthTime ?? true,
-      relationship_status: onboardingData.relationshipStatus || null,
-      goals,
-      color_preference: onboardingData.colorPreference || null,
-      element_preference: onboardingData.elementPreference || null,
-      zodiac_sign: onboardingData.zodiacSign || null,
-      sun_sign: onboardingData.sunSign || null,
-      moon_sign: onboardingData.moonSign || null,
-      ascendant_sign: onboardingData.ascendantSign || null,
-      modality: onboardingData.modality || null,
-      polarity: onboardingData.polarity || null,
       updated_at: now,
     };
+
+    setIfPresent(userPayload, "email", email);
+    setIfPresent(userPayload, "gender", onboardingData.gender);
+    setIfPresent(userPayload, "age", age);
+    setIfPresent(userPayload, "relationship_status", onboardingData.relationshipStatus);
+    setIfPresent(userPayload, "goals", goals);
+    setIfPresent(userPayload, "birth_month", onboardingData.birthMonth);
+    setIfPresent(userPayload, "birth_day", onboardingData.birthDay);
+    setIfPresent(userPayload, "birth_year", onboardingData.birthYear);
+    setIfPresent(userPayload, "birth_hour", onboardingData.birthHour);
+    setIfPresent(userPayload, "birth_minute", onboardingData.birthMinute);
+    setIfPresent(userPayload, "birth_period", onboardingData.birthPeriod);
+    setIfPresent(userPayload, "birth_place", onboardingData.birthPlace);
+    if ("knowsBirthTime" in onboardingData) userPayload.knows_birth_time = onboardingData.knowsBirthTime ?? true;
+    setIfPresent(userPayload, "sun_sign", onboardingData.sunSign);
+    setIfPresent(userPayload, "moon_sign", onboardingData.moonSign);
+    setIfPresent(userPayload, "ascendant_sign", onboardingData.ascendantSign);
+    setIfPresent(userPayload, "modality", onboardingData.modality);
+    setIfPresent(userPayload, "polarity", onboardingData.polarity);
+
+    setIfPresent(profilePayload, "email", email);
+    setIfPresent(profilePayload, "gender", onboardingData.gender);
+    setIfPresent(profilePayload, "birth_month", onboardingData.birthMonth);
+    setIfPresent(profilePayload, "birth_day", onboardingData.birthDay);
+    setIfPresent(profilePayload, "birth_year", onboardingData.birthYear);
+    setIfPresent(profilePayload, "birth_hour", onboardingData.birthHour);
+    setIfPresent(profilePayload, "birth_minute", onboardingData.birthMinute);
+    setIfPresent(profilePayload, "birth_period", onboardingData.birthPeriod);
+    setIfPresent(profilePayload, "birth_place", onboardingData.birthPlace);
+    if ("knowsBirthTime" in onboardingData) profilePayload.knows_birth_time = onboardingData.knowsBirthTime ?? true;
+    setIfPresent(profilePayload, "relationship_status", onboardingData.relationshipStatus);
+    setIfPresent(profilePayload, "goals", goals);
+    setIfPresent(profilePayload, "color_preference", onboardingData.colorPreference);
+    setIfPresent(profilePayload, "element_preference", onboardingData.elementPreference);
+    setIfPresent(profilePayload, "zodiac_sign", onboardingData.zodiacSign);
+    setIfPresent(profilePayload, "sun_sign", onboardingData.sunSign);
+    setIfPresent(profilePayload, "moon_sign", onboardingData.moonSign);
+    setIfPresent(profilePayload, "ascendant_sign", onboardingData.ascendantSign);
+    setIfPresent(profilePayload, "modality", onboardingData.modality);
+    setIfPresent(profilePayload, "polarity", onboardingData.polarity);
 
     const sessionPayload = {
       id: `session_${userId}`,

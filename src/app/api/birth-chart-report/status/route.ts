@@ -91,6 +91,34 @@ function makeBirthChartCacheKey(userProfile: Record<string, any> | null, user: R
   return `${base}_vedic`;
 }
 
+function normalizeOnboardingBirthData(onboardingData: Record<string, any> | null): Record<string, any> | null {
+  if (!onboardingData) return null;
+  return {
+    birth_month: onboardingData.birthMonth,
+    birth_day: onboardingData.birthDay,
+    birth_year: onboardingData.birthYear,
+    birth_hour: onboardingData.birthHour,
+    birth_minute: onboardingData.birthMinute,
+    birth_period: onboardingData.birthPeriod,
+    birth_place: onboardingData.birthPlace,
+    knows_birth_time: onboardingData.knowsBirthTime,
+  };
+}
+
+function withSessionBirthFallback(
+  primary: Record<string, any> | null,
+  sessionBirthData: Record<string, any> | null
+): Record<string, any> | null {
+  if (!sessionBirthData) return primary;
+  const merged = { ...(primary || {}) };
+  for (const [key, value] of Object.entries(sessionBirthData)) {
+    if (merged[key] === undefined || merged[key] === null || merged[key] === "") {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 export async function GET(request: NextRequest) {
   const userId = getSessionUserId(request);
 
@@ -112,8 +140,18 @@ export async function GET(request: NextRequest) {
       .eq("id", userId)
       .maybeSingle(),
   ]);
+  const { data: onboardingSession } = await supabaseAdmin
+    .from("onboarding_sessions")
+    .select("onboarding_data")
+    .eq("user_id", userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const sessionBirthData = normalizeOnboardingBirthData(onboardingSession?.onboarding_data || null);
+  const userProfileWithFallback = withSessionBirthFallback(userProfile || null, sessionBirthData);
+  const userWithFallback = withSessionBirthFallback(user || null, sessionBirthData);
 
-  if (!hasKnownBirthTime(userProfile || null, user || null)) {
+  if (!hasKnownBirthTime(userProfileWithFallback || null, userWithFallback || null)) {
     return NextResponse.json({ status: "needs_birth_time", error: "birth_time_required" });
   }
 
@@ -140,7 +178,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ status: "not_started" });
   }
 
-  const currentBirthChartId = makeBirthChartCacheKey(userProfile || null, user || null);
+  const currentBirthChartId = makeBirthChartCacheKey(userProfileWithFallback || null, userWithFallback || null);
   if (
     latestReport.status === "complete" &&
     currentBirthChartId &&

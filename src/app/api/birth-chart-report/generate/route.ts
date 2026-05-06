@@ -88,6 +88,31 @@ function makeBirthChartCacheKey(userProfile: AnyRecord | null, user: AnyRecord |
   return `${base}_vedic`;
 }
 
+function normalizeOnboardingBirthData(onboardingData: AnyRecord | null): AnyRecord | null {
+  if (!onboardingData) return null;
+  return {
+    birth_month: onboardingData.birthMonth,
+    birth_day: onboardingData.birthDay,
+    birth_year: onboardingData.birthYear,
+    birth_hour: onboardingData.birthHour,
+    birth_minute: onboardingData.birthMinute,
+    birth_period: onboardingData.birthPeriod,
+    birth_place: onboardingData.birthPlace,
+    knows_birth_time: onboardingData.knowsBirthTime,
+  };
+}
+
+function withSessionBirthFallback(primary: AnyRecord | null, sessionBirthData: AnyRecord | null): AnyRecord | null {
+  if (!sessionBirthData) return primary;
+  const merged = { ...(primary || {}) };
+  for (const [key, value] of Object.entries(sessionBirthData)) {
+    if (merged[key] === undefined || merged[key] === null || merged[key] === "") {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
 function getBirthDateFromProfile(userProfile: AnyRecord | null, user: AnyRecord | null): string | null {
   const monthRaw = userProfile?.birth_month || user?.birth_month || "";
   const dayRaw = userProfile?.birth_day || user?.birth_day || "";
@@ -282,12 +307,22 @@ export async function POST(request: NextRequest) {
       .select("*")
       .eq("id", userId)
       .maybeSingle();
+    const { data: onboardingSession } = await supabaseAdmin
+      .from("onboarding_sessions")
+      .select("onboarding_data")
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sessionBirthData = normalizeOnboardingBirthData((onboardingSession?.onboarding_data as AnyRecord | null) || null);
+    const userProfileWithFallback = withSessionBirthFallback(userProfile || null, sessionBirthData);
+    const userWithFallback = withSessionBirthFallback(user || null, sessionBirthData);
 
-    if (!hasKnownBirthTime(userProfile || null, user || null)) {
+    if (!hasKnownBirthTime(userProfileWithFallback || null, userWithFallback || null)) {
       return NextResponse.json({ error: "birth_time_required" }, { status: 400 });
     }
 
-    const birthChartCacheKey = makeBirthChartCacheKey(userProfile || null, user || null);
+    const birthChartCacheKey = makeBirthChartCacheKey(userProfileWithFallback || null, userWithFallback || null);
 
     const { data: existingComplete } = await supabaseAdmin
       .from("birth_chart_reports")
@@ -358,8 +393,8 @@ export async function POST(request: NextRequest) {
         request,
         supabaseAdmin,
         userId,
-        userProfile || null,
-        user || null,
+        userProfileWithFallback || null,
+        userWithFallback || null,
         birthChartCacheKey
       );
     }

@@ -48,7 +48,7 @@ export default function WhyAstrorekhaPage() {
         </div>
       </div>
 
-      <div className="mt-auto px-6 pb-6">
+      <div className="onboarding-cta mt-auto">
         <Button
           onClick={() => router.push("/onboarding/birth-details-intro")}
           className="w-full h-14 rounded-xl bg-[#38bdf8] text-base font-semibold text-black shadow-[0_18px_40px_rgba(56,189,248,0.24)] hover:bg-[#0284c7]"

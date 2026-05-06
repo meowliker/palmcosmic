@@ -172,7 +172,7 @@ export default function BirthTimePage() {
         </div>
       </div>
 
-      <div className="space-y-3 px-6 pb-6">
+      <div className="onboarding-cta space-y-3">
         <button
           onClick={() => continueToBirthplace(false)}
           disabled={saving}

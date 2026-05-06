@@ -296,7 +296,7 @@ export default function OnboardingEmailPage() {
         </motion.div>
       </div>
 
-      <div className="px-6 pb-6">
+      <div className="onboarding-cta">
         <Button
           onClick={handleContinue}
           disabled={!isEmailValid || isSubmitting}

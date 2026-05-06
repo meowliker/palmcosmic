@@ -149,7 +149,7 @@ export default function BirthplacePage() {
         </div>
       </div>
 
-      <div className="px-6 pb-6">
+      <div className="onboarding-cta">
         <Button
           onClick={handleContinue}
           className="h-14 w-full rounded-xl bg-[#38bdf8] text-lg font-semibold text-black shadow-[0_18px_40px_rgba(56,189,248,0.24)] hover:bg-[#0284c7] disabled:bg-[#15314d] disabled:text-[#b8c7da] disabled:shadow-none"

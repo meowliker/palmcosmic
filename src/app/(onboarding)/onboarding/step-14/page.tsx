@@ -543,7 +543,7 @@ export default function Step14Page() {
             </p>
           </div>
 
-          <div className="space-y-3 px-6 pb-6">
+          <div className="onboarding-cta space-y-3">
             <Button
               onClick={handleProceed}
               disabled={isValidatingPalm || isSavingPalm || isPalmValid === false}

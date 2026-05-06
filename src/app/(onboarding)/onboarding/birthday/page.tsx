@@ -177,7 +177,7 @@ export default function BirthdayPage() {
         </div>
       </div>
 
-      <div className="px-6 pb-6">
+      <div className="onboarding-cta">
         <Button
           onClick={handleContinue}
           disabled={saving}
