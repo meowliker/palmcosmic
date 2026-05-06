@@ -526,7 +526,7 @@ export default function BundlePaywallPage() {
 
         {paymentError ? <div className="mb-4 w-full max-w-sm rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{paymentError}</div> : null}
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-6 w-full max-w-sm">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-5 w-full max-w-sm">
           <Button ref={getFullReportRef} onClick={handlePurchase} disabled={!agreedToTerms || isProcessing} className="h-14 w-full bg-[#38bdf8] text-lg font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
             {isProcessing ? (
               <span className="flex items-center gap-2">
@@ -538,6 +538,17 @@ export default function BundlePaywallPage() {
             )}
           </Button>
         </motion.div>
+
+        <motion.button
+          type="button"
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.65 }}
+          onClick={handlePurchase}
+          className="mb-7 text-center text-sm font-semibold text-[#38bdf8] underline-offset-4 transition-colors hover:text-[#7dd3fc] hover:underline"
+        >
+          Have a coupon code?
+        </motion.button>
 
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.7 }} className="mb-8 flex flex-col items-center gap-2">
           <div className="flex items-center gap-2 text-[#b8c7da]">
@@ -552,7 +563,25 @@ export default function BundlePaywallPage() {
           </div>
         </motion.div>
 
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }} className="mb-8 w-full max-w-sm rounded-2xl border border-[#173653] bg-[#0b2338]/70 p-5 backdrop-blur-sm">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }} className="mb-8 w-full max-w-sm rounded-2xl border border-[#173653] bg-[#061525]/70 p-5 backdrop-blur-sm">
+          <div className="relative mx-auto mb-8 flex h-40 w-44 items-center justify-center overflow-hidden rounded-2xl border border-[#173653] bg-[#071a2b]">
+            {/* eslint-disable-next-line @next/next/no-img-element -- Mirrors AstroRekha paywall preview behavior. */}
+            <img src={soulmatePreviewImage} alt="Your soulmate sketch preview" className="h-full w-[72%] object-cover blur-[3px] saturate-75" />
+            <div className="pointer-events-none absolute inset-0 bg-[#061525]/10" />
+          </div>
+          <h3 className="mb-5 text-center text-lg font-semibold">Your soulmate sketch preview</h3>
+          <StatsList stats={readingStats} />
+          <div className="mt-5 space-y-2 text-sm leading-relaxed text-[#b8c7da]">
+            <p>Your <span className="font-semibold text-[#38bdf8]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
+            <p>Your <span className="font-semibold text-[#7dd3fc]">Life Line</span> depicts that your physical health requires hard work to improve...</p>
+            <p className="cursor-pointer text-[#38bdf8]" onClick={scrollToPayment}>More data in the full report</p>
+          </div>
+          <Button onClick={scrollToPayment} className="mt-5 h-12 w-full bg-[#38bdf8] text-base font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
+            Get Full Report
+          </Button>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.85 }} className="mb-8 w-full max-w-sm rounded-2xl border border-[#173653] bg-[#0b2338]/70 p-5 backdrop-blur-sm">
           <div className="relative mb-4 h-48 w-full overflow-hidden rounded-xl bg-gradient-to-b from-[#102c45] to-[#071a2b]">
             {palmImage ? (
               // eslint-disable-next-line @next/next/no-img-element -- Captured data URLs cannot be optimized by next/image.
