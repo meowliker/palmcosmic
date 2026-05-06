@@ -31,10 +31,10 @@ const predictionLabels = [
 ];
 
 const readingStats = [
-  { label: "Love", color: "#38bdf8", value: 88 },
-  { label: "Health", color: "#7dd3fc", value: 82 },
-  { label: "Wisdom", color: "#22d3ee", value: 91 },
-  { label: "Career", color: "#0ea5e9", value: 76 },
+  { label: "Love", color: "#EF6B6B", value: 88 },
+  { label: "Health", color: "#4ECDC4", value: 82 },
+  { label: "Wisdom", color: "#F5C542", value: 91 },
+  { label: "Career", color: "#8B5CF6", value: 76 },
 ];
 
 const compatibilityStats = [
@@ -572,8 +572,8 @@ export default function BundlePaywallPage() {
           <h3 className="mb-5 text-center text-lg font-semibold">Your soulmate sketch preview</h3>
           <StatsList stats={readingStats} />
           <div className="mt-5 space-y-2 text-sm leading-relaxed text-[#b8c7da]">
-            <p>Your <span className="font-semibold text-[#38bdf8]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
-            <p>Your <span className="font-semibold text-[#7dd3fc]">Life Line</span> depicts that your physical health requires hard work to improve...</p>
+            <p>Your <span className="font-semibold text-[#EF6B6B]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
+            <p>Your <span className="font-semibold text-[#4ECDC4]">Life Line</span> depicts that your physical health requires hard work to improve...</p>
             <p className="cursor-pointer text-[#38bdf8]" onClick={scrollToPayment}>More data in the full report</p>
           </div>
           <Button onClick={scrollToPayment} className="mt-5 h-12 w-full bg-[#38bdf8] text-base font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
@@ -596,8 +596,8 @@ export default function BundlePaywallPage() {
           <h3 className="mb-4 text-center text-lg font-semibold">Your palm reading</h3>
           <StatsList stats={readingStats} />
           <div className="mt-4 space-y-2 text-sm text-[#b8c7da]">
-            <p>Your <span className="font-medium text-[#38bdf8]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
-            <p>Your <span className="font-medium text-[#7dd3fc]">Life Line</span> depicts resilience and a path that strengthens with focus.</p>
+            <p>Your <span className="font-medium text-[#EF6B6B]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
+            <p>Your <span className="font-medium text-[#4ECDC4]">Life Line</span> depicts resilience and a path that strengthens with focus.</p>
             <p className="cursor-pointer text-[#38bdf8]" onClick={scrollToPayment}>More data in the full report</p>
           </div>
           <Button onClick={scrollToPayment} className="mt-4 h-12 w-full bg-[#38bdf8] text-base font-semibold text-black hover:bg-[#0ea5e9]" size="lg">

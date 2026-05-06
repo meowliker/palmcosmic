@@ -14,10 +14,10 @@ import { trackFunnelAction, trackLeadCaptured } from "@/lib/analytics-events";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const READING_STATS = [
-  { label: "Love", color: "#38bdf8", value: 85 },
-  { label: "Health", color: "#7dd3fc", value: 91 },
-  { label: "Wisdom", color: "#22d3ee", value: 78 },
-  { label: "Career", color: "#0ea5e9", value: 65 },
+  { label: "Love", color: "#EF6B6B", value: 85 },
+  { label: "Health", color: "#4ECDC4", value: 91 },
+  { label: "Wisdom", color: "#F5C542", value: 78 },
+  { label: "Career", color: "#8B5CF6", value: 65 },
 ];
 
 function getSoulmateAnswers() {
@@ -256,10 +256,10 @@ export default function OnboardingEmailPage() {
 
           <div className="space-y-3 text-sm text-[#b8c7da]">
             <p>
-              Your <span className="font-medium text-[#38bdf8]">Heart Line</span> shows passionate expression and strong emotional awareness.
+              Your <span className="font-medium text-[#EF6B6B]">Heart Line</span> shows passionate expression and strong emotional awareness.
             </p>
             <p>
-              Your <span className="font-medium text-[#7dd3fc]">Life Line</span> points to renewal, resilience, and steady movement toward your goals.
+              Your <span className="font-medium text-[#4ECDC4]">Life Line</span> points to renewal, resilience, and steady movement toward your goals.
             </p>
           </div>
         </motion.div>
