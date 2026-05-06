@@ -152,7 +152,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid amount" }, { status: 400 });
     }
 
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    const requestOrigin = request.nextUrl.origin;
+    const appUrl = requestOrigin || process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
     const safeSuccessPath = normalizeRelativePath(successPath, "/");
     const safeCancelPath = normalizeRelativePath(cancelPath, "/");
 
