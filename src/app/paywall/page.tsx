@@ -11,7 +11,6 @@ import { usePricing } from "@/hooks/usePricing";
 import type { BundlePlan } from "@/lib/pricing";
 import { pixelEvents } from "@/lib/pixel-events";
 import { trackFunnelAction } from "@/lib/analytics-events";
-import { detectHandLandmarks } from "@/lib/palm-detection";
 import { generateUserId } from "@/lib/user-profile";
 import { OnboardingFunnelTracker } from "@/components/onboarding/OnboardingFunnelTracker";
 import {
@@ -129,8 +128,6 @@ export default function BundlePaywallPage() {
   const [agreedToTerms, setAgreedToTerms] = useState(true);
   const [paymentError, setPaymentError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [palmImage, setPalmImage] = useState<string | null>(null);
-  const [croppedPalmImage, setCroppedPalmImage] = useState<string | null>(null);
   const [soulmatePreviewImage, setSoulmatePreviewImage] = useState<"/male.png" | "/female.png">("/female.png");
   const [showStickyCTA, setShowStickyCTA] = useState(false);
 
@@ -157,7 +154,6 @@ export default function BundlePaywallPage() {
     if (!priceVariant) return;
 
     const savedImage = localStorage.getItem("astrorekha_palm_image");
-    if (savedImage) setPalmImage(savedImage);
     localStorage.setItem("palmcosmic_active_flow", "palm_reading");
 
     pixelEvents.viewContent("PalmCosmic Bundle Pricing", "product");
@@ -251,65 +247,6 @@ export default function BundlePaywallPage() {
       buttonObserver.disconnect();
     };
   }, []);
-
-  useEffect(() => {
-    if (!palmImage) return;
-
-    (async () => {
-      try {
-        const img = new window.Image();
-        img.crossOrigin = "anonymous";
-        img.src = palmImage;
-        await new Promise<void>((resolve, reject) => {
-          img.onload = () => resolve();
-          img.onerror = () => reject(new Error("Failed to load palm image"));
-        });
-
-        const results = await detectHandLandmarks(img);
-        const landmarks = results?.landmarks?.[0];
-        if (!landmarks?.length) {
-          setCroppedPalmImage(palmImage);
-          return;
-        }
-
-        let minX = 1;
-        let minY = 1;
-        let maxX = 0;
-        let maxY = 0;
-        for (const p of landmarks) {
-          minX = Math.min(minX, p.x);
-          minY = Math.min(minY, p.y);
-          maxX = Math.max(maxX, p.x);
-          maxY = Math.max(maxY, p.y);
-        }
-
-        const pad = 0.12;
-        minX = Math.max(0, minX - pad);
-        minY = Math.max(0, minY - pad);
-        maxX = Math.min(1, maxX + pad);
-        maxY = Math.min(1, maxY + pad);
-
-        const sx = Math.floor(minX * img.width);
-        const sy = Math.floor(minY * img.height);
-        const sw = Math.max(1, Math.ceil((maxX - minX) * img.width));
-        const sh = Math.max(1, Math.ceil((maxY - minY) * img.height));
-
-        const canvas = document.createElement("canvas");
-        canvas.width = sw;
-        canvas.height = sh;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          setCroppedPalmImage(palmImage);
-          return;
-        }
-
-        ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
-        setCroppedPalmImage(canvas.toDataURL("image/jpeg", 0.92));
-      } catch {
-        setCroppedPalmImage(palmImage);
-      }
-    })();
-  }, [palmImage]);
 
   const scrollToPayment = () => {
     paymentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -577,30 +514,6 @@ export default function BundlePaywallPage() {
             <p className="cursor-pointer text-[#38bdf8]" onClick={scrollToPayment}>More data in the full report</p>
           </div>
           <Button onClick={scrollToPayment} className="mt-5 h-12 w-full bg-[#38bdf8] text-base font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
-            Get Full Report
-          </Button>
-        </motion.div>
-
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.85 }} className="mb-8 w-full max-w-sm rounded-2xl border border-[#173653] bg-[#0b2338]/70 p-5 backdrop-blur-sm">
-          <div className="relative mb-4 h-48 w-full overflow-hidden rounded-xl bg-gradient-to-b from-[#102c45] to-[#071a2b]">
-            {palmImage ? (
-              // eslint-disable-next-line @next/next/no-img-element -- Captured data URLs cannot be optimized by next/image.
-              <img src={croppedPalmImage || palmImage} alt="Your palm" className="h-full w-full object-cover opacity-70" />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center">
-                {/* eslint-disable-next-line @next/next/no-img-element -- Static onboarding illustration. */}
-                <img src="/palm.png" alt="Your palm" className="h-40 w-32 object-contain opacity-70" />
-              </div>
-            )}
-          </div>
-          <h3 className="mb-4 text-center text-lg font-semibold">Your palm reading</h3>
-          <StatsList stats={readingStats} />
-          <div className="mt-4 space-y-2 text-sm text-[#b8c7da]">
-            <p>Your <span className="font-medium text-[#EF6B6B]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
-            <p>Your <span className="font-medium text-[#4ECDC4]">Life Line</span> depicts resilience and a path that strengthens with focus.</p>
-            <p className="cursor-pointer text-[#38bdf8]" onClick={scrollToPayment}>More data in the full report</p>
-          </div>
-          <Button onClick={scrollToPayment} className="mt-4 h-12 w-full bg-[#38bdf8] text-base font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
             Get Full Report
           </Button>
         </motion.div>
