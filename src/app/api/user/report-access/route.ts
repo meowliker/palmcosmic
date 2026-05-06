@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeUnlockedFeatures } from "@/lib/unlocked-features";
 import { REPORT_TO_UNLOCKED_FEATURE, type ReportKey } from "@/lib/report-entitlements";
+import { deriveUnlockedFeaturesFromPurchases, unlockedFeaturesEqual } from "@/lib/payment-derived-entitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -121,7 +122,19 @@ export async function GET(request: NextRequest) {
     }
 
     const featureKey = REPORT_TO_UNLOCKED_FEATURE[reportKey];
-    const unlockedFeatures = normalizeUnlockedFeatures(user.unlocked_features);
+    const unlockedFeatures = await deriveUnlockedFeaturesFromPurchases({
+      supabase,
+      userId: user.id,
+      email: user.email || email,
+      baseFeatures: user.unlocked_features,
+    });
+
+    if (!unlockedFeaturesEqual(unlockedFeatures, user.unlocked_features)) {
+      await supabase
+        .from("users")
+        .update({ unlocked_features: unlockedFeatures, updated_at: nowIso })
+        .eq("id", user.id);
+    }
 
     const { data: historicalEntitlements, error: historicalEntitlementError } = await supabase
       .from("user_entitlements")
@@ -133,12 +146,11 @@ export async function GET(request: NextRequest) {
 
     if (
       featureKey &&
-      (unlockedFeatures as unknown as Record<string, boolean>)[featureKey] === true &&
-      (historicalEntitlements || []).length === 0
+      (unlockedFeatures as unknown as Record<string, boolean>)[featureKey] === true
     ) {
       return NextResponse.json({
         canAccess: true,
-        reason: "legacy_feature_unlocked",
+        reason: (historicalEntitlements || []).length > 0 ? "purchase_feature_unlocked" : "legacy_feature_unlocked",
         userId: user.id,
         reportId: user[REPORT_ID_COLUMNS[reportKey]] || null,
         accessStatus: user.access_status,

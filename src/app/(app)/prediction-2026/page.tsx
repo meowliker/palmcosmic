@@ -55,15 +55,14 @@ export default function Prediction2026Page() {
   const [prediction, setPrediction] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
-  const [zodiacSign, setZodiacSign] = useState<string>("Aries");
+  const [zodiacSign, setZodiacSign] = useState<string | null>(null);
   const [checkingAccess, setCheckingAccess] = useState(true);
 
   // Get sun sign from onboarding store as fallback
   const { sunSign: storeSunSign } = useOnboardingStore();
 
   useEffect(() => {
-    checkReportAccess();
-    loadUserSunSign();
+    initializeReport();
   }, []);
 
   const checkReportAccess = async () => {
@@ -76,7 +75,7 @@ export default function Prediction2026Page() {
 
       if (!userId && !email) {
         router.replace("/onboarding/future-prediction/paywall");
-        return;
+        return false;
       }
 
       const params = new URLSearchParams({ reportKey: "prediction_2026" });
@@ -90,14 +89,14 @@ export default function Prediction2026Page() {
 
       if (!response.ok || !data?.canAccess) {
         router.replace("/onboarding/future-prediction/paywall");
-        return;
+        return false;
       }
+      return true;
     } catch (error) {
       console.error("Failed to check 2026 prediction access:", error);
       router.replace("/onboarding/future-prediction/paywall");
-      return;
+      return false;
     } finally {
-      setCheckingAccess(false);
     }
   };
 
@@ -115,41 +114,56 @@ export default function Prediction2026Page() {
           normalizeSignKey(dbUser?.sunSign);
 
         if (reportSignKey) {
-          setZodiacSign(displaySignName(reportSignKey));
-          return;
+          return displaySignName(reportSignKey);
         }
 
         if (dbUser?.sunSign) {
           const signName = extractStoredSignName(dbUser.sunSign);
           const signKey = normalizeSignKey(signName);
           if (signKey) {
-            setZodiacSign(displaySignName(signKey));
-            return;
+            return displaySignName(signKey);
           }
         }
       }
       // Fallback to onboarding store
       if (storeSunSign?.name) {
-        setZodiacSign(storeSunSign.name);
+        return storeSunSign.name;
       }
     } catch (err) {
       console.error("Failed to load sun sign:", err);
       if (storeSunSign?.name) {
-        setZodiacSign(storeSunSign.name);
+        return storeSunSign.name;
       }
+    }
+    return null;
+  };
+
+  const initializeReport = async () => {
+    setCheckingAccess(true);
+    setLoading(true);
+    try {
+      const canAccess = await checkReportAccess();
+      if (!canAccess) return;
+      const sign = await loadUserSunSign();
+      if (!sign) {
+        setError("We need your zodiac sign to load your 2026 prediction.");
+        return;
+      }
+      setZodiacSign(sign);
+      await loadPrediction(sign);
+    } finally {
+      setCheckingAccess(false);
+      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    loadPrediction();
-  }, [zodiacSign]);
-
-  const loadPrediction = async () => {
+  const loadPrediction = async (sign = zodiacSign) => {
+    if (!sign) return;
     setLoading(true);
     setError(null);
 
     try {
-      const signKey = zodiacSign.toLowerCase() as keyof typeof predictions2026Data;
+      const signKey = sign.toLowerCase() as keyof typeof predictions2026Data;
       const response = await fetch(`/api/prediction-2026/global?sign=${encodeURIComponent(signKey)}`, { cache: "no-store" });
       const supabasePrediction = await response.json().catch(() => null);
 
@@ -167,7 +181,7 @@ export default function Prediction2026Page() {
       console.error("Failed to load prediction:", err);
       setError("Failed to load prediction. Please try again.");
     } finally {
-      setLoading(false);
+      if (!checkingAccess) setLoading(false);
     }
   };
 
@@ -183,17 +197,17 @@ export default function Prediction2026Page() {
 
   if (checkingAccess || loading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A] flex items-center justify-center">
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] flex items-center justify-center">
           <div className="text-center px-8">
-            <Loader2 className="w-16 h-16 text-primary animate-spin mx-auto mb-6" />
+            <Loader2 className="w-16 h-16 text-[#38bdf8] animate-spin mx-auto mb-6" />
             <h2 className="text-white text-xl font-bold mb-2">
               {checkingAccess ? "Checking your access..." : "Consulting the Stars..."}
             </h2>
             <p className="text-white/60 text-sm">
               {checkingAccess
                 ? "Restoring your 2026 prediction unlock."
-                : `Generating your personalized 2026 predictions for ${zodiacSign}`}
+                : `Loading your personalized 2026 predictions${zodiacSign ? ` for ${zodiacSign}` : ""}.`}
             </p>
           </div>
         </div>
@@ -203,9 +217,9 @@ export default function Prediction2026Page() {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-        <div className="w-full max-w-md h-screen bg-[#0A0E1A] flex flex-col">
-          <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm border-b border-white/10">
+      <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+        <div className="w-full max-w-md h-screen bg-[#061525] flex flex-col">
+          <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
             <div className="flex items-center gap-4 px-4 py-3">
               <button onClick={() => router.back()} className="w-10 h-10 flex items-center justify-center">
                 <ArrowLeft className="w-5 h-5 text-white" />
@@ -217,8 +231,8 @@ export default function Prediction2026Page() {
             <div className="text-center">
               <p className="text-red-400 mb-4">{error}</p>
               <button
-                onClick={loadPrediction}
-                className="px-6 py-3 bg-primary rounded-xl text-white font-semibold"
+                onClick={() => loadPrediction()}
+                className="px-6 py-3 bg-[#38bdf8] rounded-xl text-black font-semibold"
               >
                 Try Again
               </button>
@@ -230,10 +244,10 @@ export default function Prediction2026Page() {
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0f] flex items-center justify-center">
-      <div className="w-full max-w-md h-screen bg-[#0A0E1A] overflow-hidden flex flex-col">
+    <div className="min-h-screen bg-[#061525] flex items-center justify-center">
+      <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="sticky top-0 z-40 bg-[#0A0E1A]/95 backdrop-blur-sm border-b border-white/10">
+        <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
           <div className="flex items-center justify-between px-4 py-3">
             <button onClick={() => router.back()} className="w-10 h-10 flex items-center justify-center">
               <ArrowLeft className="w-5 h-5 text-white" />

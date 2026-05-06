@@ -352,9 +352,9 @@ function RegistrationContent() {
 
       <AnimatePresence>
         {showSuccess ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex items-end">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 z-50 flex items-end justify-center">
             <div className="absolute inset-0 bg-black/55" />
-            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 300 }} className="relative w-full rounded-t-3xl bg-gradient-to-b from-[#0b2338] to-[#061525] p-8 pb-12">
+            <motion.div initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }} transition={{ type: "spring", damping: 25, stiffness: 300 }} className="relative w-full max-w-md rounded-t-3xl bg-gradient-to-b from-[#0b2338] to-[#061525] p-8 pb-12">
               <div className="relative z-10 flex flex-col items-center">
                 <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} transition={{ delay: 0.2, type: "spring", stiffness: 200 }} className="mb-6 flex h-20 w-20 items-center justify-center rounded-full bg-[#38bdf8]/15">
                   <ThumbsUp className="h-10 w-10 text-[#38bdf8]" strokeWidth={1.5} />
@@ -365,7 +365,7 @@ function RegistrationContent() {
                 <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mb-8 max-w-xs text-center text-[#b8c7da]">
                   You have successfully registered for PalmCosmic. You can now access your reports.
                 </motion.p>
-                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="w-full">
+                <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="w-full max-w-sm">
                   <Button onClick={handleContinue} className="h-14 w-full bg-[#38bdf8] text-lg font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
                     Get My Prediction
                   </Button>

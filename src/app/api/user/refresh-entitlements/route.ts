@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { REPORT_TO_UNLOCKED_FEATURE, type ReportKey } from "@/lib/report-entitlements";
 import { normalizeUnlockedFeatures } from "@/lib/unlocked-features";
+import { deriveUnlockedFeaturesFromPurchases, unlockedFeaturesEqual } from "@/lib/payment-derived-entitlements";
 
 export const dynamic = "force-dynamic";
 
@@ -76,23 +77,22 @@ export async function POST(request: NextRequest) {
     if (entitlementError) throw entitlementError;
 
     const hasEntitlementRecords = (allEntitlements || []).length > 0;
-    const unlockedFeatures = hasEntitlementRecords ? normalizeUnlockedFeatures({}) : normalizeUnlockedFeatures(user.unlocked_features);
-    let changed = false;
+    const entitlementFeatures = hasEntitlementRecords ? normalizeUnlockedFeatures({}) : normalizeUnlockedFeatures(user.unlocked_features);
 
     for (const entitlement of entitlements || []) {
       const featureKey = REPORT_TO_UNLOCKED_FEATURE[entitlement.report_key as ReportKey];
-      if (featureKey && (unlockedFeatures as any)[featureKey] !== true) {
-        (unlockedFeatures as any)[featureKey] = true;
-        changed = true;
+      if (featureKey && (entitlementFeatures as any)[featureKey] !== true) {
+        (entitlementFeatures as any)[featureKey] = true;
       }
     }
 
-    if (hasEntitlementRecords) {
-      const current = normalizeUnlockedFeatures(user.unlocked_features);
-      changed = Object.keys(unlockedFeatures).some(
-        (key) => (unlockedFeatures as any)[key] !== (current as any)[key]
-      );
-    }
+    const unlockedFeatures = await deriveUnlockedFeaturesFromPurchases({
+      supabase,
+      userId: user.id,
+      email,
+      baseFeatures: entitlementFeatures,
+    });
+    const changed = !unlockedFeaturesEqual(unlockedFeatures, user.unlocked_features);
 
     const hasPostTrialPromoAccess = (entitlements || []).some(
       (entitlement) => entitlement.source === "promo_post_trial"

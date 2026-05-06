@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { REPORT_TO_UNLOCKED_FEATURE, type ReportKey } from "@/lib/report-entitlements";
 import { normalizeUnlockedFeatures } from "@/lib/unlocked-features";
+import { deriveUnlockedFeaturesFromPurchases, unlockedFeaturesEqual } from "@/lib/payment-derived-entitlements";
+import { calculateZodiacSign } from "@/lib/user-profile";
 
 export const dynamic = "force-dynamic";
 
@@ -75,21 +77,24 @@ export async function GET(request: NextRequest) {
     }
 
     const hasEntitlementRecords = (allEntitlements || []).length > 0;
-    const unlockedFeatures = hasEntitlementRecords
+    const entitlementFeatures = hasEntitlementRecords
       ? normalizeUnlockedFeatures({})
       : normalizeUnlockedFeatures(user.unlocked_features);
 
     for (const entitlement of activeEntitlements || []) {
       const featureKey = REPORT_TO_UNLOCKED_FEATURE[entitlement.report_key as ReportKey];
       if (featureKey) {
-        (unlockedFeatures as any)[featureKey] = true;
+        (entitlementFeatures as any)[featureKey] = true;
       }
     }
 
-    const currentUnlockedFeatures = normalizeUnlockedFeatures(user.unlocked_features);
-    const unlockedFeaturesChanged = Object.keys(unlockedFeatures).some(
-      (key) => (unlockedFeatures as any)[key] !== (currentUnlockedFeatures as any)[key]
-    );
+    const unlockedFeatures = await deriveUnlockedFeaturesFromPurchases({
+      supabase,
+      userId: user.id,
+      email: user.email,
+      baseFeatures: entitlementFeatures,
+    });
+    const unlockedFeaturesChanged = !unlockedFeaturesEqual(unlockedFeatures, user.unlocked_features);
     const hasPostTrialPromoAccess = (activeEntitlements || []).some(
       (entitlement) => entitlement.source === "promo_post_trial"
     );
@@ -102,15 +107,38 @@ export async function GET(request: NextRequest) {
       statusPatch.subscription_status = "active";
     }
 
+    const calculatedSunSign =
+      user.birth_month && user.birth_day
+        ? calculateZodiacSign(String(user.birth_month), String(user.birth_day))
+        : null;
+    const canonicalSunSign = user.sun_sign || calculatedSunSign || profile?.sun_sign || null;
+    if (canonicalSunSign && profile?.sun_sign !== canonicalSunSign) {
+      statusPatch.sun_sign = canonicalSunSign;
+    }
+
     if (unlockedFeaturesChanged || Object.keys(statusPatch).length > 0) {
       await supabase
         .from("users")
         .update({
           ...(unlockedFeaturesChanged ? { unlocked_features: unlockedFeatures } : {}),
-          ...statusPatch,
+          ...Object.fromEntries(Object.entries(statusPatch).filter(([key]) => key !== "sun_sign")),
           updated_at: nowIso,
         })
         .eq("id", user.id);
+
+      if (statusPatch.sun_sign) {
+        await supabase
+          .from("user_profiles")
+          .upsert(
+            {
+              id: user.id,
+              email: user.email,
+              sun_sign: statusPatch.sun_sign,
+              updated_at: nowIso,
+            },
+            { onConflict: "id" }
+          );
+      }
     }
 
     return NextResponse.json({
@@ -153,7 +181,7 @@ export async function GET(request: NextRequest) {
         zodiacSign: user.zodiac_sign || null,
         moonSign: user.moon_sign || null,
         ascendantSign: user.ascendant_sign || null,
-        sunSign: user.sun_sign || profile?.sun_sign || null,
+        sunSign: canonicalSunSign,
       },
     });
   } catch (error: any) {

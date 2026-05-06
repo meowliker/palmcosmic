@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Hash password
-    const passwordHash = await bcrypt.hash(password, 12);
+    const passwordHash = await bcrypt.hash(password, 10);
 
     // Prefer preserving the paid/demo user ID so report links and entitlements stay attached.
     let uid = existing?.id || crypto.randomUUID();
@@ -141,11 +141,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const reconciliation = await reconcilePaidPaymentsForRegistration({
+    reconcilePaidPaymentsForRegistration({
       userId: uid,
       email: normalizedEmail,
       anonId: anonId || null,
       skipAnonEntitlementReplay: hadAnonUser,
+    }).catch((error) => {
+      console.error("Payment reconciliation error:", error);
     });
 
     // Migrate related tables in background (non-blocking for faster registration)
@@ -153,7 +155,7 @@ export async function POST(request: NextRequest) {
       (async () => {
         try {
           await Promise.all([
-            supabase.from("payments").update({ user_id: uid }).eq("user_id", anonId),
+            supabase.from("payments").update({ user_id: uid }).eq("user_id", anonId).in("type", ["bundle", "upsell", "report", "coins"]),
             supabase.from("palm_readings").update({ id: uid }).eq("id", anonId),
             supabase.from("chat_messages").update({ user_id: uid }).eq("user_id", anonId),
             supabase.from("daily_insights").update({ id: uid }).eq("id", anonId),
@@ -187,7 +189,7 @@ export async function POST(request: NextRequest) {
         purchaseType: migratedData.purchase_type || null,
         bundlePurchased: migratedData.bundle_purchased || null,
         unlockedFeatures: migratedData.unlocked_features || {},
-        paymentReconciliation: reconciliation,
+        paymentReconciliation: { pending: true },
       },
     });
   } catch (error) {

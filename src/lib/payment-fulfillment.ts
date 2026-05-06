@@ -12,6 +12,7 @@ import {
   type FlowKey,
 } from "@/lib/report-entitlements";
 import { ensureAndLinkReportsForUser } from "@/lib/user-report-links";
+import { deriveUnlockedFeaturesFromPurchases } from "@/lib/payment-derived-entitlements";
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -512,12 +513,17 @@ async function applyUserEntitlements(
     .eq("id", userId)
     .maybeSingle();
 
-  const currentFeatures = existingUser?.unlocked_features || {
-    palmReading: false,
-    prediction2026: false,
-    birthChart: false,
-    compatibilityTest: false,
-  };
+  const currentFeatures = await deriveUnlockedFeaturesFromPurchases({
+    supabase,
+    userId,
+    email: customerEmail,
+    baseFeatures: existingUser?.unlocked_features || {
+      palmReading: false,
+      prediction2026: false,
+      birthChart: false,
+      compatibilityTest: false,
+    },
+  });
   const updatedFeatures = { ...currentFeatures } as Record<string, boolean>;
   let updatedCoins = existingUser?.coins || 0;
 
@@ -994,7 +1000,9 @@ export async function reconcilePaidPaymentsForRegistration(params: {
     .from("payments")
     .select(PAYMENT_SELECT)
     .eq("customer_email", normalizedEmail)
-    .eq("payment_status", "paid");
+    .eq("payment_status", "paid")
+    .in("type", ["bundle", "upsell", "report", "coins"])
+    .gte("amount", 0);
 
   const { data, error } = await query;
   if (error) throw error;
