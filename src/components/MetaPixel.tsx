@@ -1,24 +1,14 @@
 "use client";
 
 import Script from "next/script";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useEffect, Suspense } from "react";
 
 const PIXEL_ID = process.env.NEXT_PUBLIC_META_PIXEL_ID;
 
-// Separate component for tracking to handle Suspense boundary
-function PageViewTracker() {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
-
-  useEffect(() => {
-    // Track page view on route change
-    if (typeof window !== "undefined" && (window as any).fbq) {
-      (window as any).fbq("track", "PageView");
-    }
-  }, [pathname, searchParams]);
-
-  return null;
+declare global {
+  interface Window {
+    __palmcosmicFbqPageViewGuardInstalled?: boolean;
+    __palmcosmicTrackedPageViewKeys?: Record<string, boolean>;
+  }
 }
 
 export const MetaPixel = () => {
@@ -37,12 +27,34 @@ export const MetaPixel = () => {
           s.parentNode.insertBefore(t,s)}(window, document,'script',
           'https://connect.facebook.net/en_US/fbevents.js');
           fbq('init', '${PIXEL_ID}');
-          fbq('track', 'PageView');
+          (function() {
+            if (window.__palmcosmicFbqPageViewGuardInstalled) return;
+            window.__palmcosmicFbqPageViewGuardInstalled = true;
+            window.__palmcosmicTrackedPageViewKeys = window.__palmcosmicTrackedPageViewKeys || {};
+            var originalFbq = window.fbq;
+            window.fbq = function() {
+              try {
+                var args = Array.prototype.slice.call(arguments);
+                var isPageView = args[0] === 'track' && args[1] === 'PageView';
+                if (isPageView) {
+                  var params = args[2] || {};
+                  var routeKey = String(params.page_path || window.location.pathname || '/') + '?' + String(window.location.search || '');
+                  if (window.__palmcosmicTrackedPageViewKeys[routeKey]) return;
+                  window.__palmcosmicTrackedPageViewKeys[routeKey] = true;
+                }
+              } catch (error) {}
+              return originalFbq.apply(this, arguments);
+            };
+            for (var key in originalFbq) {
+              try { window.fbq[key] = originalFbq[key]; } catch (error) {}
+            }
+          })();
+          fbq('track', 'PageView', {
+            page_path: window.location.pathname || '/',
+            page_location: window.location.href
+          });
         `}
       </Script>
-      <Suspense fallback={null}>
-        <PageViewTracker />
-      </Suspense>
       <noscript>
         <img
           height="1"

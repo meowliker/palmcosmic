@@ -9,7 +9,34 @@ declare global {
 
 type PixelOptions = {
   eventID?: string;
+  dedupeKey?: string;
 };
+
+function hasTrackedPixelEvent(dedupeKey?: string): boolean {
+  if (!dedupeKey || typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`palmcosmic_pixel_${dedupeKey}`) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function markPixelEventTracked(dedupeKey?: string) {
+  if (!dedupeKey || typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`palmcosmic_pixel_${dedupeKey}`, "true");
+  } catch {
+    // Ignore storage failures; they should not block conversion tracking.
+  }
+}
+
+function buildDedupeKey(eventName: string, params?: Record<string, any>) {
+  if (typeof window === "undefined") return "";
+  const route = window.location.pathname || "/";
+  const contentName = String(params?.content_name || "");
+  const contentType = String(params?.content_type || "");
+  return encodeURIComponent(`${eventName}:${route}:${contentName}:${contentType}`).slice(0, 500);
+}
 
 /**
  * Track a standard event with Meta Pixel.
@@ -25,6 +52,8 @@ export const trackPixelEvent = (
 
   const fire = (attempt: number) => {
     if (window.fbq) {
+      if (hasTrackedPixelEvent(options?.dedupeKey)) return;
+
       const eventId = options?.eventID || params?.event_id;
       const cleanParams = { ...(params || {}) };
       delete cleanParams.event_id;
@@ -33,6 +62,7 @@ export const trackPixelEvent = (
       } else {
         window.fbq("track", eventName, cleanParams);
       }
+      markPixelEventTracked(options?.dedupeKey);
     } else if (attempt < 10) {
       setTimeout(() => fire(attempt + 1), 500);
     } else {
@@ -159,7 +189,7 @@ export const pixelEvents = {
     trackPixelEvent("ViewContent", {
       content_name: contentName,
       content_type: contentType
-    }),
+    }, { dedupeKey: buildDedupeKey("ViewContent", { content_name: contentName, content_type: contentType }) }),
 
   /** User uses chat (contact) */
   contact: () => trackPixelEvent("Contact"),

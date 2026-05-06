@@ -1,6 +1,6 @@
 "use client";
 
-import { trackCustomEvent, trackPixelEvent } from "@/lib/pixel-events";
+import { trackPixelEvent } from "@/lib/pixel-events";
 
 declare global {
   interface Window {
@@ -120,8 +120,6 @@ export function trackAnalyticsEvent(eventName: string, params: AnalyticsParams =
   const payload = cleanParams(params);
 
   trackFirstPartyEvent(eventName, payload);
-
-  trackCustomEvent(eventName, payload);
 
   if (window.gtag) {
     window.gtag("event", eventName, payload);

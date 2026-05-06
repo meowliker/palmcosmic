@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, AnimatePresence } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fadeUp, staggerContainer, staggerItem } from "@/lib/motion";
 import { OnboardingHeader } from "@/components/onboarding/OnboardingHeader";
 import { Button } from "@/components/ui/button";
@@ -51,8 +51,12 @@ export default function Step5Page() {
   const [sunSign, setSunSign] = useState<SignData>(storeSunSign || fallbackSign);
   const [moonSign, setMoonSign] = useState<SignData>(storeMoonSign || fallbackSign);
   const [ascendant, setAscendant] = useState<SignData>(storeAscendant || fallbackSign);
+  const didStartMappingRef = useRef(false);
 
   useEffect(() => {
+    if (didStartMappingRef.current) return;
+    didStartMappingRef.current = true;
+
     pixelEvents.viewContent("Birth Chart Mapping Step", "onboarding_step");
     trackFunnelAction("chart_mapping_started", {
       route: "/onboarding/step-5",
