@@ -34,6 +34,14 @@ const USER_SELECT = [
   ...Object.values(REPORT_ID_COLUMNS),
 ].join(",");
 
+type UserRecord = {
+  id: string;
+  email?: string | null;
+  access_status?: string | null;
+  subscription_status?: string | null;
+  unlocked_features?: unknown;
+} & Partial<Record<(typeof REPORT_ID_COLUMNS)[ReportKey], string | null>>;
+
 function normalizeEmail(email: string | null): string | null {
   const normalized = (email || "").trim().toLowerCase();
   return normalized || null;
@@ -54,7 +62,7 @@ export async function GET(request: NextRequest) {
     }
 
     const supabase = getSupabaseAdmin();
-    let user: any = null;
+    let user: UserRecord | null = null;
 
     if (userId) {
       const { data, error } = await supabase
@@ -63,7 +71,7 @@ export async function GET(request: NextRequest) {
         .eq("id", userId)
         .maybeSingle();
       if (error) throw error;
-      user = data;
+      user = data as UserRecord | null;
     }
 
     if (!user && email) {
@@ -75,7 +83,7 @@ export async function GET(request: NextRequest) {
         .limit(1)
         .maybeSingle();
       if (error) throw error;
-      user = data;
+      user = data as UserRecord | null;
     }
 
     if (!user?.id) {
@@ -125,8 +133,7 @@ export async function GET(request: NextRequest) {
 
     if (
       featureKey &&
-      (unlockedFeatures as any)[featureKey] === true &&
-      user.access_status !== "locked" &&
+      (unlockedFeatures as unknown as Record<string, boolean>)[featureKey] === true &&
       (historicalEntitlements || []).length === 0
     ) {
       return NextResponse.json({
@@ -141,15 +148,15 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       canAccess: false,
-      reason: user.access_status === "locked" ? "access_locked" : "report_locked",
+      reason: "report_locked",
       userId: user.id,
       accessStatus: user.access_status,
       subscriptionStatus: user.subscription_status,
     });
-  } catch (error: any) {
-    console.error("[report-access] Error:", error?.message || error);
+  } catch (error) {
+    console.error("[report-access] Error:", error instanceof Error ? error.message : error);
     return NextResponse.json(
-      { error: error?.message || "Failed to check report access" },
+      { error: error instanceof Error ? error.message : "Failed to check report access" },
       { status: 500 }
     );
   }

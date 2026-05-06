@@ -85,6 +85,47 @@ function canonicalizeBundleFeatures(bundleId: string, features: string[]): strin
 
 function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
   return bundles.map((bundle) => {
+    if (bundle.id === "palm-reading") {
+      return {
+        ...bundle,
+        name: "Palm Reading",
+        price: 2900,
+        displayPrice: 2900,
+        originalPrice: 3600,
+        discount: "20% OFF",
+        description: "Lifetime access to your personalized palm reading report.",
+        features: ["palmReading"],
+        featureList: [
+          "Complete palm line analysis",
+          "Life, heart, and head line insights",
+          "15 chat coins included",
+          "Lifetime report access",
+        ],
+        active: true,
+      };
+    }
+
+    if (bundle.id === "palm-birth") {
+      return {
+        ...bundle,
+        name: "Palm + Birth Chart",
+        price: 4900,
+        displayPrice: 4900,
+        originalPrice: 7000,
+        discount: "30% OFF",
+        description: "Lifetime access to your palm reading and birth chart reports.",
+        features: ["palmReading", "birthChart"],
+        featureList: [
+          "Everything in Palm Reading",
+          "Complete birth chart analysis",
+          "15 chat coins included",
+          "Lifetime report access",
+        ],
+        popular: true,
+        active: true,
+      };
+    }
+
     if (bundle.id === "palm-birth-compat") {
       return {
         ...bundle,
@@ -96,6 +137,7 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
           "Full compatibility analysis",
           "Future partner report",
         ],
+        active: false,
       };
     }
 
@@ -103,13 +145,22 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
       return {
         ...bundle,
         name: "Palm + Birth Chart + Soulmate Sketch + Future Partner Report",
-        description: "Palm reading + birth chart + soulmate sketch + future partner report.",
+        price: 8900,
+        displayPrice: 8900,
+        originalPrice: 17800,
+        discount: "50% OFF",
+        description: "Lifetime access to palm, birth chart, soulmate sketch, and future partner reports.",
         features: canonicalizeBundleFeatures(bundle.id, bundle.features),
         featureList: [
           "Everything in Palm + Birth Chart",
           "One AI soulmate sketch",
           "Future partner report",
+          "30 chat coins included",
+          "Lifetime report access",
         ],
+        popular: false,
+        limitedOffer: true,
+        active: true,
       };
     }
 
@@ -120,17 +171,40 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
   });
 }
 
+function applyUpsellOverrides(upsells: UpsellPlan[]): UpsellPlan[] {
+  return upsells.map((upsell) => ({
+    ...upsell,
+    price: 2400,
+    displayPrice: 2400,
+    originalPrice: 4800,
+    discount: "50% OFF",
+    active: true,
+  }));
+}
+
+function applyReportOverrides(reports: ReportPlan[]): ReportPlan[] {
+  return reports.map((report) => ({
+    ...report,
+    price: 2900,
+    originalPrice: 5800,
+    active: true,
+  }));
+}
+
 export function normalizePricing(raw?: Partial<PricingConfig> | null): PricingConfig {
   if (!raw || typeof raw !== "object") {
-    return DEFAULT_PRICING;
+    return {
+      ...DEFAULT_PRICING,
+      reports: applyReportOverrides(DEFAULT_PRICING.reports),
+    };
   }
 
   const mergedBundles = mergeById(DEFAULT_PRICING.bundles, raw.bundles as BundlePlan[] | undefined);
 
   return {
     bundles: applyBundleOverrides(mergedBundles),
-    upsells: mergeById(DEFAULT_PRICING.upsells, raw.upsells as UpsellPlan[] | undefined),
-    reports: mergeById(DEFAULT_PRICING.reports, raw.reports as ReportPlan[] | undefined),
+    upsells: applyUpsellOverrides(mergeById(DEFAULT_PRICING.upsells, raw.upsells as UpsellPlan[] | undefined)),
+    reports: applyReportOverrides(mergeById(DEFAULT_PRICING.reports, raw.reports as ReportPlan[] | undefined)),
     coinPackages: mergeById(DEFAULT_PRICING.coinPackages, raw.coinPackages as CoinPackage[] | undefined),
   };
 }
@@ -141,15 +215,16 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "palm-reading",
       name: "Palm Reading",
-      price: 559,
-      displayPrice: 559,
-      originalPrice: 699,
+      price: 2900,
+      displayPrice: 2900,
+      originalPrice: 3600,
       discount: "20% OFF",
-      description: "Personalized palm reading report delivered instantly.",
+      description: "Lifetime access to your personalized palm reading report.",
       features: ["palmReading"],
       featureList: [
         "Complete palm line analysis",
         "Life, heart, head line insights",
+        "15 chat coins included",
         "Personality traits revealed",
       ],
       popular: false,
@@ -159,15 +234,16 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "palm-birth",
       name: "Palm + Birth Chart",
-      price: 839,
-      displayPrice: 839,
-      originalPrice: 1199,
+      price: 4900,
+      displayPrice: 4900,
+      originalPrice: 7000,
       discount: "30% OFF",
-      description: "Deep palm insights plus your full zodiac reading.",
+      description: "Lifetime access to your palm reading and birth chart reports.",
       features: ["palmReading", "birthChart"],
       featureList: [
         "Everything in Palm Reading",
         "Complete birth chart analysis",
+        "15 chat coins included",
         "Planetary positions & houses",
       ],
       popular: true,
@@ -190,34 +266,35 @@ export const DEFAULT_PRICING: PricingConfig = {
       ],
       popular: false,
       limitedOffer: true,
-      active: true,
+      active: false,
     },
     {
       id: "palm-birth-sketch",
       name: "Palm + Birth Chart + Soulmate Sketch + Future Partner Report",
-      price: 1599,
-      displayPrice: 1599,
-      originalPrice: 3199,
+      price: 8900,
+      displayPrice: 8900,
+      originalPrice: 17800,
       discount: "50% OFF",
-      description: "Palm reading + birth chart + soulmate sketch + future partner report.",
+      description: "Lifetime access to palm, birth chart, soulmate sketch, and future partner reports.",
       features: ["palmReading", "birthChart", "soulmateSketch", "futurePartnerReport"],
       featureList: [
         "Everything in Palm + Birth Chart",
         "One AI soulmate sketch",
         "Future partner report",
+        "30 chat coins included",
       ],
       popular: false,
       limitedOffer: true,
-      active: false,
+      active: true,
     },
   ],
   upsells: [
     {
       id: "2026-predictions",
       name: "2026 Future Predictions",
-      price: 499,
-      displayPrice: 499,
-      originalPrice: 999,
+      price: 2400,
+      displayPrice: 2400,
+      originalPrice: 4800,
       discount: "50% OFF",
       description: "Detailed predictions for your 2026 journey.",
       feature: "prediction2026",
@@ -226,9 +303,9 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "compatibility",
       name: "Compatibility Report",
-      price: 499,
-      displayPrice: 499,
-      originalPrice: 999,
+      price: 2400,
+      displayPrice: 2400,
+      originalPrice: 4800,
       discount: "50% OFF",
       description: "Check your love match and relationship chemistry.",
       feature: "compatibilityTest",
@@ -237,9 +314,9 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "birth-chart",
       name: "Birth Chart Report",
-      price: 499,
-      displayPrice: 499,
-      originalPrice: 999,
+      price: 2400,
+      displayPrice: 2400,
+      originalPrice: 4800,
       discount: "50% OFF",
       description: "Unlock your complete astrological blueprint.",
       feature: "birthChart",
@@ -248,9 +325,9 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "soulmate-sketch",
       name: "Soulmate Sketch",
-      price: 499,
-      displayPrice: 499,
-      originalPrice: 999,
+      price: 2400,
+      displayPrice: 2400,
+      originalPrice: 4800,
       discount: "50% OFF",
       description: "Generate your one-time AI soulmate portrait.",
       feature: "soulmateSketch",
@@ -261,48 +338,48 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "report-palm",
       name: "Palm Reading Report",
-      price: 197,
-      originalPrice: 999,
+      price: 2900,
+      originalPrice: 5800,
       feature: "palmReading",
       active: true,
     },
     {
       id: "report-2026",
       name: "2026 Future Predictions",
-      price: 197,
-      originalPrice: 999,
+      price: 2900,
+      originalPrice: 5800,
       feature: "prediction2026",
       active: true,
     },
     {
       id: "report-birth-chart",
       name: "Birth Chart Report",
-      price: 197,
-      originalPrice: 999,
+      price: 2900,
+      originalPrice: 5800,
       feature: "birthChart",
       active: true,
     },
     {
       id: "report-compatibility",
       name: "Compatibility Report",
-      price: 197,
-      originalPrice: 999,
+      price: 2900,
+      originalPrice: 5800,
       feature: "compatibilityTest",
       active: true,
     },
     {
       id: "report-soulmate-sketch",
       name: "Soulmate Sketch",
-      price: 197,
-      originalPrice: 499,
+      price: 2900,
+      originalPrice: 5800,
       feature: "soulmateSketch",
       active: true,
     },
     {
       id: "report-future-partner",
       name: "Future Partner Report",
-      price: 197,
-      originalPrice: 999,
+      price: 2900,
+      originalPrice: 5800,
       feature: "futurePartnerReport",
       active: true,
     },

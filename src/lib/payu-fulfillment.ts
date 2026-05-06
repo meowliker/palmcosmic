@@ -12,8 +12,10 @@ const BUNDLE_COIN_BONUS: Record<string, number> = {
   "palm-reading": 15,
   "palm-birth": 15,
   "palm-birth-compat": 15,
-  "palm-birth-sketch": 15,
+  "palm-birth-sketch": 30,
 };
+
+type DbPayload = Record<string, unknown>;
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -151,7 +153,7 @@ export async function fulfillPayUPayment(payload: PayUCallbackPayload, context: 
   const nowIso = new Date().toISOString();
   const normalizedEmail = payload.email?.toLowerCase().trim() || null;
 
-  let resolvedUserId =
+  const resolvedUserId =
     payload.udf1?.trim() ||
     existingPayment?.user_id ||
     (await resolveUserIdFromEmail(payload.email));
@@ -162,7 +164,7 @@ export async function fulfillPayUPayment(payload: PayUCallbackPayload, context: 
   const coins = (payload.udf5 || String(existingPayment?.coins || "")).trim();
 
   if (existingPayment) {
-    const updatePayload: Record<string, any> = {
+    const updatePayload: DbPayload = {
       payu_payment_id: mihpayid || null,
       user_id: resolvedUserId || null,
       type,
@@ -219,7 +221,7 @@ export async function fulfillPayUPayment(payload: PayUCallbackPayload, context: 
     soulmateSketch: false,
     futurePartnerReport: false,
   };
-  let updatedFeatures = { ...currentFeatures } as Record<string, boolean>;
+  const updatedFeatures = { ...currentFeatures } as Record<string, boolean>;
   let updatedCoins = typeof user?.coins === "number" ? user.coins : 0;
 
   for (const f of parseFeaturesFromMetadata(type, bundleId, feature)) {
@@ -228,7 +230,7 @@ export async function fulfillPayUPayment(payload: PayUCallbackPayload, context: 
 
   updatedCoins += parseCoins(type, coins, bundleId);
 
-  const userUpdate: Record<string, any> = {
+  const userUpdate: DbPayload = {
     id: resolvedUserId,
     unlocked_features: updatedFeatures,
     coins: updatedCoins,

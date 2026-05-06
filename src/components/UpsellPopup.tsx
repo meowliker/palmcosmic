@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Lock, Loader2 } from "lucide-react";
+import { X, Sparkles, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { featureNames, UnlockedFeatures } from "@/lib/user-store";
+import { featureNames, featurePrices, UnlockedFeatures } from "@/lib/user-store";
 import { startStripeCheckout } from "@/lib/stripe-checkout";
 
 // Map feature keys to report IDs for Razorpay checkout
@@ -24,7 +24,7 @@ interface UpsellPopupProps {
   onPurchase?: () => void;
 }
 
-export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopupProps) {
+export function UpsellPopup({ isOpen, onClose, feature }: UpsellPopupProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState("");
 
@@ -58,6 +58,7 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
   };
 
   const featureName = featureNames[feature];
+  const featurePrice = featurePrices[feature];
 
   return (
     <AnimatePresence>
@@ -87,7 +88,7 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
             {/* Icon */}
             <div className="flex justify-center mb-6">
               <div className="w-20 h-20 rounded-full bg-[#061525] border border-[#173653] flex items-center justify-center">
-                <Lock className="w-10 h-10 text-[#38bdf8]" />
+                <Sparkles className="w-10 h-10 text-[#38bdf8]" />
               </div>
             </div>
 
@@ -98,8 +99,13 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
 
             {/* Description */}
             <p className="text-white/60 text-center text-sm mb-6">
-              This report will unlock once your trial ends. Unlock it now for one month without changing your subscription.
+              Get lifetime access to this report with a one-time payment.
             </p>
+
+            <div className="mb-6 rounded-2xl border border-[#38bdf8]/25 bg-[#38bdf8]/10 px-4 py-3 text-center">
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-[#7dd3fc]">One-time price</p>
+              <p className="mt-1 text-3xl font-extrabold text-white">${featurePrice}</p>
+            </div>
 
             {/* Error Message */}
             {error && (
@@ -118,7 +124,7 @@ export function UpsellPopup({ isOpen, onClose, feature, onPurchase }: UpsellPopu
               {isProcessing ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
               ) : (
-                "Unlock it now"
+                `Unlock for $${featurePrice}`
               )}
             </Button>
           </motion.div>

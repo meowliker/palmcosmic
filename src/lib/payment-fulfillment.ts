@@ -23,12 +23,14 @@ const BUNDLE_FEATURES: Record<string, string[]> = {
   "palm-reading": ["palmReading"],
   "palm-birth": ["palmReading", "birthChart"],
   "palm-birth-compat": ["palmReading", "birthChart", "compatibilityTest"],
+  "palm-birth-sketch": ["palmReading", "birthChart", "soulmateSketch", "futurePartnerReport"],
 };
 
 const BUNDLE_COIN_BONUS: Record<string, number> = {
   "palm-reading": 15,
   "palm-birth": 15,
   "palm-birth-compat": 15,
+  "palm-birth-sketch": 30,
 };
 
 const SUBSCRIPTION_TRIAL_TYPES = new Set(["subscription_trial", "future_prediction_subscription"]);
@@ -61,6 +63,114 @@ const VALID_REPORT_KEYS = new Set<ReportKey>([
 function reportKeyFromFeature(feature: string): ReportKey | null {
   const reportKey = FEATURE_TO_REPORT_KEY[feature];
   return VALID_REPORT_KEYS.has(reportKey as ReportKey) ? (reportKey as ReportKey) : null;
+}
+
+function getInternalAppUrl(): string {
+  const vercelUrl = process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "";
+  return (process.env.NEXT_PUBLIC_APP_URL || vercelUrl || "http://localhost:3000").replace(/\/$/, "");
+}
+
+async function postInternalJson(path: string, body: Record<string, unknown>, userId: string) {
+  const response = await fetch(`${getInternalAppUrl()}${path}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-user-id": userId,
+    },
+    body: JSON.stringify(body),
+    cache: "no-store",
+  });
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(String(payload?.message || payload?.error || `Internal generation failed for ${path}`));
+  }
+  return payload;
+}
+
+async function hasSoulmateAnswers(userId: string): Promise<Record<string, string> | null> {
+  const supabase = getSupabaseAdmin();
+  const { data, error } = await supabase
+    .from("soulmate_sketches")
+    .select("question_answers, sketch_image_url, generation_count")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[background-generation] soulmate answer lookup failed:", error);
+    return null;
+  }
+
+  if (data?.sketch_image_url || Number(data?.generation_count || 0) >= 1) {
+    return null;
+  }
+
+  const answers = data?.question_answers;
+  if (!answers || typeof answers !== "object") return null;
+
+  const normalized = Object.fromEntries(
+    Object.entries(answers as Record<string, unknown>)
+      .filter(([, value]) => typeof value === "string" && value.trim())
+      .map(([key, value]) => [key, String(value).trim()])
+  );
+
+  return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+export async function triggerBackgroundReportGenerationForUser(
+  userId: string | null | undefined,
+  unlockedFeatures?: Record<string, boolean> | null
+) {
+  const cleanUserId = String(userId || "").trim();
+  if (!cleanUserId) return;
+
+  let features = unlockedFeatures || null;
+  if (!features) {
+    const { data, error } = await getSupabaseAdmin()
+      .from("users")
+      .select("unlocked_features")
+      .eq("id", cleanUserId)
+      .maybeSingle();
+    if (error) {
+      console.error("[background-generation] feature lookup failed:", error);
+      return;
+    }
+    features = (data?.unlocked_features || {}) as Record<string, boolean>;
+  }
+
+  const tasks: Array<Promise<unknown>> = [];
+
+  if (features.palmReading) {
+    tasks.push(generatePalmReadingForUser(cleanUserId));
+  }
+
+  if (features.birthChart) {
+    tasks.push(postInternalJson("/api/birth-chart-report/generate", { userId: cleanUserId }, cleanUserId));
+  }
+
+  if (features.futurePartnerReport) {
+    tasks.push(postInternalJson(`/api/future-partner-report/generate?userId=${encodeURIComponent(cleanUserId)}`, {}, cleanUserId));
+  }
+
+  if (features.soulmateSketch) {
+    const answers = await hasSoulmateAnswers(cleanUserId);
+    if (answers) {
+      tasks.push(
+        postInternalJson(
+          `/api/soulmate-sketch/generate?userId=${encodeURIComponent(cleanUserId)}`,
+          { answers },
+          cleanUserId
+        )
+      );
+    }
+  }
+
+  const results = await Promise.allSettled(tasks);
+  results.forEach((result) => {
+    if (result.status === "rejected") {
+      console.error("[background-generation] report generation failed:", result.reason);
+    }
+  });
 }
 
 type PaymentStatus = "created" | "paid" | "failed";
@@ -115,6 +225,8 @@ interface PaymentRow {
   stripe_customer_id: string | null;
   metadata?: Record<string, unknown> | null;
 }
+
+type DbPayload = Record<string, unknown>;
 
 const PAYMENT_SELECT =
   "id,user_id,type,bundle_id,feature,coins,customer_email,amount,currency,payment_status,fulfilled_at,created_at,stripe_session_id,stripe_payment_intent_id,stripe_customer_id,metadata";
@@ -230,6 +342,62 @@ function getEntitlementSource(metadata: Record<string, string>, existing: Paymen
     offerIds: metadata.offerIds || "",
     coins: metadata.coins ? parseIntOrZero(metadata.coins) : existing?.coins || 0,
   };
+}
+
+async function upsertLifetimeEntitlements(params: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  userId: string;
+  email?: string | null;
+  reportKeys: ReportKey[];
+  source: EntitlementSource;
+  stripeSessionId?: string | null;
+  nowIso: string;
+}) {
+  if (params.source.type !== "bundle") return;
+
+  for (const reportKey of params.reportKeys) {
+    const entitlementPayload = {
+      user_id: params.userId,
+      report_key: reportKey,
+      source: "bundle_lifetime_purchase",
+      status: "active",
+      starts_at: params.nowIso,
+      ends_at: null,
+      stripe_session_id: params.stripeSessionId || null,
+      metadata: {
+        type: params.source.type,
+        bundle_id: params.source.bundleId,
+        email: params.email || null,
+        access: "lifetime",
+      },
+      updated_at: params.nowIso,
+    };
+
+    const { data: existingEntitlement, error: lookupError } = await params.supabase
+      .from("user_entitlements")
+      .select("id")
+      .eq("user_id", params.userId)
+      .eq("report_key", reportKey)
+      .eq("source", "bundle_lifetime_purchase")
+      .eq("status", "active")
+      .maybeSingle();
+
+    if (lookupError) throw lookupError;
+
+    if (existingEntitlement?.id) {
+      const { error } = await params.supabase
+        .from("user_entitlements")
+        .update(entitlementPayload)
+        .eq("id", existingEntitlement.id);
+      if (error) throw error;
+      continue;
+    }
+
+    const { error } = await params.supabase
+      .from("user_entitlements")
+      .insert({ id: `ent_${randomUUID()}`, ...entitlementPayload });
+    if (error) throw error;
+  }
 }
 
 async function findFirstPaymentRow(
@@ -350,7 +518,7 @@ async function applyUserEntitlements(
     birthChart: false,
     compatibilityTest: false,
   };
-  let updatedFeatures = { ...currentFeatures } as Record<string, boolean>;
+  const updatedFeatures = { ...currentFeatures } as Record<string, boolean>;
   let updatedCoins = existingUser?.coins || 0;
 
   if (source.type === "bundle") {
@@ -401,19 +569,26 @@ async function applyUserEntitlements(
     updatedCoins += source.coins || 0;
   }
 
-  const userUpdate: Record<string, any> = {
+  const userUpdate: DbPayload = {
     id: userId,
+    email: customerEmail || undefined,
     unlocked_features: updatedFeatures,
     coins: updatedCoins,
     payment_status: "paid",
+    access_status: "lifetime_active",
+    subscription_status: "lifetime",
+    is_subscribed: false,
     updated_at: nowIso,
   };
 
   if (source.type === "bundle") {
     userUpdate.bundle_purchased = source.bundleId || null;
+    userUpdate.purchase_type = "bundle";
   }
 
-  userUpdate.purchase_type = source.type;
+  if (source.type !== "bundle") {
+    userUpdate.purchase_type = source.type;
+  }
 
   // Try stripe_customer_id if schema supports it.
   if (stripeCustomerId) {
@@ -434,8 +609,18 @@ async function applyUserEntitlements(
         email: customerEmail,
         reportKeys,
       });
+      await upsertLifetimeEntitlements({
+        supabase,
+        userId,
+        email: customerEmail,
+        reportKeys: reportKeys as ReportKey[],
+        source,
+        stripeSessionId,
+        nowIso,
+      });
     }
 
+    await triggerBackgroundReportGenerationForUser(userId, updatedFeatures);
     return;
   }
 
@@ -455,8 +640,18 @@ async function applyUserEntitlements(
           email: customerEmail,
           reportKeys,
         });
+        await upsertLifetimeEntitlements({
+          supabase,
+          userId,
+          email: customerEmail,
+          reportKeys: reportKeys as ReportKey[],
+          source,
+          stripeSessionId,
+          nowIso,
+        });
       }
 
+      await triggerBackgroundReportGenerationForUser(userId, updatedFeatures);
       return;
     }
     error = retry.error;
@@ -483,10 +678,12 @@ function assertSubscriptionReportMatchesFlow(flow: FlowKey, reportKey: string) {
 }
 
 function subscriptionUnix(subscription: Stripe.Subscription, key: string): number | null {
-  const direct = (subscription as any)[key];
+  const subscriptionRecord = subscription as unknown as Record<string, unknown>;
+  const direct = subscriptionRecord[key];
   if (typeof direct === "number") return direct;
 
-  const firstItem = (subscription as any).items?.data?.[0];
+  const items = subscriptionRecord.items as { data?: Array<Record<string, unknown>> } | undefined;
+  const firstItem = items?.data?.[0];
   const fromItem = firstItem?.[key];
   return typeof fromItem === "number" ? fromItem : null;
 }
@@ -637,7 +834,7 @@ async function upsertPaidPaymentRecord(input: StripeFulfillmentInput, nowIso: st
   const feature = metadata.feature || existing?.feature || null;
   const coins = metadata.coins ? parseIntOrZero(metadata.coins) : existing?.coins || null;
 
-  const payload: Record<string, any> = {
+  const payload: DbPayload = {
     user_id: userId,
     type,
     bundle_id: bundleId,
@@ -703,7 +900,7 @@ export async function markStripePaymentStatus(input: StripePaymentStatusInput): 
     ...metadata,
   };
 
-  const payload: Record<string, any> = {
+  const payload: DbPayload = {
     user_id: userId,
     type: metadata.type || existing?.type || "bundle",
     bundle_id: metadata.bundleId || metadata.packageId || existing?.bundle_id || null,
@@ -793,22 +990,22 @@ export async function reconcilePaidPaymentsForRegistration(params: {
   if (!normalizedEmail) return { linkedRows: 0, fulfilledRows: 0 };
 
   const supabase = getSupabaseAdmin();
-  let query = supabase
+  const query = supabase
     .from("payments")
     .select(PAYMENT_SELECT)
     .eq("customer_email", normalizedEmail)
     .eq("payment_status", "paid");
 
-  if (params.anonId) {
-    query = query.or(`user_id.is.null,user_id.eq.${params.anonId}`);
-  } else {
-    query = query.is("user_id", null);
-  }
-
   const { data, error } = await query;
   if (error) throw error;
 
-  const rows = (data || []) as PaymentRow[];
+  const rows = ((data || []) as PaymentRow[]).filter((row) => {
+    if (row.user_id === params.userId) return false;
+    if (row.user_id === null) return true;
+    if (params.anonId && row.user_id === params.anonId) return true;
+    return true;
+  });
+
   if (rows.length === 0) return { linkedRows: 0, fulfilledRows: 0 };
 
   const nowIso = new Date().toISOString();
@@ -825,8 +1022,11 @@ export async function reconcilePaidPaymentsForRegistration(params: {
     linkedRows += 1;
 
     const wasAnonLinked = !!params.anonId && row.user_id === params.anonId;
+    const wasOtherUnregisteredPayment = !!row.user_id && row.user_id !== params.userId && !wasAnonLinked;
     const shouldReplayEntitlements =
-      row.user_id === null || (!params.skipAnonEntitlementReplay && wasAnonLinked);
+      row.user_id === null ||
+      (!params.skipAnonEntitlementReplay && wasAnonLinked) ||
+      wasOtherUnregisteredPayment;
 
     if (shouldReplayEntitlements) {
       await applyUserEntitlements(

@@ -9,18 +9,18 @@ export const revalidate = 0;
 export const fetchCache = "force-no-store";
 
 function getSessionUserId(request: NextRequest): string | null {
+  const headerUserId = request.headers.get("x-user-id")?.trim();
+  if (headerUserId) return headerUserId;
+
+  const queryUserId = request.nextUrl.searchParams.get("userId")?.trim();
+  if (queryUserId) return queryUserId;
+
   const accessCookie = request.cookies.get("ar_access")?.value;
   if (!accessCookie) return null;
 
   if (accessCookie !== "1" && accessCookie.trim()) {
     return accessCookie.trim();
   }
-
-  const headerUserId = request.headers.get("x-user-id")?.trim();
-  if (headerUserId) return headerUserId;
-
-  const queryUserId = request.nextUrl.searchParams.get("userId")?.trim();
-  if (queryUserId) return queryUserId;
 
   return null;
 }

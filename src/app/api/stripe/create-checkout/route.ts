@@ -3,6 +3,11 @@ import { getStripeClient } from "@/lib/stripe";
 import { getPricing, getBundleById, getCoinPackageById, getReportById, getUpsellById } from "@/lib/pricing";
 import { markStripePaymentStatus } from "@/lib/payment-fulfillment";
 import { sendMetaConversionEvent } from "@/lib/meta-conversions";
+import {
+  PAYWALL_PRICING_EXPERIMENT,
+  applyPaywallPriceVariant,
+  isPaywallPriceVariant,
+} from "@/lib/paywall-pricing-experiment";
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -39,6 +44,8 @@ export async function POST(request: NextRequest) {
       successPath,
       cancelPath,
       offerIds,
+      pricingExperiment,
+      pricingVariant,
     } = body as {
       type: "bundle" | "upsell" | "coins" | "report";
       bundleId?: string;
@@ -49,6 +56,8 @@ export async function POST(request: NextRequest) {
       successPath?: string;
       cancelPath?: string;
       offerIds?: string;
+      pricingExperiment?: string;
+      pricingVariant?: string;
     };
 
     if (!type) {
@@ -67,23 +76,31 @@ export async function POST(request: NextRequest) {
     };
 
     if (type === "bundle") {
-      const bundle = getBundleById(pricing, bundleId || "");
-      if (!bundle) return NextResponse.json({ error: "Invalid bundle" }, { status: 400 });
+      const baseBundle = getBundleById(pricing, bundleId || "");
+      if (!baseBundle) return NextResponse.json({ error: "Invalid bundle" }, { status: 400 });
+      const activePricingVariant = isPaywallPriceVariant(pricingVariant)
+        ? pricingVariant
+        : "control_29_49_89";
+      const bundle = applyPaywallPriceVariant([baseBundle], activePricingVariant)[0];
       amount = bundle.price;
       productName = bundle.name;
       metadata.bundleId = bundle.id;
       metadata.features = bundle.features.join(",");
+      metadata.pricingExperiment = pricingExperiment || PAYWALL_PRICING_EXPERIMENT;
+      metadata.pricingVariant = activePricingVariant;
+      metadata.bundlePriceCents = String(bundle.price);
+      metadata.controlBundlePriceCents = String(baseBundle.price);
     }
 
     if (type === "report") {
       const report = getReportById(pricing, packageId || "");
       if (!report) return NextResponse.json({ error: "Invalid report" }, { status: 400 });
-      amount = 197;
+      amount = report.price;
       productName = report.name;
       metadata.packageId = report.id;
       metadata.feature = report.feature;
       metadata.features = report.feature;
-      metadata.reportPriceCents = "197";
+      metadata.reportPriceCents = String(report.price);
     }
 
     if (type === "coins") {
@@ -98,15 +115,21 @@ export async function POST(request: NextRequest) {
     if (type === "upsell") {
       // Special onboarding multi-offer handling.
       if ((bundleId || "") === "ultra-pack") {
-        amount = 2499;
+        amount = 2400;
         productName = "Ultra Pack 3 in 1";
         metadata.bundleId = "ultra-pack";
         metadata.features = "prediction2026,birthChart,compatibilityTest";
       } else if ((bundleId || "").includes(",")) {
         const ids = (bundleId || "").split(",").map((v) => v.trim()).filter(Boolean);
         const features = ids.map((id) => OFFER_ID_TO_FEATURE[id]).filter(Boolean);
-        amount = ids.length * 999;
-        productName = "Custom Upsell Pack";
+        const selectedUpsells = ids
+          .map((id) => getUpsellById(pricing, id))
+          .filter((upsell): upsell is NonNullable<ReturnType<typeof getUpsellById>> => Boolean(upsell));
+        if (selectedUpsells.length !== ids.length) {
+          return NextResponse.json({ error: "Invalid upsell selection" }, { status: 400 });
+        }
+        amount = selectedUpsells.reduce((sum, upsell) => sum + upsell.price, 0);
+        productName = selectedUpsells.map((upsell) => upsell.name).join(" + ") || "Custom Upsell Pack";
         metadata.bundleId = bundleId || "";
         metadata.offerIds = ids.join(",");
         metadata.features = features.join(",");
@@ -204,8 +227,11 @@ export async function POST(request: NextRequest) {
       currency: "USD",
       productName,
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Stripe checkout create error:", error);
-    return NextResponse.json({ error: error.message || "Failed to create Stripe checkout" }, { status: 500 });
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to create Stripe checkout" },
+      { status: 500 }
+    );
   }
 }

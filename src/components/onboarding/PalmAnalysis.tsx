@@ -135,6 +135,7 @@ export function PalmAnalysis({ imageData, onComplete }: PalmAnalysisProps) {
         className="relative w-full max-w-sm aspect-[3/4] bg-black/50 rounded-lg overflow-hidden"
       >
         {/* Captured palm image */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- Captured/uploaded data URLs are not suitable for next/image optimization. */}
         <img
           src={imageData}
           alt="Captured palm"
@@ -144,9 +145,9 @@ export function PalmAnalysis({ imageData, onComplete }: PalmAnalysisProps) {
         {/* Scanning line - pure CSS animation, completely independent */}
         {progress < 100 && (
           <div 
-            className="absolute left-0 right-0 h-[2px] bg-gradient-to-r from-transparent via-red-400 to-transparent animate-scan-line"
+            className="absolute left-0 right-0 h-[2px] animate-scan-line bg-gradient-to-r from-transparent via-[#38bdf8] to-transparent"
             style={{
-              boxShadow: "0 0 10px 2px rgba(239, 107, 107, 0.6)",
+              boxShadow: "0 0 14px 3px rgba(56, 189, 248, 0.62)",
             }}
           />
         )}
@@ -189,16 +190,16 @@ export function PalmAnalysis({ imageData, onComplete }: PalmAnalysisProps) {
         </motion.p>
 
         {/* Progress bar */}
-        <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+        <div className="h-2 w-full overflow-hidden rounded-full bg-[#15314d]">
           <motion.div
-            className="h-full bg-gradient-to-r from-primary to-primary/70"
+            className="h-full bg-gradient-to-r from-[#38bdf8] to-[#7dd3fc]"
             initial={{ width: 0 }}
             animate={{ width: `${progress}%` }}
             transition={{ duration: 0.3 }}
           />
         </div>
 
-        <p className="text-muted-foreground text-center text-sm mt-3">
+        <p className="mt-3 text-center text-sm text-[#b8c7da]">
           {statusText}
         </p>
       </div>

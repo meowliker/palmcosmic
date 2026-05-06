@@ -113,8 +113,8 @@ const ONBOARDING_FLOW_ROUTES: Record<VariantKey, string[]> = {
     "/onboarding/step-14",
     "/onboarding/step-15",
     "/onboarding/bundle-pricing",
-    "/onboarding/bundle-upsell",
-    "/onboarding/step-19",
+    "/upsell",
+    "/registration",
     "/onboarding/step-20",
   ],
   B: [
@@ -136,8 +136,8 @@ const ONBOARDING_FLOW_ROUTES: Record<VariantKey, string[]> = {
     "/onboarding/step-14",
     "/onboarding/step-15",
     "/onboarding/bundle-pricing",
-    "/onboarding/bundle-upsell-b",
-    "/onboarding/step-19",
+    "/upsell",
+    "/registration",
     "/onboarding/step-20",
   ],
 };
@@ -568,12 +568,12 @@ export async function GET(request: NextRequest) {
           }
         : isOnboardingLayoutTest
         ? {
-            A: "/onboarding/bundle-upsell",
-            B: "/onboarding/bundle-upsell-b",
+            A: "/upsell",
+            B: "/upsell",
           }
         : {
-            A: "/onboarding/step-19",
-            B: "/onboarding/step-19",
+            A: "/registration",
+            B: "/registration",
           };
 
       const makeAccumulator = (route: string): InternalRouteAccumulator => ({

@@ -1,140 +1,200 @@
 "use client";
 
+import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { fadeUp } from "@/lib/motion";
+import { OnboardingHeader } from "@/components/onboarding/OnboardingHeader";
 import { Button } from "@/components/ui/button";
+import { ForecastSphere } from "@/components/onboarding/ForecastSphere";
 import { useRouter } from "next/navigation";
 import { useHaptic } from "@/hooks/useHaptic";
 import { generateUserId } from "@/lib/user-profile";
-import Image from "next/image";
-import { BrandedOnboardingHeader } from "@/components/onboarding/BrandedOnboardingHeader";
+import { pixelEvents } from "@/lib/pixel-events";
 import { trackFunnelAction } from "@/lib/analytics-events";
+import { useOnboardingStore } from "@/lib/onboarding-store";
 
 export default function Step6Page() {
   const router = useRouter();
   const { triggerLight } = useHaptic();
+  const [showButton, setShowButton] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    pixelEvents.viewContent("Forecast Accuracy Step", "onboarding_step");
+    trackFunnelAction("forecast_accuracy_viewed", {
+      route: "/onboarding/step-6",
+      step_id: "forecast_accuracy",
+      target_percentage: 34,
+      button_delay_ms: 3500,
+    });
+
+    const timer = setTimeout(() => {
+      setShowButton(true);
+      trackFunnelAction("forecast_accuracy_continue_revealed", {
+        route: "/onboarding/step-6",
+        step_id: "forecast_accuracy",
+      });
+    }, 3500);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  const persistStepSnapshot = async (userId: string) => {
+    const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || undefined;
+    const state = useOnboardingStore.getState();
+    const onboardingData = {
+      gender: state.gender,
+      birthMonth: state.birthMonth,
+      birthDay: state.birthDay,
+      birthYear: state.birthYear,
+      birthHour: state.birthHour,
+      birthMinute: state.birthMinute,
+      birthPeriod: state.birthPeriod,
+      birthPlace: state.birthPlace,
+      knowsBirthTime: state.knowsBirthTime,
+      relationshipStatus: state.relationshipStatus,
+      goals: state.goals,
+      colorPreference: state.colorPreference,
+      elementPreference: state.elementPreference,
+      sunSign: state.sunSign?.name || null,
+      moonSign: state.moonSign?.name || null,
+      ascendantSign: state.ascendantSign?.name || null,
+      modality: state.modality,
+      polarity: state.polarity,
+    };
+
+    const response = await fetch("/api/onboarding/snapshot", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        userId,
+        email,
+        currentRoute: "/onboarding/step-6",
+        currentStep: "forecast_accuracy",
+        answers: {
+          gender: state.gender,
+          birthMonth: state.birthMonth,
+          birthDay: state.birthDay,
+          birthYear: state.birthYear,
+          birthHour: state.birthHour,
+          birthMinute: state.birthMinute,
+          birthPeriod: state.birthPeriod,
+          birthPlace: state.birthPlace,
+          knowsBirthTime: state.knowsBirthTime,
+          forecastAccuracy: 34,
+        },
+        onboardingData,
+        source: "forecast_accuracy_page",
+      }),
+    });
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error || "Unable to save forecast step");
+    }
+  };
 
   const handleContinue = async () => {
+    if (saving) return;
+
     triggerLight();
-    trackFunnelAction("continue_clicked", {
+    setSaving(true);
+
+    const userId = localStorage.getItem("astrorekha_user_id") || generateUserId();
+    localStorage.setItem("astrorekha_user_id", userId);
+    localStorage.setItem("palmcosmic_user_id", userId);
+
+    trackFunnelAction("forecast_accuracy_continue_clicked", {
       route: "/onboarding/step-6",
-      step_id: "chart_preparing",
+      step_id: "forecast_accuracy",
+      user_id: userId,
       next_route: "/onboarding/step-7",
     });
 
-    const onboardingFlow = localStorage.getItem("astrorekha_onboarding_flow");
-    if (onboardingFlow !== "flow-b") {
-      router.push("/onboarding/step-7");
-      return;
-    }
-
-    const existingVariant = localStorage.getItem("astrorekha_layout_variant");
-    if (existingVariant === "B") {
-      router.push("/onboarding/step-7");
-      return;
-    }
-    if (existingVariant === "A") {
-      router.push("/onboarding/step-7");
-      return;
-    }
-
     try {
-      const userId = localStorage.getItem("astrorekha_user_id") || generateUserId();
-      const visitorId =
-        localStorage.getItem("astrorekha_ab_visitor_id") ||
-        userId;
-      localStorage.setItem("astrorekha_ab_visitor_id", visitorId);
-
-      const cfgRes = await fetch("/api/ab-test/layout-config", { cache: "no-store" });
-      const cfgJson = await cfgRes.json().catch(() => ({}));
-      const testId = cfgJson?.config?.testId || "onboarding-layout-qa";
-      const enabled = cfgJson?.config?.enabled !== false;
-      localStorage.setItem("astrorekha_ab_test_id", testId);
-
-      if (!enabled) {
-        localStorage.setItem("astrorekha_layout_variant", "A");
-        router.push("/onboarding/step-7");
-        return;
-      }
-
-      const variantParams = new URLSearchParams({
-        testId,
-        visitorId,
-        userId,
+      await persistStepSnapshot(userId);
+      trackFunnelAction("forecast_accuracy_snapshot_saved", {
+        route: "/onboarding/step-6",
+        step_id: "forecast_accuracy",
+        user_id: userId,
       });
-      const variantRes = await fetch(`/api/ab-test?${variantParams.toString()}`, { cache: "no-store" });
-      const variantJson = await variantRes.json().catch(() => ({}));
-      const variant = variantJson?.variant === "B" ? "B" : "A";
-      const resolvedTestId = variantJson?.testId || testId;
-      localStorage.setItem("astrorekha_ab_test_id", resolvedTestId);
-
-      localStorage.setItem("astrorekha_layout_variant", variant);
-      if (variant === "B") {
-        router.push("/onboarding/step-7");
-        return;
-      }
-    } catch (error) {
-      console.error("Failed to assign onboarding layout variant at step-6:", error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "snapshot_failed";
+      console.error("[step-6] snapshot failed:", message);
+      trackFunnelAction("forecast_accuracy_snapshot_failed", {
+        route: "/onboarding/step-6",
+        step_id: "forecast_accuracy",
+        user_id: userId,
+        error: message,
+      });
+    } finally {
+      setSaving(false);
+      router.push("/onboarding/step-7");
     }
-
-    router.push("/onboarding/step-7");
   };
 
   return (
-    <div className="flex-1 min-h-[100svh] max-h-[100svh] overflow-hidden bg-[#061525] text-white flex flex-col">
-      <BrandedOnboardingHeader onBack={() => router.back()} />
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={fadeUp}
+      className="flex min-h-screen flex-1 flex-col bg-[#061525] text-white"
+    >
+      <OnboardingHeader showBack currentStep={6} totalSteps={14} />
 
-      <div className="px-6 pb-3">
-        <div className="w-full h-1.5 bg-[#15314d] rounded-full overflow-hidden">
-          <div className="h-full w-[78%] bg-[#38bdf8] rounded-full" />
+      <div className="px-6 pb-4">
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-[#15314d]">
+          <div className="h-full w-[48%] rounded-full bg-[#38bdf8]" />
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center px-6 pt-3 text-center">
-        <h1 className="text-xl md:text-2xl leading-tight font-semibold tracking-tight max-w-[21rem] mb-3">
-          The Astrologer has started preparing your natal chart
-        </h1>
-
-        <p className="text-sm md:text-base leading-relaxed text-[#b8c7da] max-w-[22rem]">
-          Your upcoming transits may reveal new timing, opportunities, and relationship energy.
-        </p>
-
-        <p className="mt-3 text-sm md:text-base leading-relaxed text-[#d7e4f2]">
-          Let&apos;s turn it into clear guidance.
-        </p>
-
-        <div className="flex-1 min-h-0 w-full flex items-center justify-center py-4">
-        <div className="w-full max-w-[19rem]">
-          <div className="relative mx-auto h-[38svh] min-h-[15rem] max-h-[21rem] w-full">
-            <div className="absolute inset-[-18%] rounded-full bg-[#38bdf8]/10 blur-3xl" />
-            <Image
-              src="/onboarding-step-6-zodiac.png"
-              alt="Golden zodiac wheel with sun"
-              fill
-              sizes="(max-width: 768px) 78vw, 304px"
-              className="object-contain object-center drop-shadow-[0_0_38px_rgba(245,178,77,0.28)]"
-              priority
-            />
-            <div
-              className="absolute inset-0 bg-gradient-to-b from-[#061525]/25 via-transparent to-[#061525]/70 pointer-events-none"
-              style={{
-                WebkitMaskImage:
-                  "radial-gradient(ellipse at center, black 38%, rgba(0,0,0,0.7) 58%, transparent 78%)",
-                maskImage:
-                  "radial-gradient(ellipse at center, black 38%, rgba(0,0,0,0.7) 58%, transparent 78%)",
-              }}
-            />
-          </div>
-        </div>
-        </div>
-      </div>
-
-      <div className="mt-auto px-6 pb-5">
-        <Button
-          onClick={handleContinue}
-          className="w-full h-[52px] rounded-xl bg-[#38bdf8] text-base font-semibold text-black shadow-[0_18px_40px_rgba(56,189,248,0.24)] hover:bg-[#0284c7]"
+      <div className="flex flex-1 flex-col items-center px-6 pt-8">
+        <motion.h1
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 text-center text-xl font-bold md:text-2xl"
         >
-          Continue
-        </Button>
+          Forecast accuracy
+        </motion.h1>
+
+        <div className="mb-8">
+          <ForecastSphere targetPercentage={34} duration={3} size={180} />
+        </div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 2 }}
+          className="relative max-w-sm rounded-2xl border border-[#38bdf8]/18 bg-[#0b2338] px-6 py-4"
+        >
+          <p className="text-center text-sm text-[#d7e4f2]">
+            The cosmic energy is building up! Share a bit more to reveal what&apos;s driving you
+          </p>
+          <div className="absolute -bottom-2 left-1/2 h-4 w-4 -translate-x-1/2 rotate-45 border-b border-r border-[#38bdf8]/18 bg-[#0b2338]" />
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 2.5 }}
+          className="mt-4 flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#38bdf8]/25 to-[#7dd3fc]/10"
+        >
+          <span className="text-xl">🔮</span>
+        </motion.div>
       </div>
-    </div>
+
+      {showButton && (
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="px-6 pb-6">
+          <Button
+            onClick={handleContinue}
+            disabled={saving}
+            className="h-14 w-full rounded-xl bg-[#38bdf8] text-lg font-semibold text-black shadow-[0_18px_40px_rgba(56,189,248,0.24)] hover:bg-[#0284c7] disabled:bg-[#15314d] disabled:text-[#b8c7da] disabled:shadow-none"
+            size="lg"
+          >
+            {saving ? "Saving..." : "Continue"}
+          </Button>
+        </motion.div>
+      )}
+    </motion.div>
   );
 }

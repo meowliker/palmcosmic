@@ -61,7 +61,7 @@ function mergeFeatureUnlocks(current: unknown, reportKeys: ReportKey[]) {
   return next;
 }
 
-async function syncLegacyUnlockedFeaturesForUsers(supabase: any, userIds: string[]) {
+async function syncLegacyUnlockedFeaturesForUsers(supabase: ReturnType<typeof getSupabaseAdmin>, userIds: string[]) {
   const uniqueUserIds = Array.from(new Set(userIds.filter(Boolean)));
   if (uniqueUserIds.length === 0) return;
 
@@ -85,7 +85,7 @@ async function syncLegacyUnlockedFeaturesForUsers(supabase: any, userIds: string
     const featureKey = REPORT_TO_UNLOCKED_FEATURE[entitlement.report_key as ReportKey];
     const features = featuresByUser.get(entitlement.user_id);
     if (featureKey && features) {
-      (features as any)[featureKey] = true;
+      (features as unknown as Record<string, boolean>)[featureKey] = true;
     }
   }
 
@@ -142,7 +142,7 @@ export async function activateTrialPrimaryEntitlements(params: {
   const unlockedFeatures = mergeFeatureUnlocks(existingUser?.unlocked_features, reports);
   const currentCoins = Number(existingUser?.coins || 0);
 
-  const userUpdate: Record<string, any> = {
+  const userUpdate: Record<string, unknown> = {
     id: params.userId,
     email: params.email || undefined,
     unlocked_features: unlockedFeatures,
@@ -240,7 +240,7 @@ export async function activateFutureAllReportEntitlements(params: {
   startsAt: Date;
   stripeSubscriptionId?: string | null;
   stripeSessionId?: string | null;
-  metadata?: Record<string, any>;
+  metadata?: Record<string, unknown>;
 }) {
   const supabase = getSupabaseAdmin();
   const nowIso = new Date().toISOString();
@@ -511,7 +511,6 @@ export async function activateExtraReportPurchase(params: {
   const supabase = getSupabaseAdmin();
   const purchasedAt = params.purchasedAt || new Date();
   const startsAtIso = purchasedAt.toISOString();
-  const endsAtIso = new Date(purchasedAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const nowIso = new Date().toISOString();
 
   await ensureAndLinkReportsForUser({
@@ -529,7 +528,7 @@ export async function activateExtraReportPurchase(params: {
   if (userFetchError) throw userFetchError;
 
   const unlockedFeatures = mergeFeatureUnlocks(existingUser?.unlocked_features, [params.reportKey]);
-  const userUpdate: Record<string, any> = {
+  const userUpdate: Record<string, unknown> = {
     unlocked_features: unlockedFeatures,
     payment_status: "paid",
     purchase_type: "report",
@@ -552,12 +551,12 @@ export async function activateExtraReportPurchase(params: {
     source: "extra_report_purchase",
     status: "active",
     starts_at: startsAtIso,
-    ends_at: endsAtIso,
+    ends_at: null,
     stripe_session_id: params.stripeSessionId || null,
     metadata: {
-      price_cents: 197,
+      price_cents: 2900,
       currency: "USD",
-      access_days: 30,
+      access_type: "lifetime",
     },
     updated_at: nowIso,
   };
@@ -595,7 +594,7 @@ export async function updateTrialSubscriptionStatus(params: {
   cancelAtPeriodEnd?: boolean;
 }) {
   const supabase = getSupabaseAdmin();
-  const updatePayload: Record<string, any> = {
+  const updatePayload: Record<string, unknown> = {
     subscription_status: params.status,
     access_status: params.status === "trialing" ? "trial_active" : undefined,
     trial_ends_at: params.trialEndsAt?.toISOString() || undefined,

@@ -785,10 +785,9 @@ export default function ABTestsPage() {
       source === "dashboard" ? "dashboard" : "upsell_page";
 
     const upsellRouteStatsByVariant = {
-      A: routeStats.A.find((row) => row.route === "/onboarding/bundle-upsell"),
+      A: routeStats.A.find((row) => row.route === "/upsell"),
       B:
-        routeStats.B.find((row) => row.route === "/onboarding/bundle-upsell-b") ||
-        routeStats.B.find((row) => row.route === "/onboarding/bundle-upsell"),
+        routeStats.B.find((row) => row.route === "/upsell"),
     };
 
     const bundleBuyersByVariant = {

@@ -5,7 +5,7 @@ import { linkReportToUser } from "@/lib/user-report-links";
 
 export const maxDuration = 60;
 
-type AnyRecord = Record<string, any>;
+type AnyRecord = Record<string, unknown>;
 
 function getMonthNumber(month: string): number {
   const monthMap: Record<string, number> = {
@@ -172,14 +172,6 @@ function hasKnownBirthTime(userProfile: AnyRecord | null, user: AnyRecord | null
   );
 }
 
-function isSameUtcDay(left: Date, right: Date): boolean {
-  return (
-    left.getUTCFullYear() === right.getUTCFullYear() &&
-    left.getUTCMonth() === right.getUTCMonth() &&
-    left.getUTCDate() === right.getUTCDate()
-  );
-}
-
 async function hydrateBirthChartFromApi(
   request: NextRequest,
   supabaseAdmin: ReturnType<typeof getSupabaseAdmin>,
@@ -277,7 +269,7 @@ export async function POST(request: NextRequest) {
   const supabaseAdmin = getSupabaseAdmin();
 
   try {
-    const force = !!requestBody?.force;
+    const force = false;
 
     const { data: userProfile } = await supabaseAdmin
       .from("user_profiles")
@@ -306,7 +298,7 @@ export async function POST(request: NextRequest) {
       .limit(1)
       .maybeSingle();
 
-    if (existingComplete && (!birthChartCacheKey || existingComplete.birth_chart_id === birthChartCacheKey)) {
+    if (existingComplete) {
       await linkReportToUser({
         supabase: supabaseAdmin,
         userId,
@@ -321,34 +313,6 @@ export async function POST(request: NextRequest) {
         generated_at: existingComplete.generated_at || new Date().toISOString(),
         reused: true,
       });
-    }
-
-    if (force && existingComplete?.created_at) {
-      const generatedAt = new Date(existingComplete.generated_at || existingComplete.created_at);
-      if (isSameUtcDay(generatedAt, new Date())) {
-        return NextResponse.json(
-          {
-            error: "refresh_limit_reached",
-            message: "You can refresh your birth chart report once per day.",
-            nextAvailable: new Date(
-              Date.UTC(
-                generatedAt.getUTCFullYear(),
-                generatedAt.getUTCMonth(),
-                generatedAt.getUTCDate() + 1,
-                0,
-                0,
-                0,
-                0
-              )
-            ).toISOString(),
-          },
-          { status: 429 }
-        );
-      }
-    }
-
-    if (!force && existingComplete && existingComplete.birth_chart_id !== birthChartCacheKey) {
-      // Birth details changed. Continue into generation so the report matches the latest profile.
     }
 
     if (!force && !existingComplete) {

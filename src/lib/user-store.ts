@@ -213,12 +213,12 @@ export const featureNames: Record<keyof UnlockedFeatures, string> = {
   futurePartnerReport: "Future Partner Report",
 };
 
-// Feature prices (INR)
+// Feature prices (USD)
 export const featurePrices: Record<keyof UnlockedFeatures, number> = {
-  palmReading: 582,
-  prediction2026: 582,
-  birthChart: 582,
-  compatibilityTest: 582,
-  soulmateSketch: 199,
-  futurePartnerReport: 582,
+  palmReading: 29,
+  prediction2026: 29,
+  birthChart: 29,
+  compatibilityTest: 29,
+  soulmateSketch: 29,
+  futurePartnerReport: 29,
 };

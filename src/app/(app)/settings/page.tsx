@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Check, FileText, Mail, LogOut, CreditCard, ChevronRight } from "lucide-react";
+import { ArrowLeft, Check, FileText, Mail, LogOut, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useUserStore } from "@/lib/user-store";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
@@ -18,21 +18,13 @@ type FeatureFlags = {
   futurePartnerReport?: boolean;
 };
 
-type SubscriptionState = {
+type AccessState = {
   primaryFlow: string | null;
   primaryReport: string | null;
-  subscriptionStatus: string | null;
   accessStatus: string | null;
   bundlePurchased: string | null;
   unlockedFeatures: FeatureFlags;
-};
-
-const FLOW_LABELS: Record<string, string> = {
-  future_prediction: "2026 Prediction",
-  soulmate_sketch: "Soulmate Sketch",
-  palm_reading: "Palm Reading",
-  future_partner: "Future Partner",
-  compatibility: "Compatibility",
+  coins: number;
 };
 
 const FLOW_BENEFITS: Record<string, { icon: string; text: string }[]> = {
@@ -68,15 +60,6 @@ const BASE_APP_BENEFITS = [
   { icon: "💡", text: "Daily Tips" },
 ];
 
-const ALL_REPORT_BENEFITS = [
-  { icon: "🖐️", text: "Palm Reading Report" },
-  { icon: "📊", text: "Birth Chart Report" },
-  { icon: "🪐", text: "2026 Future Prediction Report" },
-  { icon: "💕", text: "Compatibility Report" },
-  { icon: "🎨", text: "Soulmate Sketch Report" },
-  { icon: "💍", text: "Future Partner Report" },
-];
-
 function dedupeBenefits(benefits: { icon: string; text: string }[]) {
   const seen = new Set<string>();
   return benefits.filter((benefit) => {
@@ -86,26 +69,22 @@ function dedupeBenefits(benefits: { icon: string; text: string }[]) {
   });
 }
 
-function getSubscriptionBenefits(subscription: SubscriptionState) {
+function getAccessBenefits(access: AccessState) {
   const benefits: { icon: string; text: string }[] = [...BASE_APP_BENEFITS];
 
-  if (subscription.subscriptionStatus === "active" || subscription.accessStatus === "subscription_active") {
-    benefits.push(...ALL_REPORT_BENEFITS);
-    benefits.push({ icon: "💬", text: "15 AI Chat Coins" });
-    return dedupeBenefits(benefits);
-  }
-
-  if (subscription.primaryFlow && FLOW_BENEFITS[subscription.primaryFlow]) {
-    benefits.push(...FLOW_BENEFITS[subscription.primaryFlow]);
+  if (access.primaryFlow && FLOW_BENEFITS[access.primaryFlow]) {
+    benefits.push(...FLOW_BENEFITS[access.primaryFlow]);
   }
 
   for (const feature of FEATURE_BENEFITS) {
-    if (subscription.unlockedFeatures?.[feature.key]) {
+    if (access.unlockedFeatures?.[feature.key]) {
       benefits.push({ icon: feature.icon, text: feature.text });
     }
   }
 
-  benefits.push({ icon: "💬", text: "15 AI Chat Coins for this flow" });
+  if (access.coins > 0) {
+    benefits.push({ icon: "💬", text: `${access.coins} AI Chat Coins` });
+  }
 
   return dedupeBenefits(benefits);
 }
@@ -114,39 +93,38 @@ function getSubscriptionBenefits(subscription: SubscriptionState) {
 const getBundleBenefits = (bundleId: string | null, unlockedFeatures?: FeatureFlags) => {
   const benefits = [...BASE_APP_BENEFITS];
 
-  benefits.push({ icon: "🖐️", text: "Palm Reading Report" });
+  if (bundleId || unlockedFeatures?.palmReading) {
+    benefits.push({ icon: "🖐️", text: "Palm Reading Report" });
+  }
   
   // Show based on what was purchased (check both bundleId and unlockedFeatures)
   if (bundleId === "palm-birth" || bundleId === "palm-birth-compat" || bundleId === "palm-birth-sketch" || unlockedFeatures?.birthChart) {
-  benefits.push({ icon: "🌙", text: "Birth Chart Analysis" });
-}
-if (bundleId === "palm-birth-compat" || unlockedFeatures?.compatibilityTest) {
-  benefits.push({ icon: "💕", text: "Compatibility Report" });
-}
-if (bundleId === "palm-birth-sketch" || unlockedFeatures?.soulmateSketch) {
-  benefits.push({ icon: "🎨", text: "Soulmate Sketch" });
-}
-if (bundleId === "palm-birth-compat" || bundleId === "palm-birth-sketch" || unlockedFeatures?.futurePartnerReport) {
-  benefits.push({ icon: "💍", text: "Future Partner Report" });
-}
-
-  benefits.push({ icon: "💬", text: "15 AI Chat Coins" });
+    benefits.push({ icon: "🌙", text: "Birth Chart Analysis" });
+  }
+  if (bundleId === "palm-birth-compat" || unlockedFeatures?.compatibilityTest) {
+    benefits.push({ icon: "💕", text: "Compatibility Report" });
+  }
+  if (bundleId === "palm-birth-sketch" || unlockedFeatures?.soulmateSketch) {
+    benefits.push({ icon: "🎨", text: "Soulmate Sketch" });
+  }
+  if (bundleId === "palm-birth-compat" || bundleId === "palm-birth-sketch" || unlockedFeatures?.futurePartnerReport) {
+    benefits.push({ icon: "💍", text: "Future Partner Report" });
+  }
   
-  return benefits;
+  return dedupeBenefits(benefits);
 };
 
 export default function SettingsPage() {
   const router = useRouter();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [isFlowB, setIsFlowB] = useState(false);
   const [bundleId, setBundleId] = useState<string | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionState>({
+  const [access, setAccess] = useState<AccessState>({
     primaryFlow: null,
     primaryReport: null,
-    subscriptionStatus: null,
     accessStatus: null,
     bundlePurchased: null,
     unlockedFeatures: {},
+    coins: 0,
   });
   const { purchasedBundle, resetUserState, unlockedFeatures } = useUserStore();
 
@@ -164,17 +142,14 @@ export default function SettingsPage() {
       email,
     });
     if (typeof window !== "undefined") {
-      const flow = localStorage.getItem("astrorekha_onboarding_flow");
-      const purchaseType = localStorage.getItem("astrorekha_purchase_type");
       const bundle = localStorage.getItem("astrorekha_bundle_id");
-      setIsFlowB(flow === "flow-b" || purchaseType === "one-time");
       setBundleId(bundle);
     }
-    loadSubscriptionState();
+    loadAccessState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const loadSubscriptionState = async () => {
+  const loadAccessState = async () => {
     try {
       const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
       const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email");
@@ -189,44 +164,43 @@ export default function SettingsPage() {
       const data = response.ok && result?.success ? result.user : null;
       if (!data) return;
 
-      setSubscription({
+      setAccess({
         primaryFlow: data.primaryFlow || null,
         primaryReport: data.primaryReport || null,
-        subscriptionStatus: data.subscriptionStatus || null,
         accessStatus: data.accessStatus || null,
         bundlePurchased: data.purchasedBundle || null,
         unlockedFeatures: data.unlockedFeatures || {},
+        coins: Number(data.coins || 0),
       });
       setBundleId(data.purchasedBundle || bundleId);
-      setIsFlowB(data.purchaseType === "one-time" || isFlowB);
     } catch (error) {
-      console.error("Failed to load subscription state:", error);
+      console.error("Failed to load access state:", error);
     }
   };
 
   const mergedUnlockedFeatures = {
     ...unlockedFeatures,
-    ...subscription.unlockedFeatures,
+    ...access.unlockedFeatures,
   };
-  const activeBundleId = subscription.bundlePurchased || bundleId || purchasedBundle;
-  const hasSubscriptionFlow = Boolean(subscription.primaryFlow);
-  const displayBenefits = hasSubscriptionFlow
-    ? getSubscriptionBenefits({ ...subscription, unlockedFeatures: mergedUnlockedFeatures })
+  const activeBundleId = access.bundlePurchased || bundleId || purchasedBundle;
+  const hasFlowAccess = Boolean(access.primaryFlow);
+  const unlockedReportCount = FEATURE_BENEFITS.filter((feature) => mergedUnlockedFeatures?.[feature.key]).length;
+  const displayBenefits = hasFlowAccess
+    ? getAccessBenefits({ ...access, unlockedFeatures: mergedUnlockedFeatures })
     : getBundleBenefits(activeBundleId, mergedUnlockedFeatures);
-  const planTitle = hasSubscriptionFlow
-    ? `Your ${FLOW_LABELS[subscription.primaryFlow || ""] || "PalmCosmic"} Access`
-    : isFlowB
-      ? "Your Purchase Benefits"
-      : "Your Subscription Benefits";
-  const planSubtitle = hasSubscriptionFlow
-    ? subscription.subscriptionStatus === "active"
-      ? "Monthly subscription active"
-      : subscription.subscriptionStatus === "trialing"
-        ? "Trial access active"
-        : subscription.accessStatus?.replace(/_/g, " ") || "Subscription access"
-    : activeBundleId
-      ? "Unlocked from your selected bundle"
-      : "Your current account benefits";
+  if (access.coins > 0 && !displayBenefits.some((benefit) => benefit.text.includes("AI Chat Coins"))) {
+    displayBenefits.push({ icon: "💬", text: `${access.coins} AI Chat Coins` });
+  }
+  const planTitle = activeBundleId
+    ? "Your Lifetime Bundle"
+    : unlockedReportCount > 0
+      ? "Your Lifetime Reports"
+      : "Your PalmCosmic Access";
+  const planSubtitle = activeBundleId
+    ? "One-time purchase • Lifetime access"
+    : unlockedReportCount > 0
+      ? `${unlockedReportCount} report${unlockedReportCount === 1 ? "" : "s"} unlocked for lifetime`
+      : "No reports unlocked yet";
 
   const handleLogout = () => {
     trackAnalyticsEvent("SettingsAction", {
@@ -368,34 +342,6 @@ export default function SettingsPage() {
                 </div>
               </button>
             </motion.div>
-
-            {/* Manage Subscription Button - Only show for subscription users (Flow A) */}
-            {!isFlowB && (
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.3 }}
-              >
-                <button
-                  onClick={() => {
-                    trackAnalyticsEvent("SettingsAction", {
-                      route: "/settings",
-                      action: "manage_subscription_clicked",
-                      destination: "/manage-subscription",
-                      subscription_status: subscription.subscriptionStatus,
-                      access_status: subscription.accessStatus,
-                    });
-                    router.push("/manage-subscription");
-                  }}
-                  className="w-full bg-[#0b2338] rounded-lg p-4 border border-[#38bdf8]/30 hover:bg-[#0d2a45] transition-colors"
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <CreditCard className="w-5 h-5 text-[#38bdf8]" />
-                    <span className="text-white font-medium">Manage Subscription</span>
-                  </div>
-                </button>
-              </motion.div>
-            )}
           </div>
         </div>
 

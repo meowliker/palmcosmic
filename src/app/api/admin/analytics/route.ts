@@ -120,6 +120,7 @@ const WORKFLOW_ROUTES = [
   "/onboarding/compatibility/email",
   "/onboarding/compatibility/paywall",
   "/onboarding/create-password",
+  "/registration",
   "/login",
   "/reports",
   "/prediction-2026",

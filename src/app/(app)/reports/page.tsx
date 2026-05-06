@@ -3,14 +3,13 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Star, Sun, Moon, Sparkles, Loader2, Lock, MessageCircle, Lightbulb, CheckCircle, XCircle, Clock, X } from "lucide-react";
+import { ChevronRight, Star, Sparkles, Loader2, Lightbulb, CheckCircle, XCircle } from "lucide-react";
 import Image from "next/image";
 import { getZodiacSign, getZodiacSymbol, getZodiacColor } from "@/lib/astrology-api";
 import { extractStoredSignName } from "@/lib/zodiac-utils";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { useUserStore, UnlockedFeatures } from "@/lib/user-store";
 import { UpsellPopup } from "@/components/UpsellPopup";
-import { TrialStatusBanner } from "@/components/TrialStatusBanner";
 import { UserAvatar, cacheUserInfo } from "@/components/UserAvatar";
 import { BirthChartTimer } from "@/components/BirthChartTimer";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
@@ -56,69 +55,12 @@ export default function DashboardPage() {
   const [expandedCard, setExpandedCard] = useState<string | null>(null);
   const [soulmateSketchStatus, setSoulmateSketchStatus] = useState<SoulmateSketchStatus | null>(null);
   const [reportAccessLoaded, setReportAccessLoaded] = useState(false);
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
-  const [accessStatus, setAccessStatus] = useState<string | null>(null);
-  const [primaryFlow, setPrimaryFlow] = useState<string | null>(null);
-  const [subscriptionModalOpen, setSubscriptionModalOpen] = useState(false);
-  const [subscriptionAccessLoaded, setSubscriptionAccessLoaded] = useState(false);
-  const [subscriptionPortalLoading, setSubscriptionPortalLoading] = useState(false);
-  const [subscriptionPortalError, setSubscriptionPortalError] = useState<string | null>(null);
 
   // Get sun sign from onboarding store as fallback
   const { birthMonth: storeBirthMonth, birthDay: storeBirthDay, sunSign: storeSunSign } = useOnboardingStore();
 
   // Get unlocked features from user store
-  const { unlockedFeatures, birthChartGenerating, birthChartReady, syncFromServer, unlockFeature } = useUserStore();
-
-  const isSubscriptionLocked =
-    !subscriptionAccessLoaded ||
-    accessStatus === "locked" ||
-    ["locked", "past_due", "unpaid", "incomplete_expired"].includes(subscriptionStatus || "");
-
-  const openSubscriptionModal = (source: string) => {
-    trackAnalyticsEvent("ReportsDashboardAction", {
-      action: "locked_subscription_section_clicked",
-      route: "/reports",
-      source,
-      subscription_status: subscriptionStatus || null,
-      access_status: accessStatus || null,
-    });
-    setSubscriptionPortalError(null);
-    setSubscriptionModalOpen(true);
-  };
-
-  const goToSubscriptionPayment = async () => {
-    setSubscriptionPortalLoading(true);
-    setSubscriptionPortalError(null);
-    trackAnalyticsEvent("ReportsDashboardAction", {
-      action: "subscription_reactivation_clicked",
-      route: "/reports",
-      destination: "stripe_billing_portal",
-      primary_flow: primaryFlow || null,
-      subscription_status: subscriptionStatus || null,
-      access_status: accessStatus || null,
-    });
-
-    try {
-      const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
-      const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || "";
-      const response = await fetch("/api/stripe/billing-portal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, email, returnPath: "/reports" }),
-      });
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok || !data?.url) {
-        throw new Error(data?.error || "Unable to open Stripe payment portal");
-      }
-
-      window.location.href = data.url;
-    } catch (error: any) {
-      setSubscriptionPortalError(error?.message || "Unable to open Stripe payment portal");
-      setSubscriptionPortalLoading(false);
-    }
-  };
+  const { unlockedFeatures, birthChartGenerating, syncFromServer, unlockFeature } = useUserStore();
 
   useEffect(() => {
     const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id") || "";
@@ -186,7 +128,6 @@ export default function DashboardPage() {
 
   const loadUserZodiac = async () => {
     setReportAccessLoaded(false);
-    setSubscriptionAccessLoaded(false);
     try {
       const userId = localStorage.getItem("astrorekha_user_id") || localStorage.getItem("palmcosmic_user_id");
 
@@ -211,10 +152,6 @@ export default function DashboardPage() {
         if (userData) {
           if (userData.name) setUserName(userData.name);
           if (userData.email) setUserEmail(userData.email);
-          setSubscriptionStatus(userData.subscriptionStatus || null);
-          setAccessStatus(userData.accessStatus || null);
-          setPrimaryFlow(userData.primaryFlow || null);
-          setSubscriptionAccessLoaded(true);
           cacheUserInfo(userData.name, userData.email);
 
           syncFromServer({
@@ -290,7 +227,6 @@ export default function DashboardPage() {
       setZodiacLoaded(true);
     }
     setReportAccessLoaded(true);
-    setSubscriptionAccessLoaded((loaded) => loaded);
   };
 
 
@@ -382,20 +318,10 @@ export default function DashboardPage() {
     }
 
     trackReportAction("locked_report_selected", params);
-    if (isSubscriptionLocked) {
-      openSubscriptionModal(`report_${params.reportKey}`);
-      return;
-    }
-
     setUpsellPopup({ isOpen: true, feature: params.feature });
   };
 
   const handleInsightCardClick = (card: string) => {
-    if (isSubscriptionLocked) {
-      openSubscriptionModal(`daily_insight_${card}`);
-      return;
-    }
-
     setExpandedCard(card);
     trackAnalyticsEvent("ReportsDashboardAction", {
       action: "daily_insight_card_opened",
@@ -410,9 +336,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#061525] flex items-center justify-center">
-      {/* Trial/Payment Status Banner */}
-      <TrialStatusBanner />
-
       <div className="w-full max-w-md h-screen bg-[#061525] overflow-hidden shadow-2xl shadow-black/30 flex flex-col">
         {/* Header */}
         <div className="sticky top-0 z-40 bg-[#061525]/95 backdrop-blur-sm border-b border-[#173653]">
@@ -434,16 +357,8 @@ export default function DashboardPage() {
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className={`relative overflow-hidden rounded-lg border p-5 cursor-pointer transition-all group ${
-                isSubscriptionLocked
-                  ? "border-[#173653] bg-[#0b2338]/70"
-                  : "border-[#38bdf8]/25 bg-[#0b2338] hover:border-[#38bdf8]/60 hover:bg-[#0d2a45]"
-              }`}
+              className="relative overflow-hidden rounded-lg border border-[#38bdf8]/25 bg-[#0b2338] p-5 cursor-pointer transition-all group hover:border-[#38bdf8]/60 hover:bg-[#0d2a45]"
               onClick={() => {
-                if (isSubscriptionLocked) {
-                  openSubscriptionModal("chat");
-                  return;
-                }
                 trackAnalyticsEvent("ReportsDashboardAction", {
                   action: "chat_card_clicked",
                   route: "/reports",
@@ -454,9 +369,6 @@ export default function DashboardPage() {
             >
               {/* Animated background effect */}
               <div className="absolute inset-0 bg-[#38bdf8]/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-              {isSubscriptionLocked && (
-                <div className="absolute inset-0 z-10 rounded-lg bg-[#020b15]/35 backdrop-blur-[1px]" />
-              )}
 
               {/* Sparkle decorations */}
               <div className="absolute top-3 right-3 text-yellow-400 animate-pulse">
@@ -466,7 +378,7 @@ export default function DashboardPage() {
               <div className="relative flex items-center gap-4">
                 <div className="relative flex-shrink-0">
                   {/* Pulsing ring */}
-                  <div className={`absolute inset-0 rounded-full bg-[#38bdf8] opacity-10 ${isSubscriptionLocked ? "" : "animate-ping"}`} />
+                  <div className="absolute inset-0 rounded-full bg-[#38bdf8] opacity-10 animate-ping" />
                   <div className="relative w-16 h-16 rounded-full bg-[#082035] flex items-center justify-center shadow-lg shadow-[#38bdf8]/15 overflow-hidden border border-[#38bdf8]/30">
                     <Image
                       src="/elysia.png"
@@ -478,7 +390,7 @@ export default function DashboardPage() {
                     />
                   </div>
                   {/* Online indicator */}
-                  <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-[#0A0E1A] ${isSubscriptionLocked ? "bg-[#8fa3b8]" : "bg-green-400"}`} />
+                  <div className="absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-[#0A0E1A] bg-green-400" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <h3 className="text-white font-bold text-xl mb-1">
@@ -488,13 +400,7 @@ export default function DashboardPage() {
                     Your personal cosmic guide & advisor
                   </p>
                 </div>
-                {isSubscriptionLocked ? (
-                  <div className="relative z-20 flex h-9 w-9 items-center justify-center rounded-full border border-[#38bdf8]/25 bg-[#061525]">
-                    <Lock className="h-4 w-4 text-[#38bdf8]" />
-                  </div>
-                ) : (
-                  <ChevronRight className="w-6 h-6 text-[#38bdf8] group-hover:translate-x-1 transition-transform" />
-                )}
+                <ChevronRight className="w-6 h-6 text-[#38bdf8] group-hover:translate-x-1 transition-transform" />
               </div>
             </motion.div>
 
@@ -507,7 +413,7 @@ export default function DashboardPage() {
             >
               <h2 className="text-white font-semibold text-lg mb-3">Today&apos;s Cosmic Insights</h2>
 
-              <div className={`relative ${isSubscriptionLocked ? "select-none blur-[3px]" : ""}`}>
+              <div className="relative">
                 {insightsLoading ? (
                   <div className="flex items-center justify-center py-8">
                     <Loader2 className="w-6 h-6 text-white/30 animate-spin" />
@@ -569,19 +475,6 @@ export default function DashboardPage() {
                   </div>
                 )}
               </div>
-              {isSubscriptionLocked && (
-                <button
-                  type="button"
-                  onClick={() => openSubscriptionModal("daily_insights")}
-                  className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-[#020b15]/35"
-                  aria-label="Unlock daily insights"
-                >
-                  <span className="inline-flex items-center gap-2 rounded-full border border-[#38bdf8]/30 bg-[#061525]/95 px-4 py-2 text-sm font-semibold text-[#dce8f5] shadow-lg shadow-black/30">
-                    <Lock className="h-4 w-4 text-[#38bdf8]" />
-                    Subscription required
-                  </span>
-                </button>
-              )}
             </motion.div>
 
             {/* Expanded Card Modal */}
@@ -694,10 +587,6 @@ export default function DashboardPage() {
               transition={{ delay: 0.15 }}
               className="relative rounded-lg overflow-hidden cursor-pointer group border border-[#173653]"
               onClick={() => {
-                if (isSubscriptionLocked) {
-                  openSubscriptionModal("horoscope");
-                  return;
-                }
                 trackAnalyticsEvent("ReportsDashboardAction", {
                   action: "horoscope_card_clicked",
                   route: "/reports",
@@ -718,9 +607,6 @@ export default function DashboardPage() {
               <div className="absolute top-6 right-16 opacity-10">
                 <Sparkles className="w-8 h-8 text-white" />
               </div>
-              {isSubscriptionLocked && (
-                <div className="absolute inset-0 z-10 bg-[#020b15]/35 backdrop-blur-[1px]" />
-              )}
 
               <div className="relative z-20 p-5">
                 <div className="flex items-start gap-4">
@@ -734,17 +620,10 @@ export default function DashboardPage() {
                       {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
                     </p>
                   </div>
-                  {isSubscriptionLocked ? (
-                    <div className="flex items-center gap-1 bg-[#061525]/80 rounded-full px-3 py-1.5 backdrop-blur-sm border border-white/10">
-                      <Lock className="w-3.5 h-3.5 text-[#38bdf8]" />
-                      <span className="text-white/70 text-xs font-medium">Locked</span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1 bg-white/10 rounded-full px-3 py-1.5 backdrop-blur-sm">
-                      <span className="text-white/70 text-xs font-medium">Read</span>
-                      <ChevronRight className="w-3.5 h-3.5 text-white/50" />
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1 bg-white/10 rounded-full px-3 py-1.5 backdrop-blur-sm">
+                    <span className="text-white/70 text-xs font-medium">Read</span>
+                    <ChevronRight className="w-3.5 h-3.5 text-white/50" />
+                  </div>
                 </div>
 
                 <div className="flex gap-2 mt-4">
@@ -790,8 +669,8 @@ export default function DashboardPage() {
                   className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.palmReading && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    <div className="absolute top-2 right-2 rounded-full bg-[#38bdf8]/12 px-2 py-0.5 text-[11px] font-bold text-[#7dd3fc]">
+                      $29
                     </div>
                   )}
                   <div className="flex items-center gap-3">
@@ -871,10 +750,6 @@ export default function DashboardPage() {
                           destination: "/birth-chart",
                           unlocked: false,
                         });
-                        if (isSubscriptionLocked) {
-                          openSubscriptionModal("report_birth_chart");
-                          return;
-                        }
                         setUpsellPopup({ isOpen: true, feature: "birthChart" });
                       }
                     }}
@@ -885,8 +760,8 @@ export default function DashboardPage() {
                     }`}
                   >
                     {!unlockedFeatures.birthChart && (
-                      <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
-                        <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                      <div className="absolute top-2 right-2 rounded-full bg-[#38bdf8]/12 px-2 py-0.5 text-[11px] font-bold text-[#7dd3fc]">
+                        $29
                       </div>
                     )}
                     {birthChartGenerating && (
@@ -942,8 +817,8 @@ export default function DashboardPage() {
                   className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.compatibilityTest && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    <div className="absolute top-2 right-2 rounded-full bg-[#38bdf8]/12 px-2 py-0.5 text-[11px] font-bold text-[#7dd3fc]">
+                      $29
                     </div>
                   )}
                   <div className="flex items-center gap-3">
@@ -977,8 +852,8 @@ export default function DashboardPage() {
                   className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.soulmateSketch && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    <div className="absolute top-2 right-2 rounded-full bg-[#38bdf8]/12 px-2 py-0.5 text-[11px] font-bold text-[#7dd3fc]">
+                      $29
                     </div>
                   )}
                   <div className="flex items-center gap-3">
@@ -1022,8 +897,8 @@ export default function DashboardPage() {
                   className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.futurePartnerReport && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    <div className="absolute top-2 right-2 rounded-full bg-[#38bdf8]/12 px-2 py-0.5 text-[11px] font-bold text-[#7dd3fc]">
+                      $29
                     </div>
                   )}
                   <div className="flex items-center gap-3">
@@ -1057,8 +932,8 @@ export default function DashboardPage() {
                   className="bg-[#0b2338] rounded-lg border border-[#173653] p-3 cursor-pointer hover:border-[#38bdf8]/60 transition-colors relative"
                 >
                   {!unlockedFeatures.prediction2026 && (
-                    <div className="absolute top-2 right-2 w-6 h-6 rounded-full bg-[#061525] flex items-center justify-center">
-                      <Lock className="w-3 h-3 text-[#8fa3b8]" />
+                    <div className="absolute top-2 right-2 rounded-full bg-[#38bdf8]/12 px-2 py-0.5 text-[11px] font-bold text-[#7dd3fc]">
+                      $29
                     </div>
                   )}
                   <div className="flex items-center gap-3">
@@ -1083,62 +958,6 @@ export default function DashboardPage() {
             </motion.div>
           </div>
         </div>
-
-        {subscriptionModalOpen && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#020b15]/80 p-5 backdrop-blur-sm"
-            onClick={() => setSubscriptionModalOpen(false)}
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 16 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              className="relative w-full max-w-sm rounded-2xl border border-[#38bdf8]/25 bg-gradient-to-b from-[#0b2338] to-[#061525] p-6 shadow-2xl shadow-black/40"
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                type="button"
-                onClick={() => setSubscriptionModalOpen(false)}
-                className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full border border-[#173653] bg-[#061525] text-[#b8c7da] transition-colors hover:border-[#38bdf8]/60 hover:text-white"
-                aria-label="Close subscription prompt"
-              >
-                <X className="h-4 w-4" />
-              </button>
-
-              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full border border-[#38bdf8]/30 bg-[#061525]">
-                <Lock className="h-8 w-8 text-[#38bdf8]" />
-              </div>
-
-              <h2 className="text-center text-xl font-bold text-white">Subscription Required</h2>
-              <p className="mt-3 text-center text-sm leading-6 text-[#b8c7da]">
-                Your subscription is not active right now. Reactivate it to unlock Horoscope, Chat with Elysia, daily insights, and your reports again.
-              </p>
-
-              <button
-                type="button"
-                onClick={goToSubscriptionPayment}
-                disabled={subscriptionPortalLoading}
-                className="mt-6 flex h-13 w-full items-center justify-center gap-2 rounded-lg bg-[#38bdf8] px-4 py-3 text-base font-bold text-[#03111f] transition-colors hover:bg-[#7dd3fc] disabled:cursor-not-allowed disabled:opacity-70"
-              >
-                {subscriptionPortalLoading && <Loader2 className="h-5 w-5 animate-spin" />}
-                {subscriptionPortalLoading ? "Opening Stripe..." : "Pay for Subscription"}
-              </button>
-
-              {subscriptionPortalError && (
-                <p className="mt-3 text-center text-xs leading-5 text-[#ff8b8b]">
-                  {subscriptionPortalError}
-                </p>
-              )}
-
-              <button
-                type="button"
-                onClick={() => setSubscriptionModalOpen(false)}
-                className="mt-3 w-full rounded-lg border border-[#173653] px-4 py-3 text-sm font-semibold text-[#b8c7da] transition-colors hover:border-[#38bdf8]/50 hover:text-white"
-              >
-                Not now
-              </button>
-            </motion.div>
-          </div>
-        )}
 
         {/* Upsell Popup */}
         {upsellPopup.feature && (

@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import bcrypt from "bcryptjs";
-import { reconcilePaidPaymentsForRegistration } from "@/lib/payment-fulfillment";
+import {
+  reconcilePaidPaymentsForRegistration,
+  triggerBackgroundReportGenerationForUser,
+} from "@/lib/payment-fulfillment";
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,7 +51,7 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
 
     // If there's an anonymous user, migrate their data
-    let migratedData: Record<string, any> = {};
+    let migratedData: Record<string, unknown> = {};
     let hadAnonUser = false;
 
     if (anonId) {
@@ -112,7 +115,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Create user record
-    const userData: Record<string, any> = {
+    const userData: Record<string, unknown> = {
       id: uid,
       email: normalizedEmail,
       password_hash: passwordHash,
@@ -163,10 +166,15 @@ export async function POST(request: NextRequest) {
           ]);
           await supabase.from("user_profiles").delete().eq("id", anonId);
           await supabase.from("users").delete().eq("id", anonId);
+          await triggerBackgroundReportGenerationForUser(uid);
         } catch (err) {
           console.error("Background migration error:", err);
         }
       })();
+    } else {
+      triggerBackgroundReportGenerationForUser(uid).catch((err) => {
+        console.error("Background report generation error:", err);
+      });
     }
 
     return NextResponse.json({
@@ -182,10 +190,10 @@ export async function POST(request: NextRequest) {
         paymentReconciliation: reconciliation,
       },
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error("Register error:", error);
     return NextResponse.json(
-      { success: false, error: error.message || "Failed to register" },
+      { success: false, error: error instanceof Error ? error.message : "Failed to register" },
       { status: 500 }
     );
   }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ChevronRight, Loader2, MapPin } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useOnboardingStore } from "@/lib/onboarding-store";
+import { Gender, useOnboardingStore } from "@/lib/onboarding-store";
 import { getZodiacSign } from "@/lib/astrology-api";
 import { trackAnalyticsEvent } from "@/lib/analytics-events";
 import { pixelEvents } from "@/lib/pixel-events";
@@ -16,6 +16,27 @@ const months = [
 ];
 
 const genderOptions = ["Male", "Female", "Non-binary", "Prefer not to say"];
+
+type SaveFieldValue =
+  | string
+  | { month: string | number; day: string | number; year: string | number }
+  | { hour: string | number; minute: string | number; period: string };
+
+type LocationSuggestion = {
+  display_name?: string;
+};
+
+function normalizeGender(value: string): Gender {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "male") return "male";
+  if (normalized === "female") return "female";
+  if (normalized === "non-binary") return "non-binary";
+  return null;
+}
+
+function normalizePeriod(value: unknown): "AM" | "PM" {
+  return String(value).toUpperCase() === "AM" ? "AM" : "PM";
+}
 
 export default function EditProfilePage() {
   const router = useRouter();
@@ -43,7 +64,6 @@ export default function EditProfilePage() {
   } = useOnboardingStore();
 
   const [localName, setLocalName] = useState("You");
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     setIsClient(true);
@@ -69,13 +89,11 @@ export default function EditProfilePage() {
   };
 
   const loadUserProfile = async () => {
-    setIsLoading(true);
     try {
       const storedId = localStorage.getItem("astrorekha_user_id");
       const userId = storedId;
 
       if (!userId) {
-        setIsLoading(false);
         return;
       }
 
@@ -104,7 +122,6 @@ export default function EditProfilePage() {
     } catch (error) {
       console.error("Error loading profile:", error);
     } finally {
-      setIsLoading(false);
     }
   };
 
@@ -126,28 +143,31 @@ export default function EditProfilePage() {
     return `${hour}:${String(minute).padStart(2, '0')} ${period}`;
   };
 
-  const handleSaveField = async (field: string, value: any) => {
+  const handleSaveField = async (field: string, value: SaveFieldValue) => {
     setIsSaving(true);
     try {
+      const valueText = typeof value === "string" ? value : "";
+      const dateValue = typeof value === "object" && "month" in value ? value : null;
+      const timeValue = typeof value === "object" && "hour" in value ? value : null;
       // Update local store based on field
       switch (field) {
         case "name":
-          setLocalName(value);
-          localStorage.setItem("astrorekha_name", value);
+          setLocalName(valueText);
+          localStorage.setItem("astrorekha_name", valueText);
           break;
         case "gender":
-          setGender(value);
+          setGender(normalizeGender(valueText));
           break;
         case "birthDate":
           // value is { month, day, year }
-          setBirthDate(String(value.month), String(value.day), String(value.year));
+          if (dateValue) setBirthDate(String(dateValue.month), String(dateValue.day), String(dateValue.year));
           break;
         case "birthPlace":
-          setBirthPlace(value);
+          setBirthPlace(valueText);
           break;
         case "birthTime":
           // value is { hour, minute, period }
-          setBirthTime(String(value.hour), String(value.minute), value.period);
+          if (timeValue) setBirthTime(String(timeValue.hour), String(timeValue.minute), normalizePeriod(timeValue.period));
           break;
       }
 
@@ -156,13 +176,13 @@ export default function EditProfilePage() {
       if (userId) {
         
         // Determine the new birth details
-        const newBirthMonth = field === "birthDate" ? value.month : birthMonth;
-        const newBirthDay = field === "birthDate" ? value.day : birthDay;
-        const newBirthYear = field === "birthDate" ? value.year : birthYear;
-        const newBirthHour = field === "birthTime" ? value.hour : birthHour;
-        const newBirthMinute = field === "birthTime" ? value.minute : birthMinute;
-        const newBirthPeriod = field === "birthTime" ? value.period : birthPeriod;
-        const newBirthPlace = field === "birthPlace" ? value : birthPlace;
+        const newBirthMonth = dateValue ? dateValue.month : birthMonth;
+        const newBirthDay = dateValue ? dateValue.day : birthDay;
+        const newBirthYear = dateValue ? dateValue.year : birthYear;
+        const newBirthHour = timeValue ? timeValue.hour : birthHour;
+        const newBirthMinute = timeValue ? timeValue.minute : birthMinute;
+        const newBirthPeriod = timeValue ? timeValue.period : birthPeriod;
+        const newBirthPlace = field === "birthPlace" ? valueText : birthPlace;
         
         // Calculate sun sign from birth date
         const sunSign = newBirthMonth && newBirthDay 
@@ -170,9 +190,9 @@ export default function EditProfilePage() {
           : null;
         
         // Base update data (snake_case for Supabase)
-        const updateData: any = {
-          name: field === "name" ? value : localName,
-          gender: field === "gender" ? value : gender,
+        const updateData: Record<string, unknown> = {
+          name: field === "name" ? valueText : localName,
+          gender: field === "gender" ? valueText : gender,
           birth_month: newBirthMonth,
           birth_day: newBirthDay,
           birth_year: newBirthYear,
@@ -276,8 +296,8 @@ export default function EditProfilePage() {
       const response = await fetch(
         `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5`
       );
-      const data = await response.json();
-      const suggestions = data.map((item: any) => item.display_name);
+      const data = (await response.json()) as LocationSuggestion[];
+      const suggestions = data.map((item) => item.display_name).filter((name): name is string => Boolean(name));
       setLocationSuggestions(suggestions);
     } catch (error) {
       console.error("Location search error:", error);
