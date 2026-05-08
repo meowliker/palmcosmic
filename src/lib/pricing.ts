@@ -98,7 +98,7 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
         featureList: [
           "Complete palm line analysis",
           "Life, heart, and head line insights",
-          "15 chat coins included",
+          "First 5 chats free",
           "Lifetime report access",
         ],
         active: true,
@@ -118,7 +118,7 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
         featureList: [
           "Everything in Palm Reading",
           "Complete birth chart analysis",
-          "15 chat coins included",
+          "First 5 chats free",
           "Lifetime report access",
         ],
         popular: true,
@@ -155,7 +155,7 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
           "Everything in Palm + Birth Chart",
           "One AI soulmate sketch",
           "Future partner report",
-          "30 chat coins included",
+          "First 10 chats free",
           "Lifetime report access",
         ],
         popular: false,
@@ -172,14 +172,27 @@ function applyBundleOverrides(bundles: BundlePlan[]): BundlePlan[] {
 }
 
 function applyUpsellOverrides(upsells: UpsellPlan[]): UpsellPlan[] {
-  return upsells.map((upsell) => ({
-    ...upsell,
-    price: 2400,
-    displayPrice: 2400,
-    originalPrice: 4800,
-    discount: "50% OFF",
-    active: true,
-  }));
+  return upsells.map((upsell) => {
+    if (upsell.id === "2026-predictions" || upsell.id === "compatibility") {
+      return {
+        ...upsell,
+        price: 900,
+        displayPrice: 900,
+        originalPrice: 2900,
+        discount: "69% OFF",
+        active: true,
+      };
+    }
+
+    return {
+      ...upsell,
+      price: 2400,
+      displayPrice: 2400,
+      originalPrice: 4800,
+      discount: "50% OFF",
+      active: true,
+    };
+  });
 }
 
 function applyReportOverrides(reports: ReportPlan[]): ReportPlan[] {
@@ -224,7 +237,7 @@ export const DEFAULT_PRICING: PricingConfig = {
       featureList: [
         "Complete palm line analysis",
         "Life, heart, head line insights",
-        "15 chat coins included",
+        "First 5 chats free",
         "Personality traits revealed",
       ],
       popular: false,
@@ -243,7 +256,7 @@ export const DEFAULT_PRICING: PricingConfig = {
       featureList: [
         "Everything in Palm Reading",
         "Complete birth chart analysis",
-        "15 chat coins included",
+        "First 5 chats free",
         "Planetary positions & houses",
       ],
       popular: true,
@@ -281,7 +294,7 @@ export const DEFAULT_PRICING: PricingConfig = {
         "Everything in Palm + Birth Chart",
         "One AI soulmate sketch",
         "Future partner report",
-        "30 chat coins included",
+        "10 chats included",
       ],
       popular: false,
       limitedOffer: true,
@@ -292,10 +305,10 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "2026-predictions",
       name: "2026 Future Predictions",
-      price: 2400,
-      displayPrice: 2400,
-      originalPrice: 4800,
-      discount: "50% OFF",
+      price: 900,
+      displayPrice: 900,
+      originalPrice: 2900,
+      discount: "69% OFF",
       description: "Detailed predictions for your 2026 journey.",
       feature: "prediction2026",
       active: true,
@@ -303,10 +316,10 @@ export const DEFAULT_PRICING: PricingConfig = {
     {
       id: "compatibility",
       name: "Compatibility Report",
-      price: 2400,
-      displayPrice: 2400,
-      originalPrice: 4800,
-      discount: "50% OFF",
+      price: 900,
+      displayPrice: 900,
+      originalPrice: 2900,
+      discount: "69% OFF",
       description: "Check your love match and relationship chemistry.",
       feature: "compatibilityTest",
       active: true,

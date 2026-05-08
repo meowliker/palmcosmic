@@ -219,7 +219,6 @@ function BundleUpsellContent() {
       <OnboardingFunnelTracker />
       <div className="mx-auto w-full max-w-sm">
         <h1 className="text-center text-2xl font-bold">Optional Add-ons</h1>
-        <p className="mt-2 text-center text-sm text-[#b8c7da]">Choose one, both, or skip.</p>
 
         <div className="mt-6 space-y-3">
           {offers.map((offer) => {
