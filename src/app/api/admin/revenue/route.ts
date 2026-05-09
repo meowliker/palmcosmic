@@ -471,6 +471,23 @@ export async function GET(request: NextRequest) {
       cancelAtPeriodEnd: boolean;
       renewals: LedgerEntry[];
     }>();
+    const trialCohortAliases = new Map<string, string>();
+
+    const normalizeCohortLookupKey = (value: unknown) => String(value || "").trim().toLowerCase();
+    const addTrialCohortAlias = (alias: unknown, cohortKey: string) => {
+      const normalized = normalizeCohortLookupKey(alias);
+      if (normalized) trialCohortAliases.set(normalized, cohortKey);
+    };
+    const findTrialCohort = (keys: unknown[]) => {
+      for (const key of keys) {
+        const normalized = normalizeCohortLookupKey(key);
+        if (!normalized) continue;
+        const canonicalKey = trialCohortAliases.get(normalized) || String(key || "");
+        const cohort = trialCohorts.get(canonicalKey);
+        if (cohort) return cohort;
+      }
+      return null;
+    };
 
     const subscriptionRenewals = sales.filter((entry) => {
       const kind = String(entry.billing_kind || metadataValue(entry.metadata, "billingKind") || "").toLowerCase();
@@ -492,10 +509,10 @@ export async function GET(request: NextRequest) {
         const user = userMap.get(entry.user_id) || {};
         const subscriptionId = entry.stripe_subscription_id || metadataValue(entry.metadata, "stripeSubscriptionId") || "";
         const key = subscriptionId || entry.user_id || entry.customer_email || entry.id;
-        const existing = trialCohorts.get(key);
+        const existing = findTrialCohort([key, subscriptionId, entry.user_id, entry.customer_email, user.email]);
         if (existing && new Date(existing.trialPaidAt) <= new Date(entry.eventAt)) return;
 
-        trialCohorts.set(key, {
+        const cohort = {
           key,
           userId: entry.user_id || null,
           email: user.email || entry.customer_email || null,
@@ -515,17 +532,26 @@ export async function GET(request: NextRequest) {
           lockReason: user.subscriptionLockReason || null,
           cancelAtPeriodEnd: Boolean(user.subscriptionCancelAtPeriodEnd),
           renewals: [],
-        });
+        };
+
+        trialCohorts.set(key, cohort);
+        addTrialCohortAlias(key, key);
+        addTrialCohortAlias(subscriptionId, key);
+        addTrialCohortAlias(entry.user_id, key);
+        addTrialCohortAlias(entry.customer_email, key);
+        addTrialCohortAlias(user.email, key);
       });
 
     for (const renewal of subscriptionRenewals) {
       const subscriptionId = renewal.stripe_subscription_id || metadataValue(renewal.metadata, "stripeSubscriptionId") || "";
       const keyCandidates = [
         subscriptionId,
+        metadataValue(renewal.metadata, "stripeSubscriptionId"),
         renewal.user_id,
         renewal.customer_email,
+        metadataValue(renewal.metadata, "email"),
       ].filter(Boolean);
-      const cohort = keyCandidates.map((key) => trialCohorts.get(String(key))).find(Boolean);
+      const cohort = findTrialCohort(keyCandidates);
       if (cohort) cohort.renewals.push(renewal);
     }
 
