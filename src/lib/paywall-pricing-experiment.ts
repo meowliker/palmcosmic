@@ -11,20 +11,20 @@ const TEST_PRICE_OVERRIDES: Record<string, Pick<BundlePlan, "price" | "displayPr
   "palm-reading": {
     price: 1700,
     displayPrice: 1700,
-    originalPrice: 2900,
-    discount: "41% OFF",
+    originalPrice: 2400,
+    discount: "30% OFF",
   },
   "palm-birth": {
     price: 2700,
     displayPrice: 2700,
-    originalPrice: 4900,
-    discount: "45% OFF",
+    originalPrice: 5400,
+    discount: "50% OFF",
   },
   "palm-birth-sketch": {
     price: 4700,
     displayPrice: 4700,
-    originalPrice: 8900,
-    discount: "47% OFF",
+    originalPrice: 15700,
+    discount: "70% OFF",
   },
 };
 
@@ -54,4 +54,3 @@ export function applyPaywallPriceVariant<T extends BundlePlan>(
     return override ? { ...bundle, ...override } : bundle;
   });
 }
-

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Shield, Sparkles, Star } from "lucide-react";
+import { Check, Hourglass, Shield, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fadeUp } from "@/lib/motion";
 import { usePricing } from "@/hooks/usePricing";
@@ -410,7 +410,7 @@ export default function BundlePaywallPage() {
               ) : null}
               {plan.limitedOffer ? (
                 <div className="absolute -top-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-gradient-to-r from-[#38bdf8] to-[#22d3ee] px-4 py-1 text-xs font-semibold text-black">
-                  <Sparkles className="h-3 w-3" /> Limited Offer
+                  <Hourglass className="h-3 w-3" /> Limited Time
                 </div>
               ) : null}
 
