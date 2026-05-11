@@ -22,8 +22,8 @@ async function ensureTestRowExists(supabase: ReturnType<typeof getSupabaseAdmin>
     {
       id: testId,
       name: isPalmReadyTest ? "Palm Reading Ready Scan A/B" : "Onboarding Layout A/B (QA)",
-      status: "active",
-      traffic_split: 0.5,
+      status: isPalmReadyTest ? "paused" : "active",
+      traffic_split: isPalmReadyTest ? 1 : 0.5,
       updated_at: now,
       created_at: now,
     },

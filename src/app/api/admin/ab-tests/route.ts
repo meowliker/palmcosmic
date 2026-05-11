@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { DEFAULT_LAYOUT_B_CONFIG, normalizeLayoutBConfig } from "@/lib/layout-b-funnel";
+import {
+  PAYWALL_PRICING_EXPERIMENT,
+  PAYWALL_PRICE_VARIANTS,
+} from "@/lib/paywall-pricing-experiment";
 
 // Admin API for managing A/B tests
 const SETTINGS_KEY = "funnel_layout_b_config";
 const DEFAULT_ONBOARDING_TEST_ID = DEFAULT_LAYOUT_B_CONFIG.testId;
 const PALM_READY_TEST_ID = "palm-reading-ready-scan";
 const PALM_READY_TEST_NAME = "Palm Reading Ready Scan A/B";
+const PAYWALL_PRICING_TEST_NAME = "Paywall Bundle Price A/B";
+const PAYWALL_PRICING_TRACKING_START_ISO = "2026-05-06T00:00:00.000Z";
 const SUCCESS_PAYMENT_STATUSES = new Set(["paid", "success", "captured"]);
 
 type VariantKey = "A" | "B";
@@ -159,6 +165,16 @@ function toInrAmount(amount: unknown, currency: unknown): number {
   return numeric;
 }
 
+function toUsdAmount(amount: unknown, currency: unknown): number {
+  const numeric = Number(amount || 0);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0;
+  const normalizedCurrency = String(currency || "").trim().toUpperCase();
+  if (normalizedCurrency === "USD") {
+    return numeric / 100;
+  }
+  return numeric;
+}
+
 function normalizeOnboardingRoute(page: unknown, fallback: string): string {
   const raw = String(page || "").trim();
   if (!raw) return fallback;
@@ -202,7 +218,29 @@ function inferVariantFromUser(user: any): VariantKey {
   return "A";
 }
 
-function variantLabel(variant: VariantKey): string {
+function metadataValue(metadata: unknown, keys: string[]): string {
+  if (!metadata || typeof metadata !== "object") return "";
+  const obj = metadata as Record<string, unknown>;
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function inferPaywallPricingVariant(raw: unknown): VariantKey | null {
+  const value = String(raw || "").trim();
+  if (value === PAYWALL_PRICE_VARIANTS[0]) return "A";
+  if (value === PAYWALL_PRICE_VARIANTS[1]) return "B";
+  return null;
+}
+
+function paywallPricingLabel(variant: VariantKey): string {
+  return variant === "A" ? "Control $29/$49/$89" : "Test $17/$27/$47";
+}
+
+function variantLabel(variant: VariantKey, isPaywallPricingTest = false): string {
+  if (isPaywallPricingTest) return paywallPricingLabel(variant);
   return variant === "B" ? "Layout B" : "Layout A";
 }
 
@@ -367,8 +405,11 @@ function getTestVariants(row: Record<string, any> | null | undefined, defaults: 
 function normalizeTestForResponse(row: Record<string, any> | null | undefined, testId: string) {
   const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
   const isPalmReadyTest = testId.startsWith("palm-reading-ready");
+  const isPaywallPricingTest = testId === PAYWALL_PRICING_EXPERIMENT;
   const defaults = isPalmReadyTest
     ? { pageA: "ready-classic", pageB: "ready-scan" }
+    : isPaywallPricingTest
+    ? { pageA: PAYWALL_PRICE_VARIANTS[0], pageB: PAYWALL_PRICE_VARIANTS[1] }
     : isOnboardingLayoutTest
     ? { pageA: "bundle-pricing", pageB: "bundle-pricing-b" }
     : { pageA: "step-17", pageB: "a-step-17" };
@@ -379,7 +420,7 @@ function normalizeTestForResponse(row: Record<string, any> | null | undefined, t
 
   return {
     id: testId,
-    name: row?.name || (isPalmReadyTest ? PALM_READY_TEST_NAME : isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test"),
+    name: row?.name || (isPalmReadyTest ? PALM_READY_TEST_NAME : isPaywallPricingTest ? PAYWALL_PRICING_TEST_NAME : isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test"),
     status: row?.status || "active",
     variants,
     traffic_split: trafficSplit,
@@ -441,10 +482,38 @@ async function ensureOnboardingLayoutTest(supabase: ReturnType<typeof getSupabas
   return testId;
 }
 
+async function ensurePaywallPricingTest(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const now = new Date().toISOString();
+  await supabase.from("ab_tests").upsert(
+    {
+      id: PAYWALL_PRICING_EXPERIMENT,
+      name: PAYWALL_PRICING_TEST_NAME,
+      status: "active",
+      traffic_split: 0.5,
+      updated_at: now,
+      created_at: now,
+    },
+    { onConflict: "id", ignoreDuplicates: true }
+  );
+  return PAYWALL_PRICING_EXPERIMENT;
+}
+
+async function retirePalmReadyTest(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  await supabase
+    .from("ab_tests")
+    .update({
+      status: "paused",
+      traffic_split: 1,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", PALM_READY_TEST_ID);
+}
+
 async function buildDefaultTestData(testId: string) {
+  const isPaywallPricingTest = testId === PAYWALL_PRICING_EXPERIMENT;
   const row = normalizeTestForResponse(
     {
-      name: "Onboarding Layout A/B (QA)",
+      name: isPaywallPricingTest ? PAYWALL_PRICING_TEST_NAME : "Onboarding Layout A/B (QA)",
       status: "active",
       traffic_split: 0.5,
       updated_at: new Date().toISOString(),
@@ -462,6 +531,8 @@ export async function GET(request: NextRequest) {
 
     const supabase = getSupabaseAdmin();
     const onboardingTestId = await ensureOnboardingLayoutTest(supabase);
+    const paywallPricingTestId = await ensurePaywallPricingTest(supabase);
+    await retirePalmReadyTest(supabase);
 
     if (testId) {
       // Get specific test with detailed stats
@@ -515,8 +586,13 @@ export async function GET(request: NextRequest) {
         ? normalizeTestForResponse(testData, testId)
         : await buildDefaultTestData(testId);
 
+      const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
+      const isPalmReadyTest = testId.startsWith("palm-reading-ready");
+      const isPaywallPricingTest = testId === PAYWALL_PRICING_EXPERIMENT;
       const trackingStartIso = String(
-        resolvedTestData.last_reset_at || resolvedTestData.created_at || new Date().toISOString()
+        resolvedTestData.last_reset_at ||
+          (isPaywallPricingTest ? PAYWALL_PRICING_TRACKING_START_ISO : resolvedTestData.created_at) ||
+          new Date().toISOString()
       );
       const requestedStartDate = searchParams.get("startDate");
       const requestedEndDate = searchParams.get("endDate");
@@ -538,8 +614,6 @@ export async function GET(request: NextRequest) {
           ? filterEndBoundary
           : null;
 
-      const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
-      const isPalmReadyTest = testId.startsWith("palm-reading-ready");
       const palmReadyRoute = "/onboarding/palm-reading/ready";
       const palmPaywallRoute = "/onboarding/palm-reading/paywall";
       const pricingRoutes: Record<VariantKey, string> = isPalmReadyTest
@@ -551,6 +625,11 @@ export async function GET(request: NextRequest) {
         ? {
             A: "/onboarding/bundle-pricing",
             B: "/onboarding/bundle-pricing",
+          }
+        : isPaywallPricingTest
+        ? {
+            A: "/paywall",
+            B: "/paywall",
           }
         : {
             A: canonicalizeTrackedRoute(
@@ -567,6 +646,11 @@ export async function GET(request: NextRequest) {
             B: palmPaywallRoute,
           }
         : isOnboardingLayoutTest
+        ? {
+            A: "/upsell",
+            B: "/upsell",
+          }
+        : isPaywallPricingTest
         ? {
             A: "/upsell",
             B: "/upsell",
@@ -649,7 +733,60 @@ export async function GET(request: NextRequest) {
       }
       const { data: allEvents } = await allEventsQuery.order("created_at", { ascending: false }).limit(5000);
 
-      for (const evt of allEvents || []) {
+      let trackingEvents: any[] = [...(allEvents || [])];
+
+      if (isPaywallPricingTest) {
+        let analyticsQuery = supabase
+          .from("analytics_events")
+          .select("event_name, route, session_id, user_id, email, created_at, action, metadata")
+          .eq("event_name", "OnboardingAction")
+          .gte("created_at", dateRangeStartIso);
+        if (dateRangeEndIso) {
+          analyticsQuery = analyticsQuery.lte("created_at", dateRangeEndIso);
+        }
+
+        const { data: analyticsRows } = await analyticsQuery
+          .in("action", [
+            "bundle_paywall_viewed",
+            "bundle_paywall_checkout_started",
+          ])
+          .order("created_at", { ascending: false })
+          .limit(10000);
+
+        const syntheticPaywallEvents = (analyticsRows || [])
+          .map((row: any) => {
+            const metadata = row?.metadata || {};
+            if (metadata?.pricing_experiment !== PAYWALL_PRICING_EXPERIMENT) return null;
+            const variant = inferPaywallPricingVariant(metadata?.pricing_variant);
+            if (!variant) return null;
+            const action = String(row?.action || metadata?.action || "");
+            const eventType =
+              action === "bundle_paywall_viewed"
+                ? "impression"
+                : action === "bundle_paywall_checkout_started"
+                  ? "checkout_started"
+                  : "";
+            if (!eventType) return null;
+            return {
+              id: `analytics:${row.created_at}:${row.session_id || row.user_id || row.email || Math.random()}`,
+              test_id: PAYWALL_PRICING_EXPERIMENT,
+              variant,
+              event_type: eventType,
+              visitor_id: row.session_id || row.user_id || row.email || null,
+              created_at: row.created_at,
+              metadata: {
+                ...metadata,
+                route: canonicalizeTrackedRoute(row.route || metadata.route || "/paywall"),
+                source_event: action,
+              },
+            };
+          })
+          .filter(Boolean);
+
+        trackingEvents = syntheticPaywallEvents as any[];
+      }
+
+      for (const evt of trackingEvents || []) {
         const variant = evt?.variant === "B" ? "B" : evt?.variant === "A" ? "A" : null;
         if (!variant) continue;
 
@@ -684,9 +821,9 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      recentEvents = (allEvents || []).slice(0, 50);
+      recentEvents = (trackingEvents || []).slice(0, 50);
       const dailyData: Record<string, { A: any; B: any }> = {};
-      for (const evt of allEvents || []) {
+      for (const evt of trackingEvents || []) {
         if (!evt?.created_at) continue;
         const variant = evt?.variant === "B" ? "B" : evt?.variant === "A" ? "A" : null;
         if (!variant) continue;
@@ -792,9 +929,15 @@ export async function GET(request: NextRequest) {
         if (safeEndDate && paymentDayKey > safeEndDate) continue;
 
         const user = usersById.get(userId);
-        const variant = inferVariantFromUser(user);
-        const funnel = variantLabel(variant);
-        const amountInr = toInrAmount(row?.amount, row?.currency);
+        const paymentPricingVariant = inferPaywallPricingVariant(
+          metadataValue(row?.metadata, ["pricingVariant", "pricing_variant"])
+        );
+        const variant = isPaywallPricingTest ? paymentPricingVariant : inferVariantFromUser(user);
+        if (!variant) continue;
+        const funnel = variantLabel(variant, isPaywallPricingTest);
+        const amountInr = isPaywallPricingTest
+          ? toUsdAmount(row?.amount, row?.currency)
+          : toInrAmount(row?.amount, row?.currency);
         const paymentType = String(row?.type || "").trim().toLowerCase();
         const email = String(user?.email || row?.customer_email || "").trim() || "N/A";
         const userName = String(user?.name || "").trim() || undefined;
@@ -824,7 +967,7 @@ export async function GET(request: NextRequest) {
             paymentStatus,
           });
           addMix(variant, bundleMixMaps, bundleItem, userId, amountInr);
-        } else if (paymentType === "upsell" || paymentType === "report") {
+        } else if (!isPaywallPricingTest && (paymentType === "upsell" || paymentType === "report")) {
           const upsellSource: "upsell_page" | "dashboard" =
             paymentType === "report" ? "dashboard" : "upsell_page";
           upsellBuyerSets[variant].add(userId);
@@ -874,6 +1017,11 @@ export async function GET(request: NextRequest) {
       if (assignmentRows && assignmentRows.length > 0) {
         assignmentsACount = assignmentRows.filter((row: any) => row?.variant === "A").length;
         assignmentsBCount = assignmentRows.filter((row: any) => row?.variant === "B").length;
+      }
+
+      if (isPaywallPricingTest) {
+        assignmentsACount = routeImpressionVisitorSets.A.get("/paywall")?.size || assignmentsACount;
+        assignmentsBCount = routeImpressionVisitorSets.B.get("/paywall")?.size || assignmentsBCount;
       }
 
       const assignmentsByVariant: Record<VariantKey, number> = {
@@ -1132,17 +1280,10 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get all tests
-    await supabase.from("ab_tests").upsert({
-      id: PALM_READY_TEST_ID,
-      name: PALM_READY_TEST_NAME,
-      status: "active",
-      traffic_split: 0.5,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: "id", ignoreDuplicates: true });
-
+    // Get all tests. The old palm-ready test is retired because the current
+    // one-time flow always uses the palm scan/upload page.
     const { data: allTests } = await supabase.from("ab_tests").select("*");
-    const hydratedTests = [...(allTests || [])];
+    const hydratedTests = (allTests || []).filter((test) => test.id !== PALM_READY_TEST_ID);
     if (!hydratedTests.some((test) => test.id === onboardingTestId)) {
       const { data: onboardingTest } = await supabase
         .from("ab_tests")
@@ -1151,6 +1292,19 @@ export async function GET(request: NextRequest) {
         .single();
       if (onboardingTest) hydratedTests.push(onboardingTest);
     }
+    if (!hydratedTests.some((test) => test.id === paywallPricingTestId)) {
+      const { data: paywallPricingTest } = await supabase
+        .from("ab_tests")
+        .select("*")
+        .eq("id", paywallPricingTestId)
+        .single();
+      if (paywallPricingTest) hydratedTests.unshift(paywallPricingTest);
+    }
+    hydratedTests.sort((left, right) => {
+      if (left.id === PAYWALL_PRICING_EXPERIMENT) return -1;
+      if (right.id === PAYWALL_PRICING_EXPERIMENT) return 1;
+      return String(left.name || left.id).localeCompare(String(right.name || right.id));
+    });
     const tests = [];
 
     for (const testRow of hydratedTests) {

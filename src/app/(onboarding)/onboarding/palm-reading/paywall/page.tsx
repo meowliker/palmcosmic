@@ -15,30 +15,6 @@ import { CouponCodeLink } from "@/components/onboarding/CouponCodeLink";
 import { OnboardingMenuButton } from "@/components/onboarding/OnboardingMenuButton";
 
 const INTRO_SECONDS = 12 * 60 + 45;
-const PALM_READY_TEST_ID = "palm-reading-ready-scan";
-
-function trackPalmReadyCheckoutStarted(userId: string, placement: string) {
-  const variant = localStorage.getItem("palmcosmic_palm_ready_variant");
-  if (variant !== "A" && variant !== "B") return;
-
-  fetch("/api/ab-test/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      testId: PALM_READY_TEST_ID,
-      variant,
-      eventType: "checkout_started",
-      visitorId: userId,
-      userId,
-      metadata: {
-        route: "/onboarding/palm-reading/paywall",
-        funnel: "palm_reading",
-        source_route: "/onboarding/palm-reading/ready",
-        placement,
-      },
-    }),
-  }).catch(() => undefined);
-}
 
 const legalLine = (
   <>
@@ -155,8 +131,6 @@ export default function PalmReadingPaywallPage() {
         router.push("/onboarding/palm-reading/email");
         return;
       }
-
-      trackPalmReadyCheckoutStarted(userId, placement);
 
       const demoPayment = await runDemoPaymentBypass({ flow: "palm_reading", email, userId });
       if (demoPayment.bypassed) {

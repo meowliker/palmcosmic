@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Camera, CheckCircle2, Flashlight, FlashlightOff, ImageIcon, Loader2, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,39 +9,6 @@ import { pixelEvents } from "@/lib/pixel-events";
 import { useOnboardingStore } from "@/lib/onboarding-store";
 import { calculateZodiacSign, generateUserId } from "@/lib/user-profile";
 import { OnboardingMenuButton } from "@/components/onboarding/OnboardingMenuButton";
-import { PalmReadingImagePage } from "@/components/onboarding/palm-reading/PalmReadingImagePage";
-import { palmReadingScreens } from "@/components/onboarding/palm-reading/palmReadingFlow";
-
-const PALM_READY_TEST_ID = "palm-reading-ready-scan";
-
-function getVisitorId() {
-  const userId = localStorage.getItem("astrorekha_user_id") || generateUserId();
-  localStorage.setItem("astrorekha_user_id", userId);
-  return userId;
-}
-
-async function trackReadyAbEvent(eventType: "impression" | "conversion" | "bounce" | "checkout_started", metadata: Record<string, unknown> = {}) {
-  const variant = localStorage.getItem("palmcosmic_palm_ready_variant");
-  const visitorId = localStorage.getItem("astrorekha_user_id");
-  if (!variant || !visitorId) return;
-
-  await fetch("/api/ab-test/event", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      testId: PALM_READY_TEST_ID,
-      variant,
-      eventType,
-      visitorId,
-      userId: visitorId,
-      metadata: {
-        route: "/onboarding/palm-reading/ready",
-        funnel: "palm_reading",
-        ...metadata,
-      },
-    }),
-  }).catch(() => undefined);
-}
 
 function compressImageToDataUrl(source: HTMLCanvasElement, quality = 0.82) {
   const maxSide = 1400;
@@ -61,8 +28,6 @@ export default function PalmReadingReadyPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const convertedRef = useRef(false);
-  const bounceTrackedRef = useRef(false);
 
   const [showCamera, setShowCamera] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
@@ -71,100 +36,10 @@ export default function PalmReadingReadyPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [variant, setVariant] = useState<"A" | "B" | null>(null);
-  const [variantLoading, setVariantLoading] = useState(true);
 
   const { birthMonth, birthDay, birthYear } = useOnboardingStore();
   const zodiacSign = calculateZodiacSign(birthMonth, birthDay);
   const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
-
-  useEffect(() => {
-    let mounted = true;
-
-    async function assignVariant() {
-      try {
-        const visitorId = getVisitorId();
-        const params = new URLSearchParams({
-          testId: PALM_READY_TEST_ID,
-          visitorId,
-          userId: visitorId,
-        });
-        const response = await fetch(`/api/ab-test?${params.toString()}`, { cache: "no-store" });
-        const data = await response.json().catch(() => ({}));
-        const assigned = data?.variant === "B" ? "B" : "A";
-        localStorage.setItem("palmcosmic_palm_ready_variant", assigned);
-        localStorage.setItem("palmcosmic_palm_ready_test_id", data?.testId || PALM_READY_TEST_ID);
-        if (mounted) setVariant(assigned);
-        await trackReadyAbEvent("impression", {
-          source: data?.cached ? "server_cached_assignment" : "server_assignment",
-          page: data?.page || (assigned === "B" ? "ready-scan" : "ready-classic"),
-          status: data?.test?.status || "active",
-        });
-      } catch (err) {
-        console.error("Palm ready A/B assignment failed:", err);
-        const cached = localStorage.getItem("palmcosmic_palm_ready_variant");
-        const fallback = cached === "A" || cached === "B" ? cached : "A";
-        localStorage.setItem("palmcosmic_palm_ready_variant", fallback);
-        if (mounted) setVariant(fallback);
-      } finally {
-        if (mounted) setVariantLoading(false);
-      }
-    }
-
-    assignVariant();
-
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!variant) return;
-
-    const sendBounce = () => {
-      if (convertedRef.current || bounceTrackedRef.current) return;
-      const visitorId = localStorage.getItem("astrorekha_user_id");
-      if (!visitorId) return;
-
-      bounceTrackedRef.current = true;
-      const payload = JSON.stringify({
-        testId: PALM_READY_TEST_ID,
-        variant,
-        eventType: "bounce",
-        visitorId,
-        userId: visitorId,
-        metadata: {
-          route: "/onboarding/palm-reading/ready",
-          funnel: "palm_reading",
-          action: variant === "B" ? "left_before_palm_scan_saved" : "left_before_classic_continue",
-        },
-      });
-
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon("/api/ab-test/event", new Blob([payload], { type: "application/json" }));
-        return;
-      }
-
-      fetch("/api/ab-test/event", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload,
-        keepalive: true,
-      }).catch(() => undefined);
-    };
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden") sendBounce();
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("pagehide", sendBounce);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("pagehide", sendBounce);
-    };
-  }, [variant]);
 
   const stopCamera = () => {
     streamRef.current?.getTracks().forEach((track) => track.stop());
@@ -254,11 +129,6 @@ export default function PalmReadingReadyPage() {
       }
 
       setSaved(true);
-      convertedRef.current = true;
-      await trackReadyAbEvent("conversion", {
-        action: "palm_scan_saved",
-        source: showCamera ? "camera" : "upload",
-      });
       trackFunnelAction("palm_scan_saved", {
         funnel: "palm_reading",
         route: "/onboarding/palm-reading/ready",
@@ -333,32 +203,6 @@ export default function PalmReadingReadyPage() {
 
     router.push("/onboarding/palm-reading/email");
   };
-
-  if (variantLoading || !variant) {
-    return (
-      <main className="flex min-h-[100svh] items-center justify-center bg-[#061525] text-white">
-        <div className="text-center">
-          <Loader2 className="mx-auto mb-4 h-9 w-9 animate-spin text-[#38bdf8]" />
-          <p className="text-sm text-[#b8c7da]">Preparing your palm reading...</p>
-        </div>
-      </main>
-    );
-  }
-
-  if (variant === "A") {
-    return (
-      <PalmReadingImagePage
-        screen={palmReadingScreens.ready}
-        onContinue={() => {
-          convertedRef.current = true;
-          trackReadyAbEvent("conversion", {
-            action: "classic_continue_clicked",
-            next_route: "/onboarding/palm-reading/email",
-          });
-        }}
-      />
-    );
-  }
 
   if (showCamera) {
     return (

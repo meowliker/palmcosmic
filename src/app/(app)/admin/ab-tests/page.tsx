@@ -25,6 +25,7 @@ import {
   type LayoutBFunnelConfig,
 } from "@/lib/layout-b-funnel";
 const DEFAULT_ONBOARDING_TEST_ID = DEFAULT_LAYOUT_B_CONFIG.testId;
+const PAYWALL_PRICING_TEST_ID = "paywall_bundle_price_v1";
 
 interface ABTest {
   id: string;
@@ -297,12 +298,12 @@ export default function ABTestsPage() {
       const nextTests = data.tests || [];
       setTests(nextTests);
       if (nextTests.length > 0) {
-        const onboardingTest =
-          nextTests.find((test: ABTest) => test.id === "palm-reading-ready-scan") ||
+        const preferredTest =
+          nextTests.find((test: ABTest) => test.id === PAYWALL_PRICING_TEST_ID) ||
           nextTests.find((test: ABTest) => test.id === funnelConfig.testId) ||
           nextTests.find((test: ABTest) => test.id === DEFAULT_ONBOARDING_TEST_ID);
-        if (onboardingTest && (!selectedTest || selectedTest.test.id !== onboardingTest.id)) {
-          fetchTestDetails(onboardingTest.id);
+        if (preferredTest && (!selectedTest || selectedTest.test.id !== preferredTest.id)) {
+          fetchTestDetails(preferredTest.id);
         }
       }
     } catch (error) {
@@ -391,14 +392,15 @@ export default function ABTestsPage() {
       const testId = selectedTest.test?.id || funnelConfig.testId || DEFAULT_ONBOARDING_TEST_ID;
       const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
       const isPalmReadyTest = testId.startsWith("palm-reading-ready");
+      const isPaywallPricingTest = testId === PAYWALL_PRICING_TEST_ID;
       await fetch("/api/admin/ab-tests", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           testId,
           variants: {
-            A: { weight: weightA, page: isPalmReadyTest ? "ready-classic" : isOnboardingLayoutTest ? "bundle-pricing" : "step-17" },
-            B: { weight: weightB, page: isPalmReadyTest ? "ready-scan" : isOnboardingLayoutTest ? "bundle-pricing-b" : "a-step-17" },
+            A: { weight: weightA, page: isPalmReadyTest ? "ready-classic" : isPaywallPricingTest ? "control_29_49_89" : isOnboardingLayoutTest ? "bundle-pricing" : "step-17" },
+            B: { weight: weightB, page: isPalmReadyTest ? "ready-scan" : isPaywallPricingTest ? "test_17_27_47" : isOnboardingLayoutTest ? "bundle-pricing-b" : "a-step-17" },
           },
         }),
       });
@@ -572,22 +574,50 @@ export default function ABTestsPage() {
       avgRevenuePerBundleBuyerInr: bStats.avgRevenuePerUser,
     };
     const isPalmReadyTest = test.id?.startsWith("palm-reading-ready");
-    const variantALabel = isPalmReadyTest ? "Variant A - Classic Ready Page" : "Variant A - Current Plans";
-    const variantBLabel = isPalmReadyTest ? "Variant B - Palm Scan Page" : "Variant B - New Plans";
-    const variantARouteLabel = isPalmReadyTest ? "Ready route" : "Layout A route";
-    const variantBRouteLabel = isPalmReadyTest ? "Ready route" : "Layout B route";
+    const isPaywallPricingTest = test.id === PAYWALL_PRICING_TEST_ID;
+    const variantALabel = isPaywallPricingTest
+      ? "Variant A - $29 / $49 / $89"
+      : isPalmReadyTest
+        ? "Variant A - Classic Ready Page"
+        : "Variant A - Current Plans";
+    const variantBLabel = isPaywallPricingTest
+      ? "Variant B - $17 / $27 / $47"
+      : isPalmReadyTest
+        ? "Variant B - Palm Scan Page"
+        : "Variant B - New Plans";
+    const variantARouteLabel = isPaywallPricingTest ? "Price set" : isPalmReadyTest ? "Ready route" : "Layout A route";
+    const variantBRouteLabel = isPaywallPricingTest ? "Price set" : isPalmReadyTest ? "Ready route" : "Layout B route";
     const variantADescription = isPalmReadyTest
       ? "Original ready page. User continues straight to email."
+      : isPaywallPricingTest
+      ? "Control one-time bundle prices: $29, $49, and $89"
       : "Current baseline onboarding/paywall experience";
     const variantBDescription = isPalmReadyTest
       ? "New scanner/upload page. User must save a palm image before continuing."
+      : isPaywallPricingTest
+      ? "Test one-time bundle prices: $17, $27, and $47"
       : "Sketch-focused onboarding + compatibility on upsell";
     const orderedFlowTitle = isPalmReadyTest
       ? "Ordered Funnel Flow (Palm Ready -> Checkout)"
+      : isPaywallPricingTest
+      ? "Ordered Funnel Flow (Paywall -> Upsell)"
       : "Ordered Funnel Flow (Welcome -> Pre-Dashboard)";
     const orderedFlowDescription = isPalmReadyTest
       ? "Palm test flow is shown by real tracked routes. The first step is the shared ready URL, rendered as either the classic page or scan page."
+      : isPaywallPricingTest
+      ? "Variant assignment happens on /paywall and paid conversions are attributed from Stripe payment metadata."
       : "Routes are shown in exact funnel order for each variant. Drop-off is estimated from visitors who did not continue to the next step.";
+    const currencyLabel = isPaywallPricingTest ? "$" : "₹";
+    const formatMoney = (value: number | string) => {
+      const numeric = Number(value || 0);
+      const safe = Number.isFinite(numeric) ? numeric : 0;
+      return `${currencyLabel}${safe.toLocaleString(undefined, {
+        minimumFractionDigits: isPaywallPricingTest ? 2 : 0,
+        maximumFractionDigits: 2,
+      })}`;
+    };
+    const variantAName = isPaywallPricingTest ? "$29 / $49 / $89" : "Layout A";
+    const variantBName = isPaywallPricingTest ? "$17 / $27 / $47" : "Layout B";
 
     const formatDateTime = (value: string) => {
       if (!value) return "—";
@@ -752,7 +782,7 @@ export default function ABTestsPage() {
           variants.length === 0
             ? "Unknown"
             : variants.length === 1
-              ? `Layout ${variants[0]}`
+              ? variants[0] === "A" ? variantAName : variantBName
               : "Mixed (A/B)";
         return {
           key: entry.userId,
@@ -1152,7 +1182,7 @@ export default function ABTestsPage() {
           )}
 
           {/* Layout B Funnel Controls */}
-          {!isPalmReadyTest && (
+          {!isPalmReadyTest && !isPaywallPricingTest && (
           <div className="bg-card/50 backdrop-blur-sm border border-border rounded-xl p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Layout B Funnel Controls</h2>
@@ -1224,7 +1254,9 @@ export default function ABTestsPage() {
               <div className="space-y-4">
                 <div className="flex items-center gap-4">
                   <div className="flex-1">
-                    <label className="text-sm text-muted-foreground mb-1 block">{isPalmReadyTest ? "Variant A (Classic Ready)" : "Variant A (Current)"}</label>
+                    <label className="text-sm text-muted-foreground mb-1 block">
+                      {isPaywallPricingTest ? "Variant A ($29 / $49 / $89)" : isPalmReadyTest ? "Variant A (Classic Ready)" : "Variant A (Current)"}
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -1239,7 +1271,9 @@ export default function ABTestsPage() {
                     />
                   </div>
                   <div className="flex-1">
-                    <label className="text-sm text-muted-foreground mb-1 block">{isPalmReadyTest ? "Variant B (Palm Scan)" : "Variant B (New Plans)"}</label>
+                    <label className="text-sm text-muted-foreground mb-1 block">
+                      {isPaywallPricingTest ? "Variant B ($17 / $27 / $47)" : isPalmReadyTest ? "Variant B (Palm Scan)" : "Variant B (New Plans)"}
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -1266,7 +1300,7 @@ export default function ABTestsPage() {
                     <span className="text-2xl font-bold text-blue-400">{test.variants?.A?.weight ?? 50}%</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {variantARouteLabel}: {test.variants?.A?.page || (isPalmReadyTest ? "ready-classic" : "bundle-pricing")}
+                    {variantARouteLabel}: {test.variants?.A?.page || (isPaywallPricingTest ? "control_29_49_89" : isPalmReadyTest ? "ready-classic" : "bundle-pricing")}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">{variantADescription}</p>
                 </div>
@@ -1276,7 +1310,7 @@ export default function ABTestsPage() {
                     <span className="text-2xl font-bold text-purple-400">{test.variants?.B?.weight ?? 50}%</span>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {variantBRouteLabel}: {test.variants?.B?.page || (isPalmReadyTest ? "ready-scan" : "bundle-pricing-b")}
+                    {variantBRouteLabel}: {test.variants?.B?.page || (isPaywallPricingTest ? "test_17_27_47" : isPalmReadyTest ? "ready-scan" : "bundle-pricing-b")}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">{variantBDescription}</p>
                 </div>
@@ -1316,8 +1350,8 @@ export default function ABTestsPage() {
               />
               <StatCard
                 title="Revenue"
-                value={`$${aStats.totalRevenue.toFixed(2)}`}
-                subtitle={`$${aStats.avgRevenuePerUser} per user`}
+                value={formatMoney(aStats.totalRevenue)}
+                subtitle={`${formatMoney(aStats.avgRevenuePerUser)} per user`}
                 icon={DollarSign}
                 color="emerald-400"
               />
@@ -1356,8 +1390,8 @@ export default function ABTestsPage() {
               />
               <StatCard
                 title="Revenue"
-                value={`$${bStats.totalRevenue.toFixed(2)}`}
-                subtitle={`$${bStats.avgRevenuePerUser} per user`}
+                value={formatMoney(bStats.totalRevenue)}
+                subtitle={`${formatMoney(bStats.avgRevenuePerUser)} per user`}
                 icon={DollarSign}
                 color="emerald-400"
               />
@@ -1384,8 +1418,8 @@ export default function ABTestsPage() {
                     { metric: "Conversion Rate", a: `${aStats.conversionRate}%`, b: `${bStats.conversionRate}%`, higherBetter: true, compare: [parseFloat(aStats.conversionRate), parseFloat(bStats.conversionRate)] },
                     { metric: "Bounce Rate", a: `${aStats.bounceRate}%`, b: `${bStats.bounceRate}%`, higherBetter: false, compare: [parseFloat(aStats.bounceRate), parseFloat(bStats.bounceRate)] },
                     { metric: "Checkout Rate", a: `${aStats.checkoutRate}%`, b: `${bStats.checkoutRate}%`, higherBetter: true, compare: [parseFloat(aStats.checkoutRate), parseFloat(bStats.checkoutRate)] },
-                    { metric: "Total Revenue", a: `$${aStats.totalRevenue.toFixed(2)}`, b: `$${bStats.totalRevenue.toFixed(2)}`, higherBetter: true, compare: [aStats.totalRevenue, bStats.totalRevenue] },
-                    { metric: "Avg Revenue/User", a: `$${aStats.avgRevenuePerUser}`, b: `$${bStats.avgRevenuePerUser}`, higherBetter: true, compare: [parseFloat(aStats.avgRevenuePerUser), parseFloat(bStats.avgRevenuePerUser)] },
+                    { metric: "Total Revenue", a: formatMoney(aStats.totalRevenue), b: formatMoney(bStats.totalRevenue), higherBetter: true, compare: [aStats.totalRevenue, bStats.totalRevenue] },
+                    { metric: "Avg Revenue/User", a: formatMoney(aStats.avgRevenuePerUser), b: formatMoney(bStats.avgRevenuePerUser), higherBetter: true, compare: [parseFloat(aStats.avgRevenuePerUser), parseFloat(bStats.avgRevenuePerUser)] },
                   ].map((row) => {
                     let winner = "-";
                     if (row.compare) {
@@ -1426,7 +1460,9 @@ export default function ABTestsPage() {
             <h2 className="text-lg font-semibold mb-4">Funnel Decision Summary</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-4">
-                <p className="text-sm font-semibold text-blue-300 mb-3">{isPalmReadyTest ? "Variant A (Classic Ready)" : "Variant A (Layout A)"}</p>
+                <p className="text-sm font-semibold text-blue-300 mb-3">
+                  {isPalmReadyTest ? "Variant A (Classic Ready)" : `Variant A (${variantAName})`}
+                </p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Assigned</p>
@@ -1446,17 +1482,19 @@ export default function ABTestsPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Bundle Revenue</p>
-                    <p className="text-lg font-semibold">₹{summaryA.bundleRevenueInr.toLocaleString()}</p>
+                    <p className="text-lg font-semibold">{formatMoney(summaryA.bundleRevenueInr)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Upsell Revenue</p>
-                    <p className="text-lg font-semibold">₹{summaryA.upsellRevenueInr.toLocaleString()}</p>
+                    <p className="text-lg font-semibold">{formatMoney(summaryA.upsellRevenueInr)}</p>
                   </div>
                 </div>
               </div>
 
               <div className="rounded-lg border border-purple-500/30 bg-purple-500/5 p-4">
-                <p className="text-sm font-semibold text-purple-300 mb-3">{isPalmReadyTest ? "Variant B (Palm Scan)" : "Variant B (Layout B)"}</p>
+                <p className="text-sm font-semibold text-purple-300 mb-3">
+                  {isPalmReadyTest ? "Variant B (Palm Scan)" : `Variant B (${variantBName})`}
+                </p>
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <div>
                     <p className="text-muted-foreground">Assigned</p>
@@ -1476,11 +1514,11 @@ export default function ABTestsPage() {
                   </div>
                   <div>
                     <p className="text-muted-foreground">Bundle Revenue</p>
-                    <p className="text-lg font-semibold">₹{summaryB.bundleRevenueInr.toLocaleString()}</p>
+                    <p className="text-lg font-semibold">{formatMoney(summaryB.bundleRevenueInr)}</p>
                   </div>
                   <div>
                     <p className="text-muted-foreground">Upsell Revenue</p>
-                    <p className="text-lg font-semibold">₹{summaryB.upsellRevenueInr.toLocaleString()}</p>
+                    <p className="text-lg font-semibold">{formatMoney(summaryB.upsellRevenueInr)}</p>
                   </div>
                 </div>
               </div>
@@ -1525,7 +1563,7 @@ export default function ABTestsPage() {
                             <th className="text-right py-2 px-2">Bounce %</th>
                             <th className="text-right py-2 px-2">Checkout</th>
                             <th className="text-right py-2 px-2">Paid</th>
-                            <th className="text-right py-2 pl-2">Revenue (₹)</th>
+                            <th className="text-right py-2 pl-2">Revenue ({currencyLabel})</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1542,7 +1580,7 @@ export default function ABTestsPage() {
                               <td className="text-right py-2 px-2">{row.bounceRate}%</td>
                               <td className="text-right py-2 px-2">{row.checkoutsStarted}</td>
                               <td className="text-right py-2 px-2">{row.paidOrders}</td>
-                              <td className="text-right py-2 pl-2">₹{(row.paidRevenueInr + row.upsellRevenueInr).toLocaleString()}</td>
+                              <td className="text-right py-2 pl-2">{formatMoney(row.paidRevenueInr + row.upsellRevenueInr)}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -1575,10 +1613,10 @@ export default function ABTestsPage() {
                               <p className="font-medium">{row.item}</p>
                               <p className="text-xs text-muted-foreground">{row.orders} orders</p>
                               <p className="text-xs text-muted-foreground">
-                                Price: ₹{(row.orders > 0 ? row.revenueInr / row.orders : 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                Price: {formatMoney(row.orders > 0 ? row.revenueInr / row.orders : 0)}
                               </p>
                             </div>
-                            <p className="font-semibold">₹{row.revenueInr.toLocaleString()}</p>
+                            <p className="font-semibold">{formatMoney(row.revenueInr)}</p>
                           </div>
                         ))}
                       </div>
@@ -1607,10 +1645,10 @@ export default function ABTestsPage() {
                               <p className="font-medium">{row.item}</p>
                               <p className="text-xs text-muted-foreground">{row.orders} orders</p>
                               <p className="text-xs text-muted-foreground">
-                                Price: ₹{(row.orders > 0 ? row.revenueInr / row.orders : 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                Price: {formatMoney(row.orders > 0 ? row.revenueInr / row.orders : 0)}
                               </p>
                             </div>
-                            <p className="font-semibold">₹{row.revenueInr.toLocaleString()}</p>
+                            <p className="font-semibold">{formatMoney(row.revenueInr)}</p>
                           </div>
                         ))}
                       </div>
@@ -1667,9 +1705,9 @@ export default function ABTestsPage() {
                                     <th className="text-right py-2 px-2">Audience</th>
                                     <th className="text-right py-2 px-2">Orders</th>
                                     <th className="text-right py-2 px-2">Conv %</th>
-                                    <th className="text-right py-2 px-2">Revenue (₹)</th>
-                                    <th className="text-right py-2 px-2">AOV (₹)</th>
-                                    <th className="text-right py-2 pl-2">Rev/Audience (₹)</th>
+                                    <th className="text-right py-2 px-2">Revenue ({currencyLabel})</th>
+                                    <th className="text-right py-2 px-2">AOV ({currencyLabel})</th>
+                                    <th className="text-right py-2 pl-2">Rev/Audience ({currencyLabel})</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1679,9 +1717,9 @@ export default function ABTestsPage() {
                                       <td className="py-2 px-2 text-right">{row.audience}</td>
                                       <td className="py-2 px-2 text-right">{row.orders}</td>
                                       <td className="py-2 px-2 text-right">{row.conversionRate}%</td>
-                                      <td className="py-2 px-2 text-right">{row.revenueInr.toLocaleString()}</td>
-                                      <td className="py-2 px-2 text-right">{Number(row.avgOrderValue).toLocaleString()}</td>
-                                      <td className="py-2 pl-2 text-right">{Number(row.revenuePerAudience).toLocaleString()}</td>
+                                      <td className="py-2 px-2 text-right">{formatMoney(row.revenueInr)}</td>
+                                      <td className="py-2 px-2 text-right">{formatMoney(row.avgOrderValue)}</td>
+                                      <td className="py-2 pl-2 text-right">{formatMoney(row.revenuePerAudience)}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -1705,9 +1743,9 @@ export default function ABTestsPage() {
                                 <th className="text-right py-2 px-2">Audience</th>
                                 <th className="text-right py-2 px-2">Orders</th>
                                 <th className="text-right py-2 px-2">Conv %</th>
-                                <th className="text-right py-2 px-2">Revenue (₹)</th>
-                                <th className="text-right py-2 px-2">AOV (₹)</th>
-                                <th className="text-right py-2 pl-2">Rev/Audience (₹)</th>
+                                <th className="text-right py-2 px-2">Revenue ({currencyLabel})</th>
+                                <th className="text-right py-2 px-2">AOV ({currencyLabel})</th>
+                                <th className="text-right py-2 pl-2">Rev/Audience ({currencyLabel})</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1717,9 +1755,9 @@ export default function ABTestsPage() {
                                   <td className="py-2 px-2 text-right">{row.audience}</td>
                                   <td className="py-2 px-2 text-right">{row.orders}</td>
                                   <td className="py-2 px-2 text-right">{row.conversionRate}%</td>
-                                  <td className="py-2 px-2 text-right">{row.revenueInr.toLocaleString()}</td>
-                                  <td className="py-2 px-2 text-right">{Number(row.avgOrderValue).toLocaleString()}</td>
-                                  <td className="py-2 pl-2 text-right">{Number(row.revenuePerAudience).toLocaleString()}</td>
+                                  <td className="py-2 px-2 text-right">{formatMoney(row.revenueInr)}</td>
+                                  <td className="py-2 px-2 text-right">{formatMoney(row.avgOrderValue)}</td>
+                                  <td className="py-2 pl-2 text-right">{formatMoney(row.revenuePerAudience)}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1760,8 +1798,8 @@ export default function ABTestsPage() {
                   className="w-full px-3 py-2 bg-background border border-border rounded-lg"
                 >
                   <option value="all">All</option>
-                  <option value="A">Layout A</option>
-                  <option value="B">Layout B</option>
+                  <option value="A">{variantAName}</option>
+                  <option value="B">{variantBName}</option>
                 </select>
               </label>
               <label className="text-sm">
@@ -1802,7 +1840,7 @@ export default function ABTestsPage() {
                     <tr className="border-b border-border text-xs text-muted-foreground">
                       <th className="text-left py-2 pr-3">User</th>
                       <th className="text-left py-2 px-2">Email / Name</th>
-                      <th className="text-right py-2 px-2">Total Paid (₹)</th>
+                      <th className="text-right py-2 px-2">Total Paid ({currencyLabel})</th>
                       <th className="text-left py-2 px-2">Items</th>
                       <th className="text-left py-2 px-2">Funnel</th>
                       <th className="text-left py-2 pl-2">Date & Time</th>
@@ -1829,7 +1867,7 @@ export default function ABTestsPage() {
                               <p className="font-medium">{row.userName || "—"}</p>
                               <p className="text-xs text-muted-foreground">{row.email}</p>
                             </td>
-                            <td className="py-2 px-2 text-right font-semibold">{row.totalAmountInr.toLocaleString()}</td>
+                            <td className="py-2 px-2 text-right font-semibold">{formatMoney(row.totalAmountInr)}</td>
                             <td className="py-2 px-2 relative isolate">
                               <button
                                 type="button"
@@ -1873,8 +1911,8 @@ export default function ABTestsPage() {
               ) : (
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                   {([
-                    { variant: "A" as const, label: "Layout A (Variant A)", accent: "text-blue-400", rows: groupedBundleRowsByVariant.A },
-                    { variant: "B" as const, label: "Layout B (Variant B)", accent: "text-purple-400", rows: groupedBundleRowsByVariant.B },
+                    { variant: "A" as const, label: `${variantAName} (Variant A)`, accent: "text-blue-400", rows: groupedBundleRowsByVariant.A },
+                    { variant: "B" as const, label: `${variantBName} (Variant B)`, accent: "text-purple-400", rows: groupedBundleRowsByVariant.B },
                   ]).map((group) => (
                     <div key={group.variant} className="rounded-lg border border-border/70 bg-background/40 p-4">
                       <p className={`text-sm font-semibold mb-3 ${group.accent}`}>{group.label}</p>
@@ -1887,7 +1925,7 @@ export default function ABTestsPage() {
                               <tr className="border-b border-border text-xs text-muted-foreground">
                                 <th className="text-left py-2 pr-3">Bundle</th>
                                 <th className="text-right py-2 px-2">Orders</th>
-                                <th className="text-right py-2 px-2">Amount (₹)</th>
+                                <th className="text-right py-2 px-2">Amount ({currencyLabel})</th>
                                 <th className="text-left py-2 pl-2">Last Purchase</th>
                               </tr>
                             </thead>
@@ -1897,11 +1935,11 @@ export default function ABTestsPage() {
                                   <td className="py-2 pr-3">
                                     <p>{row.bundle}</p>
                                     <p className="text-xs text-muted-foreground">
-                                      Price: ₹{(row.orders > 0 ? row.revenueInr / row.orders : 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                                      Price: {formatMoney(row.orders > 0 ? row.revenueInr / row.orders : 0)}
                                     </p>
                                   </td>
                                   <td className="py-2 px-2 text-right">{row.orders}</td>
-                                  <td className="py-2 px-2 text-right">{row.revenueInr.toLocaleString()}</td>
+                                  <td className="py-2 px-2 text-right">{formatMoney(row.revenueInr)}</td>
                                   <td className="py-2 pl-2">{formatDateTime(row.latestPurchasedAt)}</td>
                                 </tr>
                               ))}

@@ -96,7 +96,26 @@ export async function GET(request: NextRequest) {
     const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
     const isPalmReadyTest = testId.startsWith("palm-reading-ready");
 
-    if (!AB_TESTS_LIVE && !isPalmReadyTest) {
+    if (isPalmReadyTest) {
+      return NextResponse.json({
+        testId,
+        variant: "B",
+        page: "ready-scan",
+        test: {
+          id: testId,
+          name: "Palm Reading Ready Scan A/B (retired)",
+          status: "paused",
+          traffic_split: 1,
+          variants: {
+            A: { weight: 0, page: "ready-classic" },
+            B: { weight: 100, page: "ready-scan" },
+          },
+        },
+        message: "Palm ready A/B test is retired; defaulting to scan page",
+      });
+    }
+
+    if (!AB_TESTS_LIVE) {
       return NextResponse.json({
         testId,
         variant: "A",
