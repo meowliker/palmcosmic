@@ -3429,11 +3429,6 @@ function AnalyticsTab({
 
   const WORKFLOW_ROUTE_ORDER = [
     "/",
-    "/welcome",
-    "/onboarding",
-    "/onboarding/insights-history",
-    "/onboarding/why-astrorekha",
-    "/onboarding/birth-details-intro",
     "/onboarding/gender",
     "/onboarding/birthday",
     "/onboarding/birth-time",
@@ -3441,66 +3436,32 @@ function AnalyticsTab({
     "/onboarding/step-5",
     "/onboarding/step-6",
     "/onboarding/step-7",
-    "/onboarding/future-prediction/intro",
-    "/onboarding/future-prediction/focus",
-    "/onboarding/future-prediction/relationships",
-    "/onboarding/future-prediction/decision-style",
-    "/onboarding/future-prediction/horizon",
-    "/onboarding/future-prediction/confidence",
-    "/onboarding/future-prediction/change",
-    "/onboarding/future-prediction/life-path",
-    "/onboarding/future-prediction/ready",
-    "/onboarding/future-prediction/email",
-    "/onboarding/future-prediction/paywall",
-    "/onboarding/soulmate-sketch/intro",
-    "/onboarding/soulmate-sketch/partner-gender",
-    "/onboarding/soulmate-sketch/age-range",
-    "/onboarding/soulmate-sketch/visual-style",
-    "/onboarding/soulmate-sketch/core-quality",
-    "/onboarding/soulmate-sketch/email",
-    "/onboarding/soulmate-sketch/paywall",
-    "/onboarding/palm-reading/intro",
-    "/onboarding/palm-reading/line-focus",
-    "/onboarding/palm-reading/life-area",
-    "/onboarding/palm-reading/clarity",
-    "/onboarding/palm-reading/hand-map",
-    "/onboarding/palm-reading/personality",
-    "/onboarding/palm-reading/timing",
-    "/onboarding/palm-reading/ready",
-    "/onboarding/palm-reading/email",
-    "/onboarding/palm-reading/paywall",
-    "/onboarding/future-partner/intro",
-    "/onboarding/future-partner/partner-type",
-    "/onboarding/future-partner/love-language",
-    "/onboarding/future-partner/relationship-values",
-    "/onboarding/future-partner/ideal-date",
-    "/onboarding/future-partner/cosmic-timing",
-    "/onboarding/future-partner/email",
-    "/onboarding/future-partner/paywall",
-    "/onboarding/compatibility/intro",
-    "/onboarding/compatibility/partner-gender",
-    "/onboarding/compatibility/partner-birthday",
-    "/onboarding/compatibility/partner-birthplace",
-    "/onboarding/compatibility/partner-birth-time",
-    "/onboarding/compatibility/ready",
-    "/onboarding/compatibility/email",
-    "/onboarding/compatibility/paywall",
-    "/onboarding/create-password",
-    "/login",
+    "/onboarding/step-8",
+    "/onboarding/step-9",
+    "/onboarding/step-10",
+    "/onboarding/step-11",
+    "/onboarding/step-12",
+    "/onboarding/step-13",
+    "/onboarding/step-14",
+    "/onboarding/step-15",
+    "/onboarding/email",
+    "/paywall",
+    "/upsell",
+    "/registration",
     "/reports",
-    "/prediction-2026",
     "/palm-reading",
     "/birth-chart",
     "/birth-chart/report",
     "/soulmate-sketch",
     "/future-partner",
     "/compatibility",
+    "/prediction-2026",
     "/horoscope",
     "/chat",
+    "/login",
     "/profile",
     "/profile/edit",
     "/settings",
-    "/manage-subscription",
   ];
 
   const WEEKDAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -3626,18 +3587,24 @@ function AnalyticsTab({
 
   const getWorkflowRank = (route: string) => {
     const normalized = route.trim().toLowerCase();
-    const exactIdx = WORKFLOW_ROUTE_ORDER.findIndex((item) => normalized === item || normalized.startsWith(`${item}/`));
+    const exactIdx = WORKFLOW_ROUTE_ORDER.findIndex((item) => normalized === item);
     if (exactIdx >= 0) return exactIdx;
+    const prefixIdx = WORKFLOW_ROUTE_ORDER.findIndex((item) => item !== "/" && normalized.startsWith(`${item}/`));
+    if (prefixIdx >= 0) return prefixIdx;
 
-    if (normalized.includes("welcome")) return 1;
-    if (normalized.includes("gender")) return 4;
-    if (normalized.includes("birthday") || normalized.includes("birthdate")) return 6;
-    if (normalized.includes("birth-time")) return 7;
-    if (normalized.includes("birthplace")) return 8;
-    if (normalized.includes("bundle") || normalized.includes("paywall")) return 24;
-    if (normalized.includes("dashboard")) return 30;
+    if (normalized.includes("gender")) return 1;
+    if (normalized.includes("birthday") || normalized.includes("birthdate")) return 2;
+    if (normalized.includes("birth-time")) return 3;
+    if (normalized.includes("birthplace")) return 4;
+    if (normalized.includes("email")) return 16;
+    if (normalized.includes("bundle") || normalized.includes("paywall")) return 17;
+    if (normalized.includes("upsell")) return 18;
+    if (normalized.includes("registration") || normalized.includes("create-password")) return 19;
+    if (normalized.includes("reports") || normalized.includes("dashboard")) return 20;
     return 1000;
   };
+
+  const isWorkflowRoute = (route: string) => getWorkflowRank(route) < 1000;
 
   const formatAxisNumber = (value: number) => {
     const abs = Math.abs(value);
@@ -4397,6 +4364,7 @@ function AnalyticsTab({
 
   const filteredRoutes = data
     ? data.routes.filter((row) => {
+        if (routeViewMode === "workflow" && !isWorkflowRoute(row.route)) return false;
         const matchesSearch = row.route.toLowerCase().includes(routeSearch.toLowerCase());
         const matchesSelection = selectedRoutes.length === 0 || selectedRoutes.includes(row.route);
         return matchesSearch && matchesSelection;
