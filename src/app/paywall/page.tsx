@@ -16,7 +16,7 @@ import { OnboardingFunnelTracker } from "@/components/onboarding/OnboardingFunne
 import {
   PAYWALL_PRICING_EXPERIMENT,
   applyPaywallPriceVariant,
-  pickPaywallPriceVariant,
+  resolvePaywallPriceVariant,
   type PaywallPriceVariant,
 } from "@/lib/paywall-pricing-experiment";
 
@@ -145,8 +145,15 @@ export default function BundlePaywallPage() {
   const selectedPlanData = bundlePlans.find((plan) => plan.id === selectedPlan) || bundlePlans[1] || bundlePlans[0];
 
   useEffect(() => {
-    const variant = pickPaywallPriceVariant();
-    setPriceVariant(variant);
+    let cancelled = false;
+    const userId = getOrCreateUserId();
+    resolvePaywallPriceVariant(userId).then((variant) => {
+      if (!cancelled) setPriceVariant(variant);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

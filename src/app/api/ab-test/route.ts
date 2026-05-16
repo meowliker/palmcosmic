@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase-admin";
 import { DEFAULT_LAYOUT_B_CONFIG, normalizeLayoutBConfig } from "@/lib/layout-b-funnel";
+import {
+  PAYWALL_PRICING_EXPERIMENT,
+  PAYWALL_PRICE_VARIANTS,
+} from "@/lib/paywall-pricing-experiment";
 
 // A/B Test configuration API
 // Handles getting assigned variant for a user and managing test configs
@@ -14,8 +18,11 @@ function clampPercent(value: number): number {
 
 function getNormalizedVariants(testData: any, isOnboardingLayoutTest: boolean) {
   const isPalmReadyTest = String(testData?.id || "").startsWith("palm-reading-ready");
+  const isPaywallPricingTest = String(testData?.id || "") === PAYWALL_PRICING_EXPERIMENT;
   const defaults = isPalmReadyTest
     ? { pageA: "ready-classic", pageB: "ready-scan" }
+    : isPaywallPricingTest
+    ? { pageA: PAYWALL_PRICE_VARIANTS[0], pageB: PAYWALL_PRICE_VARIANTS[1] }
     : isOnboardingLayoutTest
     ? { pageA: "bundle-pricing", pageB: "bundle-pricing-b" }
     : { pageA: "step-17", pageB: "a-step-17" };
@@ -95,6 +102,7 @@ export async function GET(request: NextRequest) {
     const testId = requestedTestId || await resolveDefaultTestId(supabase);
     const isOnboardingLayoutTest = testId.startsWith("onboarding-layout");
     const isPalmReadyTest = testId.startsWith("palm-reading-ready");
+    const isPaywallPricingTest = testId === PAYWALL_PRICING_EXPERIMENT;
 
     if (isPalmReadyTest) {
       return NextResponse.json({
@@ -115,7 +123,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (!AB_TESTS_LIVE) {
+    if (!AB_TESTS_LIVE && !isPaywallPricingTest) {
       return NextResponse.json({
         testId,
         variant: "A",
@@ -141,13 +149,24 @@ export async function GET(request: NextRequest) {
 
     const defaultTest = {
       id: testId,
-      name: isPalmReadyTest ? "Palm Reading Ready Scan A/B" : isOnboardingLayoutTest ? "Onboarding Layout A/B (QA)" : "Pricing Page A/B Test",
+      name: isPalmReadyTest
+        ? "Palm Reading Ready Scan A/B"
+        : isPaywallPricingTest
+        ? "Paywall Bundle Price A/B"
+        : isOnboardingLayoutTest
+        ? "Onboarding Layout A/B (QA)"
+        : "Pricing Page A/B Test",
       status: "active",
       traffic_split: 0.5,
       variants: isPalmReadyTest
         ? {
             A: { weight: 50, page: "ready-classic" },
             B: { weight: 50, page: "ready-scan" },
+          }
+        : isPaywallPricingTest
+        ? {
+            A: { weight: 50, page: PAYWALL_PRICE_VARIANTS[0] },
+            B: { weight: 50, page: PAYWALL_PRICE_VARIANTS[1] },
           }
         : isOnboardingLayoutTest
         ? {
@@ -174,6 +193,9 @@ export async function GET(request: NextRequest) {
       const configured = test?.variants?.[variant]?.page;
       if (configured && typeof configured === "string") {
         return configured;
+      }
+      if (isPaywallPricingTest) {
+        return variant === "A" ? PAYWALL_PRICE_VARIANTS[0] : PAYWALL_PRICE_VARIANTS[1];
       }
       if (isOnboardingLayoutTest) {
         return variant === "A" ? "bundle-pricing" : "bundle-pricing-b";
@@ -225,6 +247,8 @@ export async function GET(request: NextRequest) {
       });
     }
 
+    const variants = getNormalizedVariants(testData, isOnboardingLayoutTest);
+
     // Check if visitor already has an assigned variant
     if (visitorId) {
       const { data: assignment, error: assignmentLookupError } = await supabase
@@ -241,25 +265,33 @@ export async function GET(request: NextRequest) {
       }
       
       if (assignment) {
-        await persistUserFlowVariant({
-          supabase,
-          userId: userIdFromQuery || visitorId,
-          variant: assignment.variant,
-          isOnboardingLayoutTest,
-        });
+        const assignedVariant = String(assignment.variant || "A");
+        const assignedWeight = Number((variants as Record<string, { weight: number }>)[assignedVariant]?.weight || 0);
+        if (assignedWeight <= 0) {
+          await supabase
+            .from("ab_test_assignments")
+            .delete()
+            .eq("id", `${testId}_${visitorId}`);
+        } else {
+          await persistUserFlowVariant({
+            supabase,
+            userId: userIdFromQuery || visitorId,
+            variant: assignedVariant,
+            isOnboardingLayoutTest,
+          });
 
-        return NextResponse.json({
-          testId,
-          variant: assignment.variant,
-          page: pageForVariant(assignment.variant, testData),
-          test: testData,
-          cached: true,
-        });
+          return NextResponse.json({
+            testId,
+            variant: assignedVariant,
+            page: pageForVariant(assignedVariant, { ...testData, variants }),
+            test: { ...testData, variants },
+            cached: true,
+          });
+        }
       }
     }
 
     // Assign variant based on weights
-    const variants = getNormalizedVariants(testData, isOnboardingLayoutTest);
     const totalWeight = Object.values(variants).reduce(
       (sum: number, v: any) => sum + (v.weight || 0),
       0
@@ -308,8 +340,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       testId,
       variant: assignedVariant,
-      page: pageForVariant(assignedVariant, testData),
-      test: testData,
+      page: pageForVariant(assignedVariant, { ...testData, variants }),
+      test: { ...testData, variants },
     });
   } catch (error) {
     console.error("A/B test error:", error);

@@ -32,15 +32,32 @@ export function isPaywallPriceVariant(value: unknown): value is PaywallPriceVari
   return typeof value === "string" && PAYWALL_PRICE_VARIANTS.includes(value as PaywallPriceVariant);
 }
 
-export function pickPaywallPriceVariant(): PaywallPriceVariant {
+export function variantKeyToPaywallPriceVariant(variant: unknown): PaywallPriceVariant {
+  return variant === "B" ? "test_17_27_47" : "control_29_49_89";
+}
+
+export async function resolvePaywallPriceVariant(visitorId: string): Promise<PaywallPriceVariant> {
   if (typeof window === "undefined") return "control_29_49_89";
 
-  const stored = window.localStorage.getItem(PAYWALL_PRICING_STORAGE_KEY);
-  if (isPaywallPriceVariant(stored)) return stored;
+  try {
+    const params = new URLSearchParams({
+      testId: PAYWALL_PRICING_EXPERIMENT,
+      visitorId,
+      userId: visitorId,
+    });
+    const response = await fetch(`/api/ab-test?${params.toString()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error("Failed to resolve paywall price variant");
 
-  const variant: PaywallPriceVariant = Math.random() < 0.5 ? "control_29_49_89" : "test_17_27_47";
-  window.localStorage.setItem(PAYWALL_PRICING_STORAGE_KEY, variant);
-  return variant;
+    const data = await response.json();
+    const resolvedFromPage = isPaywallPriceVariant(data?.page) ? data.page : null;
+    const resolved = resolvedFromPage || variantKeyToPaywallPriceVariant(data?.variant);
+    window.localStorage.setItem(PAYWALL_PRICING_STORAGE_KEY, resolved);
+    return resolved;
+  } catch {
+    const stored = window.localStorage.getItem(PAYWALL_PRICING_STORAGE_KEY);
+    if (isPaywallPriceVariant(stored) && stored !== "control_29_49_89") return stored;
+    return "test_17_27_47";
+  }
 }
 
 export function applyPaywallPriceVariant<T extends BundlePlan>(
