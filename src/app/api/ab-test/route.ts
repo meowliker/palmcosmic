@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
         test: {
           id: testId,
           name: "Palm Reading Ready Scan A/B (retired)",
-          status: "paused",
+          status: "closed",
           traffic_split: 1,
           variants: {
             A: { weight: 0, page: "ready-classic" },
@@ -123,17 +123,32 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (!AB_TESTS_LIVE && !isPaywallPricingTest) {
+    if (!AB_TESTS_LIVE) {
+      const disabledVariant = isPaywallPricingTest ? "B" : "A";
+      const disabledPage = isPaywallPricingTest
+        ? PAYWALL_PRICE_VARIANTS[1]
+        : isOnboardingLayoutTest
+        ? "bundle-pricing"
+        : "step-17";
       return NextResponse.json({
         testId,
-        variant: "A",
-        page: isOnboardingLayoutTest ? "bundle-pricing" : "step-17",
+        variant: disabledVariant,
+        page: disabledPage,
         test: {
           id: testId,
-          name: isOnboardingLayoutTest ? "Onboarding Layout A/B (disabled)" : "Pricing Page A/B Test (disabled)",
-          status: "paused",
-          traffic_split: 0,
-          variants: isOnboardingLayoutTest
+          name: isPaywallPricingTest
+            ? "Paywall Bundle Price A/B (closed)"
+            : isOnboardingLayoutTest
+            ? "Onboarding Layout A/B (closed)"
+            : "Pricing Page A/B Test (closed)",
+          status: "closed",
+          traffic_split: isPaywallPricingTest ? 1 : 0,
+          variants: isPaywallPricingTest
+            ? {
+                A: { weight: 0, page: PAYWALL_PRICE_VARIANTS[0] },
+                B: { weight: 100, page: PAYWALL_PRICE_VARIANTS[1] },
+              }
+            : isOnboardingLayoutTest
             ? {
                 A: { weight: 100, page: "bundle-pricing" },
                 B: { weight: 0, page: "bundle-pricing-b" },
@@ -143,7 +158,7 @@ export async function GET(request: NextRequest) {
                 B: { weight: 0, page: "a-step-17" },
               },
         },
-        message: "A/B tests are disabled; defaulting to variant A",
+        message: "A/B tests are closed; defaulting to the normal flow",
       });
     }
 
@@ -226,7 +241,7 @@ export async function GET(request: NextRequest) {
         });
       }
       
-      const variant = Math.random() < 0.5 ? "A" : "B";
+      const variant = isPaywallPricingTest ? "B" : "A";
       
       return NextResponse.json({
         testId,

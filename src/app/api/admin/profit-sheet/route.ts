@@ -6,7 +6,7 @@ import { getStripeClient } from "@/lib/stripe";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const APP_LAUNCH_DATE = "2026-04-30";
+const APP_LAUNCH_DATE = "2026-05-10";
 const META_API_VERSION = "v21.0";
 const META_BASE_URL = `https://graph.facebook.com/${META_API_VERSION}`;
 const IST_TIMEZONE = "Asia/Kolkata";

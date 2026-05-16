@@ -30,7 +30,7 @@ const PAYWALL_PRICING_TEST_ID = "paywall_bundle_price_v1";
 interface ABTest {
   id: string;
   name: string;
-  status: "active" | "paused" | "completed";
+  status: "active" | "paused" | "completed" | "closed";
   variants: {
     A: { weight: number; page: string };
     B: { weight: number; page: string };
@@ -297,15 +297,6 @@ export default function ABTestsPage() {
       const data = await response.json();
       const nextTests = data.tests || [];
       setTests(nextTests);
-      if (nextTests.length > 0) {
-        const preferredTest =
-          nextTests.find((test: ABTest) => test.id === PAYWALL_PRICING_TEST_ID) ||
-          nextTests.find((test: ABTest) => test.id === funnelConfig.testId) ||
-          nextTests.find((test: ABTest) => test.id === DEFAULT_ONBOARDING_TEST_ID);
-        if (preferredTest && (!selectedTest || selectedTest.test.id !== preferredTest.id)) {
-          fetchTestDetails(preferredTest.id);
-        }
-      }
     } catch (error) {
       console.error("Failed to fetch tests:", error);
     } finally {

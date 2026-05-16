@@ -6,7 +6,7 @@ import { classifyStoredPaymentEvent } from "@/lib/finance-events";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const DEFAULT_ANALYTICS_START_DATE = "2026-04-30";
+const DEFAULT_ANALYTICS_START_DATE = "2026-05-10";
 
 interface PeakSalesMetric {
   label: string;

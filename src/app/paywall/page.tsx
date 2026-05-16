@@ -14,19 +14,18 @@ import { trackFunnelAction } from "@/lib/analytics-events";
 import { generateUserId } from "@/lib/user-profile";
 import { OnboardingFunnelTracker } from "@/components/onboarding/OnboardingFunnelTracker";
 import {
-  PAYWALL_PRICING_EXPERIMENT,
   applyPaywallPriceVariant,
-  resolvePaywallPriceVariant,
   type PaywallPriceVariant,
 } from "@/lib/paywall-pricing-experiment";
+import { cn } from "@/lib/utils";
 
 const BUNDLE_ORDER = ["palm-reading", "palm-birth", "palm-birth-sketch"];
+const FIXED_PAYWALL_PRICE_VARIANT: PaywallPriceVariant = "test_17_27_47";
 
 const predictionLabels = [
-  { text: "First date", top: "15%", left: "10%", rotation: -12 },
-  { text: "Marriage", top: "35%", left: "56%", rotation: 5 },
-  { text: "Anniversary", top: "58%", left: "12%", rotation: -10 },
-  { text: "Big change", top: "60%", left: "52%", rotation: 8 },
+  { text: "Children", emoji: "👶", top: "15%", left: "20%", rotation: -15 },
+  { text: "Marriage", emoji: "💕", top: "35%", left: "55%", rotation: 5 },
+  { text: "Big change at", emoji: "✨", top: "55%", left: "15%", rotation: -10 },
 ];
 
 const readingStats = [
@@ -107,60 +106,35 @@ function getOrCreateUserId() {
   return userId;
 }
 
-function getSoulmatePreviewImage(): "/male.png" | "/female.png" {
-  try {
-    const raw = localStorage.getItem("astrorekha_soulmate_answers");
-    const answers = raw ? JSON.parse(raw) : {};
-    const attractedTo = String(answers?.attracted_to || "").trim().toLowerCase();
-    if (attractedTo === "female" || attractedTo.includes("woman")) return "/female.png";
-    if (attractedTo === "male" || attractedTo.includes("man")) return "/male.png";
-  } catch {
-    return "/female.png";
-  }
-  return "/female.png";
+function getPalmPreviewImage() {
+  return localStorage.getItem("astrorekha_palm_image") || "/palm-reading-paywall.png";
 }
 
 export default function BundlePaywallPage() {
   const router = useRouter();
   const { pricing } = usePricing();
-  const [priceVariant, setPriceVariant] = useState<PaywallPriceVariant | null>(null);
-  const [selectedPlan, setSelectedPlan] = useState("palm-birth");
+  const [selectedPlan, setSelectedPlan] = useState("palm-birth-sketch");
   const [agreedToTerms, setAgreedToTerms] = useState(true);
   const [paymentError, setPaymentError] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const [soulmatePreviewImage, setSoulmatePreviewImage] = useState<"/male.png" | "/female.png">("/female.png");
+  const [palmPreviewImage, setPalmPreviewImage] = useState("/palm-reading-paywall.png");
   const [showStickyCTA, setShowStickyCTA] = useState(false);
 
   const paymentSectionRef = useRef<HTMLDivElement>(null);
-  const testimonialSectionRef = useRef<HTMLDivElement>(null);
-  const birthChartSectionRef = useRef<HTMLDivElement>(null);
-  const getFullReportRef = useRef<HTMLButtonElement>(null);
+  const pricingCardsRef = useRef<HTMLDivElement>(null);
+  const checkoutCtaRef = useRef<HTMLDivElement>(null);
 
   const bundlePlans = useMemo(() => {
     const byId = new Map(pricing.bundles.filter((bundle) => bundle.active).map((bundle) => [bundle.id, bundle]));
     const orderedBundles = BUNDLE_ORDER.map((id) => byId.get(id)).filter(Boolean) as BundlePlan[];
-    return applyPaywallPriceVariant(orderedBundles, priceVariant || "control_29_49_89");
-  }, [pricing.bundles, priceVariant]);
+    return applyPaywallPriceVariant(orderedBundles, FIXED_PAYWALL_PRICE_VARIANT);
+  }, [pricing.bundles]);
 
-  const selectedPlanData = bundlePlans.find((plan) => plan.id === selectedPlan) || bundlePlans[1] || bundlePlans[0];
-
-  useEffect(() => {
-    let cancelled = false;
-    const userId = getOrCreateUserId();
-    resolvePaywallPriceVariant(userId).then((variant) => {
-      if (!cancelled) setPriceVariant(variant);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const selectedPlanData = bundlePlans.find((plan) => plan.id === selectedPlan) || bundlePlans[2] || bundlePlans[0];
 
   useEffect(() => {
-    setSoulmatePreviewImage(getSoulmatePreviewImage());
-    if (!priceVariant) return;
+    setPalmPreviewImage(getPalmPreviewImage());
 
-    const savedImage = localStorage.getItem("astrorekha_palm_image");
     localStorage.setItem("palmcosmic_active_flow", "palm_reading");
 
     pixelEvents.viewContent("PalmCosmic Bundle Pricing", "product");
@@ -169,8 +143,7 @@ export default function BundlePaywallPage() {
       step_id: "bundle_paywall",
       funnel: "palm_reading",
       payment_model: "one_time_lifetime",
-      pricing_experiment: PAYWALL_PRICING_EXPERIMENT,
-      pricing_variant: priceVariant,
+      pricing_set: FIXED_PAYWALL_PRICE_VARIANT,
     });
 
     const email = getStoredEmail();
@@ -188,17 +161,16 @@ export default function BundlePaywallPage() {
         })
         .catch(() => undefined);
     }
-  }, [router, priceVariant]);
+  }, [router]);
 
   useEffect(() => {
     if (bundlePlans.length === 0) return;
-    setSelectedPlan((current) => (bundlePlans.some((plan) => plan.id === current) ? current : bundlePlans[0].id));
+    setSelectedPlan((current) => (bundlePlans.some((plan) => plan.id === current) ? current : "palm-birth-sketch"));
   }, [bundlePlans]);
 
   useEffect(() => {
     const email = getStoredEmail();
     const userId = getOrCreateUserId();
-    if (!priceVariant) return;
 
     fetch("/api/onboarding/snapshot", {
       method: "POST",
@@ -211,47 +183,61 @@ export default function BundlePaywallPage() {
         priorityArea: "palm_reading",
         answers: {
           selectedBundleId: selectedPlan,
-          pricingExperiment: PAYWALL_PRICING_EXPERIMENT,
-          pricingVariant: priceVariant,
+          pricingSet: FIXED_PAYWALL_PRICE_VARIANT,
           palmImageSaved: Boolean(localStorage.getItem("astrorekha_palm_image")) || localStorage.getItem("palmcosmic_palm_image_saved") === "true",
         },
         source: "bundle_paywall_view",
       }),
       keepalive: true,
     }).catch(() => undefined);
-  }, [selectedPlan, priceVariant]);
+  }, [selectedPlan]);
 
   useEffect(() => {
-    let isInContentSection = false;
-    let isGetFullReportVisible = false;
+    let frameId = 0;
+    let timeoutId = 0;
+    let intervalId = 0;
 
-    const sectionObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.target === testimonialSectionRef.current || entry.target === birthChartSectionRef.current) {
-            isInContentSection = entry.isIntersecting;
-          }
-        });
-        setShowStickyCTA(isInContentSection && !isGetFullReportVisible);
-      },
-      { threshold: 0.1 }
-    );
+    const updateStickyState = () => {
+      const paymentSection = paymentSectionRef.current;
+      const cards = pricingCardsRef.current;
+      const checkoutCta = checkoutCtaRef.current;
+      if (!paymentSection || !cards || !checkoutCta) {
+        setShowStickyCTA(false);
+        return;
+      }
 
-    const buttonObserver = new IntersectionObserver(
-      ([entry]) => {
-        isGetFullReportVisible = entry.isIntersecting;
-        setShowStickyCTA(isInContentSection && !isGetFullReportVisible);
-      },
-      { threshold: 0.5 }
-    );
+      const scrollY = window.scrollY || window.pageYOffset;
+      const viewportBottom = scrollY + window.innerHeight;
+      const sectionTop = paymentSection.getBoundingClientRect().top + scrollY;
+      const sectionBottom = sectionTop + paymentSection.offsetHeight;
+      const cardElements = Array.from(cards.querySelectorAll<HTMLElement>("[data-bundle-card]"));
+      const triggerCard = cardElements[cardElements.length - 1] || cards;
+      const triggerCardTop = triggerCard.getBoundingClientRect().top + scrollY;
+      const buttonTop = checkoutCta.getBoundingClientRect().top + scrollY;
+      const hasReachedBundleCards = viewportBottom >= triggerCardTop + 80;
+      const isBeforeRealButton = viewportBottom < buttonTop + 8;
+      const isWithinPaymentSection = scrollY < sectionBottom;
 
-    if (testimonialSectionRef.current) sectionObserver.observe(testimonialSectionRef.current);
-    if (birthChartSectionRef.current) sectionObserver.observe(birthChartSectionRef.current);
-    if (getFullReportRef.current) buttonObserver.observe(getFullReportRef.current);
+      setShowStickyCTA(hasReachedBundleCards && isBeforeRealButton && isWithinPaymentSection);
+    };
+
+    const scheduleUpdate = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateStickyState);
+    };
+
+    updateStickyState();
+    timeoutId = window.setTimeout(updateStickyState, 150);
+    intervalId = window.setInterval(updateStickyState, 300);
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
 
     return () => {
-      sectionObserver.disconnect();
-      buttonObserver.disconnect();
+      window.cancelAnimationFrame(frameId);
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
     };
   }, []);
 
@@ -281,10 +267,9 @@ export default function BundlePaywallPage() {
 
     setIsProcessing(true);
     const userId = getOrCreateUserId();
-    const activePriceVariant = priceVariant || "control_29_49_89";
     localStorage.setItem("astrorekha_selected_plan", selectedPlan);
     localStorage.setItem("palmcosmic_selected_bundle", selectedPlan);
-    localStorage.setItem("palmcosmic_selected_bundle_price_variant", activePriceVariant);
+    localStorage.setItem("palmcosmic_selected_bundle_price_variant", FIXED_PAYWALL_PRICE_VARIANT);
     localStorage.setItem("palmcosmic_active_flow", "palm_reading");
 
     const value = plan.price / 100;
@@ -296,8 +281,7 @@ export default function BundlePaywallPage() {
       bundle_id: selectedPlan,
       value,
       payment_model: "one_time_lifetime",
-      pricing_experiment: PAYWALL_PRICING_EXPERIMENT,
-      pricing_variant: activePriceVariant,
+      pricing_set: FIXED_PAYWALL_PRICE_VARIANT,
       bundle_price_cents: plan.price,
     });
 
@@ -308,8 +292,7 @@ export default function BundlePaywallPage() {
         body: JSON.stringify({
           type: "bundle",
           bundleId: selectedPlan,
-          pricingExperiment: PAYWALL_PRICING_EXPERIMENT,
-          pricingVariant: activePriceVariant,
+          pricingVariant: FIXED_PAYWALL_PRICE_VARIANT,
           userId,
           email,
           firstName: localStorage.getItem("palmcosmic_first_name") || localStorage.getItem("astrorekha_name") || "Customer",
@@ -332,8 +315,7 @@ export default function BundlePaywallPage() {
         bundle_id: selectedPlan,
         stripe_session_id: data.sessionId,
         value,
-        pricing_experiment: PAYWALL_PRICING_EXPERIMENT,
-        pricing_variant: activePriceVariant,
+        pricing_set: FIXED_PAYWALL_PRICE_VARIANT,
         bundle_price_cents: plan.price,
       });
 
@@ -356,17 +338,32 @@ export default function BundlePaywallPage() {
         </motion.div>
 
         <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="mb-1 text-center text-2xl font-bold md:text-3xl">
-          Your Soulmate Sketch
+          Your Palm Reading
         </motion.h1>
         <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="mb-8 text-xl font-bold text-[#38bdf8] md:text-2xl">
           Is Ready!
         </motion.p>
 
-        <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 0.3 }} className="relative mb-8 h-80 w-72">
-          <div className="absolute inset-0 rounded-full bg-[#38bdf8]/20 blur-2xl" />
-          <div className="absolute inset-4 flex items-center justify-center overflow-hidden rounded-full border border-[#38bdf8]/25 bg-[#0b2338]/80">
-            {/* eslint-disable-next-line @next/next/no-img-element -- Mirrors AstroRekha paywall preview behavior. */}
-            <img src={soulmatePreviewImage} alt="Your soulmate sketch preview" className="h-[78%] w-[68%] rounded-3xl border border-white/10 object-cover" />
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ delay: 0.3 }}
+          className="relative mb-8 h-80 w-72"
+        >
+          <div className="absolute inset-0 rounded-full bg-gradient-to-b from-[#38bdf8]/20 via-[#38bdf8]/10 to-transparent blur-2xl" />
+
+          <div className="absolute inset-4 flex items-center justify-center overflow-hidden rounded-full border border-[#173653] bg-[#0b2338]/80">
+            {/* eslint-disable-next-line @next/next/no-img-element -- User palm preview can be a local data URL. */}
+            <img
+              src={palmPreviewImage === "/palm-reading-paywall.png" ? "/palm.png" : palmPreviewImage}
+              alt="Your palm reading"
+              className={cn(
+                "opacity-80",
+                palmPreviewImage === "/palm-reading-paywall.png"
+                  ? "h-[240px] w-[200px] object-contain"
+                  : "h-full w-full object-cover"
+              )}
+            />
           </div>
 
           {predictionLabels.map((label, index) => (
@@ -375,10 +372,12 @@ export default function BundlePaywallPage() {
               initial={{ opacity: 0, scale: 0, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               transition={{ delay: 0.6 + index * 0.2, type: "spring", stiffness: 200 }}
-              className="absolute whitespace-nowrap rounded-lg border border-[#38bdf8]/25 bg-[#071a2b] px-3 py-1.5 text-white shadow-[0_10px_28px_rgba(0,0,0,0.48)]"
+              className="absolute whitespace-nowrap rounded-lg border border-white/20 bg-[#0b2338] px-3 py-1.5 text-white shadow-[0_10px_28px_rgba(0,0,0,0.48)]"
               style={{ top: label.top, left: label.left, transform: `rotate(${label.rotation}deg)` }}
             >
-              <span className="flex items-center gap-1 text-sm font-medium">{label.text}</span>
+              <span className="flex items-center gap-1 text-sm font-medium">
+                {label.text} <span>{label.emoji}</span>
+              </span>
             </motion.div>
           ))}
         </motion.div>
@@ -398,7 +397,7 @@ export default function BundlePaywallPage() {
           One-time payment • Lifetime access
         </motion.p>
 
-        <div className="mb-6 w-full max-w-sm space-y-4">
+        <div ref={pricingCardsRef} className="mb-6 w-full max-w-sm space-y-4">
           {bundlePlans.map((plan, index) => (
             <motion.div
               key={plan.id}
@@ -406,9 +405,10 @@ export default function BundlePaywallPage() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 + index * 0.1 }}
               onClick={() => setSelectedPlan(plan.id)}
+              data-bundle-card
               className={`relative cursor-pointer rounded-2xl border-2 p-4 transition-all ${
                 selectedPlan === plan.id ? "border-[#38bdf8] bg-[#38bdf8]/5" : "border-[#173653] bg-[#0b2338]/70"
-              } ${plan.popular ? "ring-2 ring-[#38bdf8]/45" : ""}`}
+              }`}
             >
               {plan.popular ? (
                 <div className="absolute -top-3 left-1/2 flex -translate-x-1/2 items-center gap-1 rounded-full bg-[#38bdf8] px-4 py-1 text-xs font-semibold text-black">
@@ -470,8 +470,8 @@ export default function BundlePaywallPage() {
 
         {paymentError ? <div className="mb-4 w-full max-w-sm rounded-lg bg-red-500/10 p-3 text-sm text-red-300">{paymentError}</div> : null}
 
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-5 w-full max-w-sm">
-          <Button ref={getFullReportRef} onClick={handlePurchase} disabled={!agreedToTerms || isProcessing} className="h-14 w-full bg-[#38bdf8] text-lg font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
+        <motion.div ref={checkoutCtaRef} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.6 }} className="mb-5 w-full max-w-sm">
+          <Button onClick={handlePurchase} disabled={!agreedToTerms || isProcessing} className="h-14 w-full bg-[#38bdf8] text-lg font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
             {isProcessing ? (
               <span className="flex items-center gap-2">
                 <div className="h-5 w-5 animate-spin rounded-full border-2 border-black/30 border-t-black" />
@@ -508,12 +508,12 @@ export default function BundlePaywallPage() {
         </motion.div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.8 }} className="mb-8 w-full max-w-sm rounded-2xl border border-[#173653] bg-[#061525]/70 p-5 backdrop-blur-sm">
-          <div className="relative mx-auto mb-8 flex h-40 w-44 items-center justify-center overflow-hidden rounded-2xl border border-[#173653] bg-[#071a2b]">
-            {/* eslint-disable-next-line @next/next/no-img-element -- Mirrors AstroRekha paywall preview behavior. */}
-            <img src={soulmatePreviewImage} alt="Your soulmate sketch preview" className="h-full w-[72%] object-cover blur-[3px] saturate-75" />
-            <div className="pointer-events-none absolute inset-0 bg-[#061525]/10" />
+          <div className="relative mx-auto mb-8 h-40 w-full overflow-hidden rounded-2xl border border-[#173653] bg-[#071a2b]">
+            {/* eslint-disable-next-line @next/next/no-img-element -- User palm preview can be a local data URL. */}
+            <img src={palmPreviewImage} alt="Your palm reading preview" className="h-full w-full object-cover opacity-70" />
+            <div className="pointer-events-none absolute inset-0 bg-[#061525]/20" />
           </div>
-          <h3 className="mb-5 text-center text-lg font-semibold">Your soulmate sketch preview</h3>
+          <h3 className="mb-5 text-center text-lg font-semibold">Your palm reading preview</h3>
           <StatsList stats={readingStats} />
           <div className="mt-5 space-y-2 text-sm leading-relaxed text-[#b8c7da]">
             <p>Your <span className="font-semibold text-[#EF6B6B]">Heart Line</span> shows that you are very passionate and freely express your thoughts and feelings.</p>
@@ -560,7 +560,7 @@ export default function BundlePaywallPage() {
           </Button>
         </motion.div>
 
-        <div ref={testimonialSectionRef} className="mb-8 w-full max-w-sm">
+        <div className="mb-8 w-full max-w-sm">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.2 }} className="mb-4 flex items-center justify-center gap-3">
             <span className="text-3xl font-bold text-emerald-300">4.8</span>
             <div>
@@ -612,7 +612,7 @@ export default function BundlePaywallPage() {
           </div>
         </div>
 
-        <div ref={birthChartSectionRef} className="mb-8 w-full max-w-sm">
+        <div className="mb-8 w-full max-w-sm">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.6 }} className="rounded-3xl bg-gradient-to-b from-[#102c45] to-[#071a2b] p-6">
             <h3 className="mb-6 text-center text-xl font-bold">Your birth chart analysis</h3>
             <div className="relative mb-4 rounded-2xl bg-white p-4">
@@ -684,10 +684,10 @@ export default function BundlePaywallPage() {
       </div>
 
       {showStickyCTA ? (
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-0 left-0 right-0 bg-gradient-to-t from-[#061525] via-[#061525] to-transparent p-4">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }} className="fixed bottom-0 left-0 right-0 z-50 bg-gradient-to-t from-[#061525] via-[#061525] to-transparent p-4">
           <div className="mx-auto max-w-sm">
-            <Button onClick={scrollToPayment} className="h-14 w-full bg-[#38bdf8] text-lg font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
-              Get personal prediction
+            <Button onClick={handlePurchase} disabled={!agreedToTerms || isProcessing} className="h-14 w-full bg-[#38bdf8] text-lg font-semibold text-black hover:bg-[#0ea5e9]" size="lg">
+              {isProcessing ? "Processing..." : `Get My Reading - ${selectedPlanData ? formatDollars(selectedPlanData.displayPrice || selectedPlanData.price) : ""}`}
             </Button>
           </div>
         </motion.div>

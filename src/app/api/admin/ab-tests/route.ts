@@ -454,7 +454,7 @@ async function ensureOnboardingLayoutTest(supabase: ReturnType<typeof getSupabas
     const row = {
       id: testId,
       name: "Onboarding Layout A/B (QA)",
-      status: config.enabled ? "active" : "paused",
+      status: config.enabled ? "active" : "closed",
       traffic_split: trafficSplit,
       updated_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
@@ -464,17 +464,21 @@ async function ensureOnboardingLayoutTest(supabase: ReturnType<typeof getSupabas
     return testId;
   }
 
-  // Keep metadata aligned with funnel config, but do not overwrite admin
-  // controls such as status or split weights on every read.
+  // Keep the retired layout experiment visible in admin, but closed when
+  // the single onboarding flow is active.
+  const desiredStatus = config.enabled ? "active" : "closed";
+  const desiredTrafficSplit = config.enabled ? trafficSplit : 0;
   const shouldUpdateName = existing.name !== "Onboarding Layout A/B (QA)";
-  const shouldSeedTrafficSplit = existing.traffic_split === null || existing.traffic_split === undefined;
+  const shouldUpdateStatus = existing.status !== desiredStatus;
+  const shouldUpdateTrafficSplit = Number(existing.traffic_split ?? 0) !== desiredTrafficSplit;
 
-  if (shouldUpdateName || shouldSeedTrafficSplit) {
+  if (shouldUpdateName || shouldUpdateStatus || shouldUpdateTrafficSplit) {
     const patch: Record<string, unknown> = {
       updated_at: new Date().toISOString(),
     };
     if (shouldUpdateName) patch.name = "Onboarding Layout A/B (QA)";
-    if (shouldSeedTrafficSplit) patch.traffic_split = trafficSplit;
+    if (shouldUpdateStatus) patch.status = desiredStatus;
+    if (shouldUpdateTrafficSplit) patch.traffic_split = desiredTrafficSplit;
 
     await supabase.from("ab_tests").update(patch).eq("id", testId);
   }
@@ -488,12 +492,12 @@ async function ensurePaywallPricingTest(supabase: ReturnType<typeof getSupabaseA
     {
       id: PAYWALL_PRICING_EXPERIMENT,
       name: PAYWALL_PRICING_TEST_NAME,
-      status: "active",
-      traffic_split: 0.5,
+      status: "closed",
+      traffic_split: 1,
       updated_at: now,
       created_at: now,
     },
-    { onConflict: "id", ignoreDuplicates: true }
+    { onConflict: "id" }
   );
   return PAYWALL_PRICING_EXPERIMENT;
 }
@@ -502,7 +506,7 @@ async function retirePalmReadyTest(supabase: ReturnType<typeof getSupabaseAdmin>
   await supabase
     .from("ab_tests")
     .update({
-      status: "paused",
+      status: "closed",
       traffic_split: 1,
       updated_at: new Date().toISOString(),
     })
@@ -514,8 +518,8 @@ async function buildDefaultTestData(testId: string) {
   const row = normalizeTestForResponse(
     {
       name: isPaywallPricingTest ? PAYWALL_PRICING_TEST_NAME : "Onboarding Layout A/B (QA)",
-      status: "active",
-      traffic_split: 0.5,
+      status: "closed",
+      traffic_split: isPaywallPricingTest ? 1 : 0,
       updated_at: new Date().toISOString(),
       created_at: new Date().toISOString(),
     },

@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { OnboardingHeader } from "@/components/onboarding/OnboardingHeader";
@@ -48,7 +48,8 @@ export default function Step12Page() {
   const router = useRouter();
   const { triggerLight } = useHaptic();
   const [phase, setPhase] = useState(0);
-  const [soulmateAnswers, setSoulmateAnswers] = useState<Record<string, unknown>>({});
+  const [genericAnswers, setGenericAnswers] = useState<Record<string, unknown>>({});
+  const revealStartedRef = useRef(false);
 
   const {
     gender,
@@ -74,10 +75,13 @@ export default function Step12Page() {
   const polarity = storePolarity || "Feminine";
 
   useEffect(() => {
-    pixelEvents.viewContent("Soulmate Chart Reveal", "onboarding_step");
-    trackFunnelAction("soulmate_chart_reveal_viewed", {
+    if (revealStartedRef.current) return;
+    revealStartedRef.current = true;
+
+    pixelEvents.viewContent("Generic Chart Reveal", "onboarding_step");
+    trackFunnelAction("generic_chart_reveal_viewed", {
       route: "/onboarding/step-12",
-      step_id: "soulmate_chart_reveal",
+      step_id: "generic_chart_reveal",
     });
 
     if (!storeSunSign) {
@@ -92,23 +96,25 @@ export default function Step12Page() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === "object") {
-          setSoulmateAnswers(parsed as Record<string, unknown>);
+          setGenericAnswers(parsed as Record<string, unknown>);
         }
       }
     } catch {
       // Ignore malformed local data.
     }
+  }, [calculateLocalSigns, fetchAccurateSigns, signsFromApi, storeSunSign]);
 
+  useEffect(() => {
     const timers = [
-      setTimeout(() => setPhase(1), 800),
-      setTimeout(() => setPhase(2), 2500),
-      setTimeout(() => setPhase(3), 5500),
-      setTimeout(() => setPhase(4), 7500),
-      setTimeout(() => setPhase(5), 9000),
+      setTimeout(() => setPhase(1), 300),
+      setTimeout(() => setPhase(2), 1100),
+      setTimeout(() => setPhase(3), 3800),
+      setTimeout(() => setPhase(4), 4900),
+      setTimeout(() => setPhase(5), 5000),
     ];
 
     return () => timers.forEach(clearTimeout);
-  }, [calculateLocalSigns, fetchAccurateSigns, signsFromApi, storeSunSign]);
+  }, []);
 
   const persistSnapshot = async (userId: string) => {
     const email = localStorage.getItem("palmcosmic_email") || localStorage.getItem("astrorekha_email") || undefined;
@@ -121,9 +127,9 @@ export default function Step12Page() {
         userId,
         email,
         currentRoute: "/onboarding/step-12",
-        currentStep: "soulmate_chart_reveal",
+        currentStep: "generic_chart_reveal",
         answers: {
-          soulmateAnswers,
+          genericAnswers,
         },
         onboardingData: {
           gender: state.gender,
@@ -140,9 +146,13 @@ export default function Step12Page() {
           ascendantSign: state.ascendantSign?.name || null,
           modality: state.modality,
           polarity: state.polarity,
-          soulmateAnswers,
+          relationshipStatus: state.relationshipStatus,
+          goals: state.goals,
+          colorPreference: state.colorPreference,
+          elementPreference: state.elementPreference,
+          genericAnswers,
         },
-        source: "soulmate_chart_reveal_page",
+        source: "generic_chart_reveal_page",
       }),
     }).catch((error) => {
       console.error("[step-12] snapshot failed:", error);
@@ -155,9 +165,9 @@ export default function Step12Page() {
     localStorage.setItem("astrorekha_user_id", userId);
     localStorage.setItem("palmcosmic_user_id", userId);
     persistSnapshot(userId);
-    trackFunnelAction("soulmate_chart_reveal_continue", {
+    trackFunnelAction("generic_chart_reveal_continue", {
       route: "/onboarding/step-12",
-      step_id: "soulmate_chart_reveal",
+      step_id: "generic_chart_reveal",
       user_id: userId,
       next_route: "/onboarding/step-13",
     });
@@ -167,8 +177,9 @@ export default function Step12Page() {
   const formattedBirthDate = birthMonth ? `${birthMonth.slice(0, 3)} ${birthDay}, ${birthYear}` : "Not specified";
   const genderLabel = gender === "male" ? "Man" : gender === "female" ? "Woman" : "Person";
   const elementLabel = elementPreference ? elementPreference.charAt(0).toUpperCase() + elementPreference.slice(1) : "Water";
-  const mainWorry = getAnswerLabel("main_worry", soulmateAnswers.main_worry) || "Not specified";
-  const futureGoal = getAnswerLabel("future_goal", soulmateAnswers.future_goal) || "Not specified";
+  const relationshipStatus = getAnswerLabel("relationship_status", genericAnswers.relationship_status) || "Not specified";
+  const futureGoal = getAnswerLabel("future_goal", genericAnswers.future_goal) || "Not specified";
+  const colorPreference = getAnswerLabel("color_preference", genericAnswers.color_preference) || "Not specified";
 
   return (
     <motion.div initial="hidden" animate="visible" variants={fadeUp} className="flex min-h-screen flex-1 flex-col bg-[#061525] text-white">
@@ -255,7 +266,7 @@ export default function Step12Page() {
                 initial={{ opacity: 0, height: 0, y: 20 }}
                 animate={{ opacity: 1, height: "auto", y: 0 }}
                 exit={{ opacity: 0, height: 0, y: -10 }}
-                transition={{ duration: 0.8, ease: [0.4, 0, 0.2, 1] }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
                 className="relative z-10 mb-4 overflow-hidden rounded-xl bg-[#15314d]/55 p-4"
               >
                 <h3 className="mb-3 text-center text-sm font-semibold">Your Details</h3>
@@ -269,12 +280,16 @@ export default function Step12Page() {
                     <span className="max-w-[180px] truncate text-right">{birthPlace || "Not specified"}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="font-medium text-[#b8c7da]">Relationship Worries</span>
-                    <span className="max-w-[180px] text-right">{mainWorry}</span>
+                    <span className="font-medium text-[#b8c7da]">Relationship</span>
+                    <span className="max-w-[180px] text-right">{relationshipStatus}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="font-medium text-[#b8c7da]">Future</span>
                     <span className="max-w-[180px] text-right">{futureGoal}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="font-medium text-[#b8c7da]">Color</span>
+                    <span className="max-w-[180px] text-right">{colorPreference}</span>
                   </div>
                 </div>
               </motion.div>

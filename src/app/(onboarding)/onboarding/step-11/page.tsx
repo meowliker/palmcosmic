@@ -1,7 +1,5 @@
-"use client";
-
-import { SoulmateSketchQuestionStep } from "@/components/onboarding/SoulmateSketchQuestionStep";
+import { redirect } from "next/navigation";
 
 export default function Step11Page() {
-  return <SoulmateSketchQuestionStep routeStep={11} />;
+  redirect("/onboarding/step-12");
 }

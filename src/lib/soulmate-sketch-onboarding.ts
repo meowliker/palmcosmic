@@ -1,9 +1,8 @@
 export type SoulmateSketchQuestionId =
-  | "attracted_to"
-  | "age_group"
-  | "vibe"
-  | "main_worry"
-  | "future_goal";
+  | "relationship_status"
+  | "future_goal"
+  | "color_preference"
+  | "element_preference";
 
 export interface SoulmateSketchQuestionOption {
   value: string;
@@ -19,59 +18,52 @@ export interface SoulmateSketchQuestion {
 
 export const SOULMATE_SKETCH_ONBOARDING_QUESTIONS: SoulmateSketchQuestion[] = [
   {
-    id: "attracted_to",
-    title: "Who are you attracted to?",
+    id: "relationship_status",
+    title: "To get started, tell us about your current relationship status",
     options: [
-      { value: "male", label: "Male", emoji: "👨" },
-      { value: "female", label: "Female", emoji: "👩" },
-      { value: "any", label: "Any", emoji: "✨" },
-    ],
-  },
-  {
-    id: "age_group",
-    title: "Which age group is your perfect match?",
-    options: [
-      { value: "20-25", label: "20-25", emoji: "🧒" },
-      { value: "25-30", label: "25-30", emoji: "🧑" },
-      { value: "30-35", label: "30-35", emoji: "🧑‍💼" },
-      { value: "35-40", label: "35-40", emoji: "🧔" },
-      { value: "40-45", label: "40-45", emoji: "👨‍🦱" },
-      { value: "45-50", label: "45-50", emoji: "👨‍🦳" },
-      { value: "50+", label: "50+", emoji: "🧓" },
-    ],
-  },
-  {
-    id: "vibe",
-    title: "What vibe do you want your soulmate to have?",
-    options: [
-      { value: "cute", label: "Cute", emoji: "😊" },
-      { value: "bold", label: "Bold", emoji: "⚡" },
-      { value: "elegant", label: "Elegant", emoji: "✨" },
-      { value: "mysterious", label: "Mysterious", emoji: "🌙" },
-    ],
-  },
-  {
-    id: "main_worry",
-    title: "Your main worry when it comes to love?",
-    options: [
-      { value: "broken_trust", label: "Broken trust", emoji: "🥀" },
-      { value: "emotional_distance", label: "Emotional distance", emoji: "🧊" },
-      { value: "lack_understanding", label: "Lack of understanding", emoji: "❓" },
-      { value: "commitment_issues", label: "Commitment issues", emoji: "🔒" },
-      { value: "fear_opening_up", label: "Fear of opening up", emoji: "🛡️" },
-      { value: "heartbreak", label: "Heartbreak", emoji: "💔" },
-      { value: "something_else", label: "Something else", emoji: "🎭" },
+      { value: "in-relationship", label: "In a relationship", emoji: "💕" },
+      { value: "just-broke-up", label: "Just broke up", emoji: "💔" },
+      { value: "engaged", label: "Engaged", emoji: "🥰" },
+      { value: "married", label: "Married", emoji: "💍" },
+      { value: "looking-for-soulmate", label: "Looking for a soulmate", emoji: "🔍" },
+      { value: "single", label: "Single", emoji: "😊" },
+      { value: "complicated", label: "It's complicated", emoji: "🤔" },
     ],
   },
   {
     id: "future_goal",
-    title: "What’s the future you hope to create together?",
+    title: "What are your goals for the future?",
     options: [
-      { value: "family_life", label: "Peaceful family life", emoji: "🏡" },
-      { value: "adventures", label: "Adventures around the globe", emoji: "🌍" },
-      { value: "grow_together", label: "Growing together", emoji: "🌱" },
-      { value: "financial_security", label: "Financially secure", emoji: "💰" },
-      { value: "change_world", label: "Changing the world", emoji: "🌟" },
+      { value: "family-harmony", label: "Family harmony", emoji: "👨‍👩‍👧" },
+      { value: "career", label: "Career", emoji: "🏆" },
+      { value: "health", label: "Health", emoji: "🍎" },
+      { value: "getting-married", label: "Getting married", emoji: "💒" },
+      { value: "traveling", label: "Traveling the world", emoji: "🌍" },
+      { value: "education", label: "Education", emoji: "🎓" },
+      { value: "friends", label: "Friends", emoji: "👥" },
+      { value: "children", label: "Children", emoji: "👶" },
+    ],
+  },
+  {
+    id: "color_preference",
+    title: "Which of the following colors do you prefer?",
+    options: [
+      { value: "red", label: "Red", emoji: "🔴" },
+      { value: "yellow", label: "Yellow", emoji: "🟡" },
+      { value: "blue", label: "Blue", emoji: "🔵" },
+      { value: "orange", label: "Orange", emoji: "🟠" },
+      { value: "green", label: "Green", emoji: "🟢" },
+      { value: "violet", label: "Violet", emoji: "🟣" },
+    ],
+  },
+  {
+    id: "element_preference",
+    title: "Which element of nature do you like the best?",
+    options: [
+      { value: "earth", label: "Earth", emoji: "🌍" },
+      { value: "water", label: "Water", emoji: "💧" },
+      { value: "fire", label: "Fire", emoji: "🔥" },
+      { value: "air", label: "Air", emoji: "🌬️" },
     ],
   },
 ];

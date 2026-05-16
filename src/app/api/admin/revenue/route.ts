@@ -10,7 +10,7 @@ export const revalidate = 0;
 
 const IST_OFFSET_MINUTES = 330;
 const STRIPE_DAY_START_MINUTE_IST = 11 * 60 + 30;
-const DEFAULT_START_DATE = "2026-04-30";
+const DEFAULT_START_DATE = "2026-05-10";
 
 type BreakdownRow = {
   id: string;

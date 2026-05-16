@@ -461,7 +461,7 @@ const META_IST_TIMEZONE = "Asia/Kolkata";
 const META_BUSINESS_BOUNDARY_HOUR = 11;
 const META_BUSINESS_BOUNDARY_MINUTE = 30;
 const META_MIN_RANGE_START = "2024-01-01";
-const REVENUE_DEFAULT_START_DATE = "2026-04-30";
+const REVENUE_DEFAULT_START_DATE = "2026-05-10";
 
 type CalendarRange = { startDate: string; endDate: string };
 type CalendarCell = { isoDate: string; day: number; inCurrentMonth: boolean };

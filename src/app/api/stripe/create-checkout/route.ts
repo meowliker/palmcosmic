@@ -3,11 +3,7 @@ import { getStripeClient } from "@/lib/stripe";
 import { getPricing, getBundleById, getCoinPackageById, getReportById, getUpsellById } from "@/lib/pricing";
 import { markStripePaymentStatus } from "@/lib/payment-fulfillment";
 import { sendMetaConversionEvent } from "@/lib/meta-conversions";
-import {
-  PAYWALL_PRICING_EXPERIMENT,
-  applyPaywallPriceVariant,
-  isPaywallPriceVariant,
-} from "@/lib/paywall-pricing-experiment";
+import { applyPaywallPriceVariant } from "@/lib/paywall-pricing-experiment";
 
 const OFFER_ID_TO_FEATURE: Record<string, string> = {
   "2026-predictions": "prediction2026",
@@ -45,7 +41,6 @@ export async function POST(request: NextRequest) {
       cancelPath,
       offerIds,
       pricingExperiment,
-      pricingVariant,
     } = body as {
       type: "bundle" | "upsell" | "coins" | "report";
       bundleId?: string;
@@ -57,7 +52,6 @@ export async function POST(request: NextRequest) {
       cancelPath?: string;
       offerIds?: string;
       pricingExperiment?: string;
-      pricingVariant?: string;
     };
 
     if (!type) {
@@ -78,18 +72,17 @@ export async function POST(request: NextRequest) {
     if (type === "bundle") {
       const baseBundle = getBundleById(pricing, bundleId || "");
       if (!baseBundle) return NextResponse.json({ error: "Invalid bundle" }, { status: 400 });
-      const activePricingVariant = isPaywallPriceVariant(pricingVariant)
-        ? pricingVariant
-        : "control_29_49_89";
+      const activePricingVariant = "test_17_27_47";
       const bundle = applyPaywallPriceVariant([baseBundle], activePricingVariant)[0];
       amount = bundle.price;
       productName = bundle.name;
       metadata.bundleId = bundle.id;
       metadata.features = bundle.features.join(",");
-      metadata.pricingExperiment = pricingExperiment || PAYWALL_PRICING_EXPERIMENT;
       metadata.pricingVariant = activePricingVariant;
+      if (pricingExperiment) {
+        metadata.pricingExperiment = pricingExperiment;
+      }
       metadata.bundlePriceCents = String(bundle.price);
-      metadata.controlBundlePriceCents = String(baseBundle.price);
     }
 
     if (type === "report") {
